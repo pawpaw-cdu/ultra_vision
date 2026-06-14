@@ -30,7 +30,6 @@ struct EnergyDetectorConfig {
     float max_radius_px = 350.0f;
     int max_track_lost_frames = 5;
     float max_match_distance_ratio = 0.4f;
-    float r_center_weight = 0.3f;      // R标检测结果的权重 (0~1)
 };
 
 // ==================== 基于HSV的扇叶中心检测 ====================
@@ -240,15 +239,14 @@ int main() {
         return -1;
     }
 
-    EnergyDetectorConfig cfg;  // 保留原有配置（本次未直接使用）
+    EnergyDetectorConfig cfg;  // 原配置
     cfg.num_blades = 5;
-    cfg.angular_velocity_deg = 60.0f;
+    cfg.angular_velocity_deg = 55.0f;
     cfg.jump_threshold_px = 10.0f;
     cfg.min_radius_px = 160.0f;
     cfg.max_radius_px = 300.0f;
     cfg.max_track_lost_frames = 5;
     cfg.max_match_distance_ratio = 0.3f;
-    cfg.r_center_weight = 0.9f;
 
     // 用于平滑显示的缓存
     Point2f smoothed_center(0, 0);
