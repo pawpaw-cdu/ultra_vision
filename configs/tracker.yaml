@@ -1,13 +1,24 @@
 tracker:
   min_detect_frames: 3          # 降低连续检测帧数要求，更快进入跟踪
   max_lost_frames: 15           # 增加丢失容忍帧数，避免短暂丢失导致目标重置
-  max_match_distance: 1.5       # 增大匹配距离阈值（米），适应检测跳动
+  max_match_distance: 2.0       # 增大匹配距离阈值（米），适应检测跳动
 
   kalman:
+    # Legacy fields retained for configuration compatibility.
     state_dim: 6
     measure_dim: 4
-    process_noise_pos: 0.01     # 降低位置过程噪声，使预测更平滑
-    process_noise_vel: 0.01
-    measure_noise: 0.05          # 增大测量噪声，更信任预测
     init_error_cov: 10.0
-    default_dt: 0.015
+
+    # ArmorEKF parameters.
+    process_noise_pos: 1.0      # translation acceleration noise
+    process_noise_vel: 2.0      # angular acceleration noise
+    measure_noise: 0.01         # x/z measurement noise
+    default_dt: 0.033
+    armor_radius: 0.18          # measured chassis armor-circle radius (m)
+    y_noise_mult: 30.0          # PnP y is much noisier than x/z
+    p_cov_min: 0.001
+    angle_measure_noise: 0.04   # PnP radial-angle variance (rad^2)
+    angle_match_weight: 0.08    # metre-equivalent cost for one radian mismatch
+    max_angle_error: 0.70       # reject plate candidates beyond about 40 degrees
+    position_nis_threshold: 7.815  # chi-square 95%, 3 DoF
+    angle_nis_threshold: 3.841     # chi-square 95%, 1 DoF

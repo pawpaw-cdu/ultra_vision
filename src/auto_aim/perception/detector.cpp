@@ -1,13 +1,14 @@
 #include "detector.hpp"
 #include <iostream>
 #include <algorithm>
+#include <utility>
 
 namespace auto_aim
 {
     Detector::Detector(const cv::Mat& img, const DetectorConfig& cfg)
         : config_(cfg)
     {
-        this->clone_img = img.clone();
+        this->clone_img = img;
     }
 
     void Detector::gray_img(const cv::Mat& clone_img, cv::Mat& gray_img)
@@ -38,16 +39,17 @@ namespace auto_aim
 
     void Detector::find_lights(const std::vector<std::vector<cv::Point>>& contours,
                            std::vector<Light>& light_,
-                           const cv::Mat img,
+                           const cv::Mat& img,
                            int detector_color)
 {
-    std::cout << "Total contours: " << contours.size() << std::endl;
-    for (const auto& contour : contours) {
-        std::cout << "Contour size: " << contour.size() << std::endl;
-        if (contour.size() < config_.light_min_contour_points) {
-            std::cout << "  -> rejected: too few points (" << contour.size() << " < " << config_.light_min_contour_points << ")" << std::endl;
-            continue;
-        }
+    //std::cout << "Total contours: " << contours.size() << std::endl;
+    for (const auto& contour : contours) 
+    {
+    //    std::cout << "Contour size: " << contour.size() << std::endl;
+    //    if (contour.size() < config_.light_min_contour_points) {
+    //        std::cout << "  -> rejected: too few points (" << contour.size() << " < " << config_.light_min_contour_points << ")" << std::endl;
+    //        continue;
+    //    }
 
         cv::RotatedRect rrect = cv::minAreaRect(contour);
         Light light(rrect);
@@ -57,19 +59,23 @@ namespace auto_aim
 
         // 打印原始几何信息
 
-        // 颜色判断
-        cv::Mat mask = cv::Mat::zeros(img.size(), CV_8U);
-        std::vector<std::vector<cv::Point>> temp_contours = {contour};
-        cv::drawContours(mask, temp_contours, 0, 255, cv::FILLED);
-
         cv::Rect rect = cv::boundingRect(contour);
         cv::Rect roi_rect = rect & cv::Rect(0, 0, img.cols, img.rows);
         if (roi_rect.width <= 0 || roi_rect.height <= 0) {
             continue;
         }
 
-    cv::Mat img_roi = img(roi_rect);
-    cv::Mat mask_roi = mask(roi_rect);
+        cv::Mat img_roi = img(roi_rect);
+        // Build the contour mask in the small ROI. Allocating a full-frame mask
+        // for every contour made detection cost proportional to image area.
+        cv::Mat mask_roi = cv::Mat::zeros(roi_rect.size(), CV_8U);
+        std::vector<cv::Point> local_contour;
+        local_contour.reserve(contour.size());
+        for (const auto& point : contour) {
+            local_contour.emplace_back(point.x - roi_rect.x, point.y - roi_rect.y);
+        }
+        std::vector<std::vector<cv::Point>> local_contours = {std::move(local_contour)};
+        cv::drawContours(mask_roi, local_contours, 0, 255, cv::FILLED);
 
     bool color_ok = true;
     if (config_.color_use_detect) {
@@ -112,15 +118,16 @@ namespace auto_aim
 
         // 形状筛选
         bool valid = light.isValid();
-        std::cout << "  isValid() = " << valid << std::endl;
+        //std::cout << "  isValid() = " << valid << std::endl;
         if (valid) {
             light_.push_back(light);
         } else {
-            float ratio = light.width / light.height;
-            std::cout << "  -> rejected by isValid: ratio=" << ratio 
-                      << " (min=" << light.min_ratio << ", max=" << light.max_ratio 
-                      << "), angle=" << light.tilt_angle 
-                      << " (max=" << light.max_light_angle << ")" << std::endl;
+            //float ratio = light.width / light.height;
+            //std::cout << "  -> rejected by isValid: ratio=" << ratio 
+            //          << " (min=" << light.min_ratio << ", max=" << light.max_ratio 
+            //          << "), angle=" << light.tilt_angle 
+            //          << " (max=" << light.max_light_angle << ")" << std::endl;
+            continue;
         }
     }
 }
@@ -185,7 +192,7 @@ namespace auto_aim
                     continue;
 
                 // 确保左右顺序（左灯条中心 x 更小）
-                if (l1.center.x > l2.center.x) continue;
+                //if (l1.center.x > l2.center.x) continue;
 
                 // 检查区域内是否包含其他灯条
                  if (containLight(l1, l2, lights))

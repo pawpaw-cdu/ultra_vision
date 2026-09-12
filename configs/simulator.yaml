@@ -1,0 +1,4 @@
+# Simulator TCP server. Use the host machine's IP when the simulator is
+# running outside this machine.
+host: 10.117.214.138
+port: 7666

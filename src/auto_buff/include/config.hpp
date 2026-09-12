@@ -1,68 +1,64 @@
-// include/auto_buff/config.hpp
-#ifndef AUTO_BUFF_CONFIG_HPP
-#define AUTO_BUFF_CONFIG_HPP
+#ifndef ENERGY_DETECTOR_CONFIG_HPP
+#define ENERGY_DETECTOR_CONFIG_HPP
 
 #include <string>
-#include <opencv2/opencv.hpp>
 #include <yaml-cpp/yaml.h>
 
-namespace auto_buff {
+namespace energy {
 
 struct HsvRange {
-    int h_min, h_max;
-    int s_min, s_max;
-    int v_min, v_max;
+    int h_min;
+    int h_max;
+    int s_min;
+    int v_min;
 };
 
-struct BuffParams {
-    // 通用参数
-    std::string buff_type;
-    int detector_color;   // 1:red 0:blue
-    int color_type;       // 1:hsv 0:bgr
-    int debug;            // 1:阻塞调试 0:实时播放
-    int threshold;        // 二值化阈值
-    
-    // 形态学参数
-    int morph_size;       // 形态学核大小
-    
-    // ROI参数
-    int roi_width;
-    int roi_height;
-    int roi_y_offset;     // ROI Y轴偏移
-    
-    // 扇叶筛选参数
-    int fanblade_min_h;
-    int fanblade_min_w;
-    int fanblade_max_h;
-    int fanblade_max_w;
-    double hw_ratio_min;  // 高宽比最小值
-    double hw_ratio_max;  // 高宽比最大值
-    double area_rect_ratio_min; // 轮廓面积/矩形面积最小值
-    
-    // 中心筛选参数
-    int center_max_h;
-    int center_max_w;
-    double center_hw_ratio_min;
-    double center_hw_ratio_max;
+struct SolvePnPconfig {
+    std::array<double, 9> camera_matrix{};
+    std::vector<double> distortion_coefficients;
+};
 
-    // HSV颜色范围
+struct DetectorConfig {
+    int color;                   // 1:red, 0:blue
     HsvRange red_range1;
     HsvRange red_range2;
     HsvRange blue_range;
+    HsvRange r_red_range1;
+    HsvRange r_red_range2;
+    HsvRange r_blue_range;
+    int morph_size;
+    double fanblade_min_area, fanblade_max_area;
+    double fanblade_ratio_min, fanblade_ratio_max;
+    double fanblade_circularity_max;
+    double fanblade_solidity_min;
+    double r_min_area, r_max_area, r_min_radius, r_max_radius;
+    int debug;
 };
 
-class BuffConfig {
-private:
-    BuffParams params_;
-    void loadFromYaml(const YAML::Node& node);
+struct TrackerConfig {
+    double center_smooth;
+    double radius_smooth;
+    double angle_smooth;
+    double blade_angle_smooth;
+    double angular_velocity_deg;
+    int max_lost_frames;
+    double match_distance_threshold;
+    int num_blades;
+    double jump_threshold_px;
+};
+
+class ConfigManager {
 public:
-    BuffConfig() = default;
-    // 加载配置文件
-    bool load(const std::string& yaml_path);
-    // 获取配置参数
-    const BuffParams& getParams() const { return params_; }
+    bool load(const std::string& detector_yaml, const std::string& tracker_yaml, const std::string& solvePnP_yaml);
+    const DetectorConfig& getDetector() const { return detector_cfg_; }
+    const TrackerConfig& getTracker() const { return tracker_cfg_; }
+    const SolvePnPconfig& getSolvePnP() const {return solvePnP_cfg_;}
+private:
+    SolvePnPconfig solvePnP_cfg_;
+    DetectorConfig detector_cfg_;
+    TrackerConfig tracker_cfg_;
 };
 
-} // namespace auto_buff
+} // namespace energy
 
-#endif // AUTO_BUFF_CONFIG_HPP
+#endif

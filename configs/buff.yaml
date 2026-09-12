@@ -2,7 +2,7 @@ buff_type: "small"
 detector_color: 1
 color_type: 1
 debug: 1
-dt: 0.02                  # 卡尔曼时间步长
+dt: 0.033                  # 卡尔曼时间步长
 visualization: 1          # 可视化总开关 1开 0关
 
 # 卡尔曼滤波噪声参数

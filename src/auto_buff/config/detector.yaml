@@ -1,0 +1,24 @@
+color: 1
+
+red_range1: {h_min: 0, h_max: 40, s_min: 80, v_min: 80}
+red_range2: {h_min: 140, h_max: 180, s_min: 80, v_min: 80}
+blue_range: {h_min: 88, h_max: 120, s_min: 68, v_min: 198}
+
+r_red_range1: {h_min: 0, h_max: 40, s_min: 80, v_min: 80}
+r_red_range2: {h_min: 140, h_max: 180, s_min: 80, v_min: 80}
+r_blue_range: {h_min: 88, h_max: 120, s_min: 68, v_min: 198}
+morph_size: 5
+
+fanblade_min_area: 7000
+fanblade_max_area: 50000
+fanblade_ratio_min: 0.0
+fanblade_ratio_max: 0.75
+fanblade_circularity_max: 0.7
+fanblade_solidity_min: 0.5
+
+r_min_area: 200
+r_max_area: 400
+r_min_radius: 10
+r_max_radius: 35
+
+debug: 0

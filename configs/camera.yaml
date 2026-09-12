@@ -7,6 +7,23 @@ camera:
   timeout_ms: 1000         # 取图超时（毫秒）
 
 # 相机内参矩阵（3x3）和畸变系数
+simulator:
+  # Matches simulator/config/camera.yaml. The capture size can be changed
+  # with DAEDALUS_CAPTURE_WIDTH/HEIGHT; focal lengths are derived from FOV.
+  fov_degrees: 45.0
+  max_processing_width: 960
+  camera_matrix:
+    rows: 3
+    cols: 3
+    data: [579.411, 0.0, 320.0,
+           0.0, 579.411, 240.0,
+           0.0, 0.0, 1.0]
+
+  dist_coeffs:
+    rows: 5
+    cols: 1
+    data: [0.0, 0.0, 0.0, 0.0, 0.0]
+
 galaxy:
   camera_matrix:
     rows: 3

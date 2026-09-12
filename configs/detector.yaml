@@ -1,22 +1,22 @@
 detector:
   enemy_color: 0
-  binary_threshold: 160
+  binary_threshold: 121
   light:
-    min_ratio: 0.15
-    max_ratio: 0.55
-    max_angle: 40.0
-    min_contour_points: 8
+    min_ratio: 0.01
+    max_ratio: 0.15
+    max_angle: 10.0
+    min_contour_points: 5
   armor:
-    height_ratio_min: 0.75
+    height_ratio_min: 0.70
     height_ratio_max: 1.25
-    angle_diff_max: 40.0
+    angle_diff_max: 30.0
     width_to_height_min: 0.8
-    width_to_height_max: 2.0
+    width_to_height_max: 3.0
     large_armor_ratio_thresh: 3.0
   color:
     use_color_detect: true
     # 选择颜色空间: "hsv" 或 "bgr"
-    method: "hsv"
+    method: "bgr"
     # HSV 阈值（当 method = "hsv" 时使用）
     hsv:
       red_low1: 0

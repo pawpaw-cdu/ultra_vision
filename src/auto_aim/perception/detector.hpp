@@ -4,7 +4,7 @@
 #include <iostream>
 #include <vector>
 #include <opencv2/opencv.hpp>
-#include "/home/pawpaw-ubuntu/rm_ultra/common/types.hpp"
+#include "common/types.hpp"
 
 namespace auto_aim
 {
@@ -58,7 +58,7 @@ namespace auto_aim
         
         void find_lights(const std::vector<std::vector<cv::Point>>& contours,
                          std::vector<Light>& light_,
-                         const cv::Mat img,
+                         const cv::Mat& img,
                          int detector_color);
         void find_armors(const std::vector<Light>& lights, std::vector<Armor>& armors);
 

@@ -1,3 +1,0 @@
-/home/pawpaw-ubuntu/rm_ultra/src/auto_buff/test/build/CMakeFiles/buff_test.dir
-/home/pawpaw-ubuntu/rm_ultra/src/auto_buff/test/build/CMakeFiles/edit_cache.dir
-/home/pawpaw-ubuntu/rm_ultra/src/auto_buff/test/build/CMakeFiles/rebuild_cache.dir

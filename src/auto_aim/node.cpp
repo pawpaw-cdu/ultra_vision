@@ -3,15 +3,21 @@
 #include <memory>
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
+#include <string>
 #include <opencv2/opencv.hpp>
 #include <yaml-cpp/yaml.h>
 
-#include "/home/pawpaw-ubuntu/rm_ultra/common/types.hpp"
+#include "common/types.hpp"
 #include "perception/detector.hpp"
-#include "/home/pawpaw-ubuntu/rm_ultra/tools/visualizer.hpp"
+#include "tools/visualizer.hpp"
 #include "perception/pnp_solver.hpp"
 #include "Kalman/tracker.hpp"
-#include "/home/pawpaw-ubuntu/rm_ultra/io/camera/GalaxyCamera.hpp"
+#include "io/camera/GalaxyCamera.hpp"
+
+#ifndef ULTRA_VISION_CONFIG_DIR
+#define ULTRA_VISION_CONFIG_DIR "configs"
+#endif
 
 // 辅助函数：从 YAML 节点读取矩阵
 cv::Mat readMatFromYaml(const YAML::Node & node) {
@@ -25,11 +31,22 @@ cv::Mat readMatFromYaml(const YAML::Node & node) {
     return mat;
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+    std::string config_dir = ULTRA_VISION_CONFIG_DIR;
+    if (argc > 1) {
+        config_dir = argv[1];
+    }
+    if (const char* env = std::getenv("ULTRA_VISION_CONFIG_DIR")) {
+        config_dir = env;
+    }
+    auto config_path = [&](const std::string& name) {
+        return config_dir + "/" + name;
+    };
+
     // ------------------- 1. 加载配置文件 -------------------
-    YAML::Node camera_cfg = YAML::LoadFile("/home/pawpaw-ubuntu/rm_ultra/configs/camera.yaml");
-    YAML::Node detector_cfg = YAML::LoadFile("/home/pawpaw-ubuntu/rm_ultra/configs/detector.yaml");
-    YAML::Node tracker_cfg = YAML::LoadFile("/home/pawpaw-ubuntu/rm_ultra/configs/tracker.yaml");
+    YAML::Node camera_cfg = YAML::LoadFile(config_path("camera.yaml"));
+    YAML::Node detector_cfg = YAML::LoadFile(config_path("detector.yaml"));
+    YAML::Node tracker_cfg = YAML::LoadFile(config_path("tracker.yaml"));
 
     // 相机参数
      std::string camera_name = camera_cfg["camera"]["name"].as<std::string>();
@@ -99,6 +116,14 @@ int main() {
     track_cfg.measure_noise = kalman["measure_noise"].as<double>();
     track_cfg.init_error_cov = kalman["init_error_cov"].as<double>();
     track_cfg.default_dt = kalman["default_dt"].as<double>();
+    track_cfg.armor_radius = kalman["armor_radius"].as<double>(0.21);
+    track_cfg.y_noise_mult = kalman["y_noise_mult"].as<double>(30.0);
+    track_cfg.p_cov_min = kalman["p_cov_min"].as<double>(1e-3);
+    track_cfg.angle_measure_noise = kalman["angle_measure_noise"].as<double>(0.04);
+    track_cfg.max_angle_error = kalman["max_angle_error"].as<double>(0.70);
+    track_cfg.angle_match_weight = kalman["angle_match_weight"].as<double>(0.08);
+    track_cfg.position_nis_threshold = kalman["position_nis_threshold"].as<double>(7.815);
+    track_cfg.angle_nis_threshold = kalman["angle_nis_threshold"].as<double>(3.841);
 
     // ------------------- 2. 初始化大恒相机 -------------------
     rm_ultra::GalaxyCamera camera;
@@ -131,7 +156,7 @@ int main() {
 
     cv::Mat img;
     int key = 1;
-    //cv::VideoCapture cap("/home/pawpaw-ubuntu/rm_ultra/test_vid_pic/auto_aim.mp4");
+    // cv::VideoCapture cap("test_vid_pic/auto_aim.mp4");
     while (key) {
         //cap >> img;
         cv::resize(img, img ,cv::Size(400,400));

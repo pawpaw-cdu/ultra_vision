@@ -1,0 +1,9 @@
+center_smooth: 0.9
+radius_smooth: 0.9
+angle_smooth: 0.75
+blade_angle_smooth: 0.65
+angular_velocity_deg: 50.5
+max_lost_frames: 5
+match_distance_threshold: 30.0
+num_blades: 5
+jump_threshold_px: 10.0

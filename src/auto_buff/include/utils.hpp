@@ -1,20 +1,15 @@
-#ifndef AUTO_BUFF_UTILS_HPP
-#define AUTO_BUFF_UTILS_HPP
+#ifndef ENERGY_DETECTOR_UTILS_HPP
+#define ENERGY_DETECTOR_UTILS_HPP
 
 #include <opencv2/opencv.hpp>
+#include <vector>
+#include "types.hpp"
 
-namespace auto_buff {
-    class Fanblade;
-}
+namespace energy {
 
-namespace auto_buff {
+float normalizeAngle(float angle);
+void showBladesROI(const cv::Mat& src, const std::vector<cv::Point2f>& blade_centers, int roi_size = 80);
+void drawModel(cv::Mat& img, const TrackerResult& result);
+} // namespace energy
 
-cv::Mat safeResize(const cv::Mat& img, double scale);
-cv::Mat safeResize(const cv::Mat& img, const cv::Size& size);
-bool isRoiValid(const cv::Mat& img, const cv::Rect& roi);
-void drawRotatedRect(cv::Mat& img, const cv::RotatedRect& rect, const cv::Scalar& color, int thickness = 2);
-void drawFanblade(cv::Mat& img, const auto_buff::Fanblade& fanblade);
-
-} // namespace auto_buff
-
-#endif // AUTO_BUFF_UTILS_HPP
+#endif

@@ -9,7 +9,7 @@
 #include <string>
 #include <thread>
 
-#include "/home/pawpaw-ubuntu/rm_ultra/io/GalaxySDK/include/GxIAPI.h"
+#include <GxIAPI.h>
 
 namespace rm_ultra {
 
