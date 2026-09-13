@@ -73,6 +73,21 @@ cd /path/to/Ultra_Vision
 ./build_sim/src/auto_aim/auto_aim
 ```
 
-The simulator endpoint is configured in `configs/simulator.yaml`. The receiver
-enters tracking mode after stable detections and sends `FIRE` to TCP port 7667
-at up to 10 Hz. Press `Esc` to exit.
+The simulator endpoint is configured in `configs/simulator.yaml`. After stable
+tracking is established, `node_sim` aims at the filtered visible armor plate and
+sends `GIMBAL <yaw> <pitch>` to TCP port 7667. Angles are absolute radians,
+with positive yaw turning right and positive pitch turning up. The pitch limits
+are configured under `tracker.gimbal` in `configs/tracker.yaml`. The receiver
+enters tracking mode after stable detections and sends `FIRE` to the same port
+at up to 10 Hz. Press `Esc` or `e` to exit.
+
+The same configuration section also sets the visual-servo yaw/pitch gains,
+maximum angle step per processed frame, and deadbands. The command state is
+updated only after a newer image frame arrives, which prevents an asynchronous
+TCP command from being mistaken for a camera pose that has already been applied.
+
+Angle calculation lives in `src/auto_aim/control/gimbal_aimer.*`. It only
+converts a target position and the current absolute gimbal angle into a new
+absolute angle. TCP transmission remains in
+`sim_receiver::VisionDateReceiver::sendGimbalCommand()`, so the solver can be
+reused with a real gimbal control backend without simulator dependencies.

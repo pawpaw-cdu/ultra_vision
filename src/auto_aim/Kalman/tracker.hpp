@@ -15,16 +15,35 @@ namespace auto_aim
 {
     enum class TrackerState { DETECTING, TRACKING, TEMP_LOST, LOST };
 
+    struct CameraPose {
+        bool valid = true;
+        bool timestamp_valid = false;
+        double timestamp = 0.0;
+        double yaw = 0.0;
+        double pitch = 0.0;
+        // world <- base. Simulator uses identity; a real robot can fill this
+        // from IMU so the target EKF stays in the world frame.
+        std::array<std::array<double, 3>, 3> base_to_world{{
+            {{1.0, 0.0, 0.0}},
+            {{0.0, 1.0, 0.0}},
+            {{0.0, 0.0, 1.0}}
+        }};
+    };
+
     struct TrackerConfig {
         int min_detect_frames = 3;
         int max_lost_frames = 10;
+        int reacquire_frames = 3;
         double max_match_distance = 0.5;
+        double reacquire_center_error = 0.25;
+        double reacquire_max_dt = 0.15;
+        double max_camera_pose_dt = 0.05;
 
         // These dimensions are kept for compatibility with the existing YAML.
         int state_dim = 6;
         int measure_dim = 3;
         double process_noise_pos = 1.0;
-        double process_noise_vel = 2.0;
+        double process_noise_vel = 400.0;
         double measure_noise = 0.01;
         double init_error_cov = 1.0;
         double default_dt = 0.033;
@@ -34,10 +53,17 @@ namespace auto_aim
         double y_noise_mult = 30.0;
         double p_cov_min = 1e-3;
         double angle_measure_noise = 0.04;
+        double bearing_measure_noise = 0.0025;
+        double pitch_measure_noise = 0.005;
+        double range_noise_distance_scale = 0.1;
+        double ypd_nis_threshold = 9.488;
         double max_angle_error = 0.70;
         double angle_match_weight = 0.08;
         double position_nis_threshold = 7.815;
         double angle_nis_threshold = 3.841;
+        // Per-armor vertical center offsets. They remain zero for a symmetric
+        // real robot model and can be calibrated for a simulator vehicle.
+        std::array<double, 4> armor_y_offsets{{0.0, 0.0, 0.0, 0.0}};
     };
 
     class Tracker
@@ -62,20 +88,27 @@ namespace auto_aim
         int getLostCount() const { return lost_count_; }
 
         cv::Mat getTargetCenter() const;
+        std::array<double, 3> getTargetCenterArray() const;
+        std::array<double, 3> getTargetVelocity() const;
+        std::array<double, 3> getTargetCenterWorldArray() const;
+        std::array<double, 3> getTargetVelocityWorld() const;
         std::array<cv::Mat, 4> getEstimatedArmorPositions() const;
-        double getYaw() const { return ekf_.getYaw(); }
+        double getYaw() const;
+        double getYawWorld() const { return ekf_.getYaw(); }
         double getOmega() const { return ekf_.getOmega(); }
+        double getArmorRadius() const { return cfg_.armor_radius; }
         double getLastMeasurementWeight() const { return last_measurement_weight_; }
 
-    private:
-        struct ChassisFit {
-            Vec<3> center;
-            double yaw = 0.0;
-            std::array<int, 4> plate_ids{{-1, -1, -1, -1}};
-            double error = 0.0;
-            bool valid = false;
-        };
+        std::array<double, 3> worldToCameraPoint(
+            const std::array<double, 3>& point) const;
+        double worldToCameraYaw(double yaw) const;
 
+        // The EKF state is maintained in the world frame. Set the timestamped
+        // camera pose used by the next observation before update().
+        void setCameraPose(const CameraPose& pose);
+        void setCameraAngles(double yaw, double pitch);
+
+    private:
         TrackerConfig cfg_;
         ArmorEKF ekf_;
         double last_timestamp_;
@@ -89,13 +122,15 @@ namespace auto_aim
         Armor last_observed_armor_;
         int last_observed_plate_id_;
         bool has_observation_;
+        CameraPose camera_pose_;
+
+        Armor toWorld(const Armor& armor) const;
+        Vec<3> worldToCameraVector(const Vec<3>& value) const;
+        cv::Mat worldToCamera(const Vec<3>& value) const;
 
         void predictStateTo(double timestamp);
-        bool fitChassis(const std::vector<const Armor*>& observations,
-                        ChassisFit& fit) const;
-        bool updateFromFit(const std::vector<const Armor*>& observations,
-                           const ChassisFit& fit, int& best_armor_index,
-                           int& best_plate_id);
+        bool tryReacquire(const std::vector<const Armor*>& observations,
+                          double timestamp);
         int selectPlateId(const Armor& armor) const;
         double distanceToPlate(const cv::Mat& tvec, int plate_id) const;
         double matchCost(const Armor& armor, int plate_id) const;

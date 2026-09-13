@@ -20,12 +20,15 @@ public:
     VisionDateRecevier& operator=(VisionDateRecevier&&) noexcept = default;
 
     void overrideEndpoint(const std::string& host, uint16_t port);
+    void overrideCommandEndpoint(uint16_t port);
     bool connect();
     bool connected() const;
     bool sendFireCommand();
+    bool sendGimbalCommand(double yaw, double pitch);
 
     // Returns an empty Mat when the stream is closed or a frame is invalid.
-    cv::Mat getFrame();
+    cv::Mat getFrame(std::uint64_t* sequence = nullptr,
+                     std::uint64_t* timestamp_us = nullptr);
 
 private:
     class Impl;

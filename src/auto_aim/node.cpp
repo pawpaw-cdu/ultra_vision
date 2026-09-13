@@ -107,7 +107,17 @@ int main(int argc, char* argv[]) {
     auto_aim::TrackerConfig track_cfg;
     track_cfg.min_detect_frames = tracker_cfg["tracker"]["min_detect_frames"].as<int>();
     track_cfg.max_lost_frames = tracker_cfg["tracker"]["max_lost_frames"].as<int>();
+    track_cfg.reacquire_frames =
+        tracker_cfg["tracker"]["reacquire_frames"].as<int>(track_cfg.reacquire_frames);
     track_cfg.max_match_distance = tracker_cfg["tracker"]["max_match_distance"].as<double>();
+    track_cfg.reacquire_center_error =
+        tracker_cfg["tracker"]["reacquire_center_error"].as<double>(
+            track_cfg.reacquire_center_error);
+    track_cfg.reacquire_max_dt =
+        tracker_cfg["tracker"]["reacquire_max_dt"].as<double>(track_cfg.reacquire_max_dt);
+    track_cfg.max_camera_pose_dt =
+        tracker_cfg["tracker"]["max_camera_pose_dt"].as<double>(
+            track_cfg.max_camera_pose_dt);
     auto kalman = tracker_cfg["tracker"]["kalman"];
     track_cfg.state_dim = kalman["state_dim"].as<int>();
     track_cfg.measure_dim = kalman["measure_dim"].as<int>();
@@ -120,6 +130,11 @@ int main(int argc, char* argv[]) {
     track_cfg.y_noise_mult = kalman["y_noise_mult"].as<double>(30.0);
     track_cfg.p_cov_min = kalman["p_cov_min"].as<double>(1e-3);
     track_cfg.angle_measure_noise = kalman["angle_measure_noise"].as<double>(0.04);
+    track_cfg.bearing_measure_noise = kalman["bearing_measure_noise"].as<double>(0.0025);
+    track_cfg.pitch_measure_noise = kalman["pitch_measure_noise"].as<double>(0.005);
+    track_cfg.range_noise_distance_scale =
+        kalman["range_noise_distance_scale"].as<double>(0.1);
+    track_cfg.ypd_nis_threshold = kalman["ypd_nis_threshold"].as<double>(9.488);
     track_cfg.max_angle_error = kalman["max_angle_error"].as<double>(0.70);
     track_cfg.angle_match_weight = kalman["angle_match_weight"].as<double>(0.08);
     track_cfg.position_nis_threshold = kalman["position_nis_threshold"].as<double>(7.815);

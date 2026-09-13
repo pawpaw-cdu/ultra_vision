@@ -12,50 +12,50 @@ kalman:
 
 small_buff: 
   detector: 
-    threshold: 180
+    threshold: 180         # 小能量机关灰度二值化阈值
 large_buff:
   detector:
-    threshold: 130
+    threshold: 130         # 大能量机关灰度二值化阈值
 
 detector:
-  morph_size: 3
+  morph_size: 3            # 形态学滤波核大小
   roi:
-    width: 450
-    height: 450
-    y_offset: -120
+    width: 450             # 感兴趣区域宽度，单位：像素
+    height: 450            # 感兴趣区域高度，单位：像素
+    y_offset: -120         # 感兴趣区域相对中心的纵向偏移，单位：像素
   fanblade:
-    min_h: 70
-    min_w: 60
-    max_h: 200
-    max_w: 250
-    hw_ratio_min: 1.7
-    hw_ratio_max: 2.3
-    area_rect_ratio_min: 0.40
+    min_h: 70              # 扇叶最小高度，单位：像素
+    min_w: 60              # 扇叶最小宽度，单位：像素
+    max_h: 200             # 扇叶最大高度，单位：像素
+    max_w: 250             # 扇叶最大宽度，单位：像素
+    hw_ratio_min: 1.7      # 扇叶高宽比下限
+    hw_ratio_max: 2.3      # 扇叶高宽比上限
+    area_rect_ratio_min: 0.40 # 轮廓面积与外接矩形面积比的下限
   center:
-    max_h: 20
-    max_w: 20
-    hw_ratio_min: 0.8
-    hw_ratio_max: 1.2
+    max_h: 20              # 中心区域最大高度，单位：像素
+    max_w: 20              # 中心区域最大宽度，单位：像素
+    hw_ratio_min: 0.8      # 中心区域高宽比下限
+    hw_ratio_max: 1.2      # 中心区域高宽比上限
 
 hsv:
   red_range1:
-    h_min: 0
-    h_max: 40
-    s_min: 100
-    s_max: 255
-    v_min: 100
-    v_max: 255
+    h_min: 0               # 红色第一段 Hue 下限
+    h_max: 40              # 红色第一段 Hue 上限
+    s_min: 100             # 饱和度下限
+    s_max: 255             # 饱和度上限
+    v_min: 100             # 明度下限
+    v_max: 255             # 明度上限
   red_range2:
-    h_min: 155
-    h_max: 180
-    s_min: 100
-    s_max: 255
-    v_min: 100
-    v_max: 255
+    h_min: 155             # 红色第二段 Hue 下限
+    h_max: 180             # 红色第二段 Hue 上限
+    s_min: 100             # 饱和度下限
+    s_max: 255             # 饱和度上限
+    v_min: 100             # 明度下限
+    v_max: 255             # 明度上限
   blue_range:
-    h_min: 105
-    h_max: 118
-    s_min: 100
-    s_max: 255
-    v_min: 100
-    v_max: 255
+    h_min: 105             # 蓝色 Hue 下限
+    h_max: 118             # 蓝色 Hue 上限
+    s_min: 100             # 饱和度下限
+    s_max: 255             # 饱和度上限
+    v_min: 100             # 明度下限
+    v_max: 255             # 明度上限

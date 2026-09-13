@@ -2,7 +2,10 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <string>
 #include <thread>
@@ -13,6 +16,11 @@
 
 #include <sim_receiver/vision_date_receiver.hpp>
 #include "common/types.hpp"
+#include "control/aim_signal_filter.hpp"
+#include "control/gimbal_aimer.hpp"
+#include "control/gimbal_controller.hpp"
+#include "control/shooter.hpp"
+#include "control/target_selector.hpp"
 #include "perception/detector.hpp"
 #include "perception/pnp_solver.hpp"
 #include "Kalman/tracker.hpp"
@@ -45,12 +53,6 @@ cv::Mat makeCameraMatrix(int rows, int columns, double vertical_fov_degrees)
         focal_length, 0.0, 0.5 * columns,
         0.0, focal_length, 0.5 * rows,
         0.0, 0.0, 1.0);
-}
-
-double steadyTimestamp()
-{
-    return std::chrono::duration<double>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
 std::vector<cv::Point2f> projectArmor(
@@ -117,6 +119,38 @@ bool projectPoint(
     if (image_points.empty()) return false;
     image_point = image_points.front();
     return true;
+}
+
+const char* shooterStateName(auto_aim::ShooterState state)
+{
+    switch (state) {
+    case auto_aim::ShooterState::IDLE: return "IDLE";
+    case auto_aim::ShooterState::READY: return "READY";
+    case auto_aim::ShooterState::FIRING: return "FIRING";
+    case auto_aim::ShooterState::ERROR: return "ERROR";
+    case auto_aim::ShooterState::END: return "END";
+    }
+    return "UNKNOWN";
+}
+
+const char* shooterErrorName(auto_aim::ShooterErrorReason reason)
+{
+    switch (reason) {
+    case auto_aim::ShooterErrorReason::NONE: return "NONE";
+    case auto_aim::ShooterErrorReason::OUT_OF_FIRE_WINDOW: return "OUT_OF_FIRE_WINDOW";
+    case auto_aim::ShooterErrorReason::GIMBAL_ERROR: return "GIMBAL_ERROR";
+    }
+    return "UNKNOWN";
+}
+
+std::string shooterStatusName(auto_aim::ShooterState state,
+                              auto_aim::ShooterErrorReason reason)
+{
+    std::string status = shooterStateName(state);
+    if (state == auto_aim::ShooterState::ERROR) {
+        status += "(" + std::string(shooterErrorName(reason)) + ")";
+    }
+    return status;
 }
 
 void drawQuad(cv::Mat& image, const std::vector<cv::Point2f>& points,
@@ -192,7 +226,17 @@ int main(int argc, char* argv[])
     auto_aim::TrackerConfig track_cfg;
     track_cfg.min_detect_frames = tracker_cfg["tracker"]["min_detect_frames"].as<int>();
     track_cfg.max_lost_frames = tracker_cfg["tracker"]["max_lost_frames"].as<int>();
+    track_cfg.reacquire_frames =
+        tracker_cfg["tracker"]["reacquire_frames"].as<int>(track_cfg.reacquire_frames);
     track_cfg.max_match_distance = tracker_cfg["tracker"]["max_match_distance"].as<double>();
+    track_cfg.reacquire_center_error =
+        tracker_cfg["tracker"]["reacquire_center_error"].as<double>(
+            track_cfg.reacquire_center_error);
+    track_cfg.reacquire_max_dt =
+        tracker_cfg["tracker"]["reacquire_max_dt"].as<double>(track_cfg.reacquire_max_dt);
+    track_cfg.max_camera_pose_dt =
+        tracker_cfg["tracker"]["max_camera_pose_dt"].as<double>(
+            track_cfg.max_camera_pose_dt);
     const auto kalman = tracker_cfg["tracker"]["kalman"];
     track_cfg.process_noise_pos = kalman["process_noise_pos"].as<double>();
     track_cfg.process_noise_vel = kalman["process_noise_vel"].as<double>();
@@ -202,16 +246,206 @@ int main(int argc, char* argv[])
     track_cfg.y_noise_mult = kalman["y_noise_mult"].as<double>(30.0);
     track_cfg.p_cov_min = kalman["p_cov_min"].as<double>(1e-3);
     track_cfg.angle_measure_noise = kalman["angle_measure_noise"].as<double>(0.04);
+    track_cfg.bearing_measure_noise = kalman["bearing_measure_noise"].as<double>(0.0025);
+    track_cfg.pitch_measure_noise = kalman["pitch_measure_noise"].as<double>(0.005);
+    track_cfg.range_noise_distance_scale =
+        kalman["range_noise_distance_scale"].as<double>(0.1);
+    track_cfg.ypd_nis_threshold = kalman["ypd_nis_threshold"].as<double>(9.488);
     track_cfg.max_angle_error = kalman["max_angle_error"].as<double>(0.70);
     track_cfg.angle_match_weight = kalman["angle_match_weight"].as<double>(0.08);
     track_cfg.position_nis_threshold = kalman["position_nis_threshold"].as<double>(7.815);
     track_cfg.angle_nis_threshold = kalman["angle_nis_threshold"].as<double>(3.841);
+    if (kalman["armor_y_offsets"]) {
+        const auto offsets = kalman["armor_y_offsets"].as<std::vector<double>>();
+        if (offsets.size() == track_cfg.armor_y_offsets.size()) {
+            std::copy(offsets.begin(), offsets.end(), track_cfg.armor_y_offsets.begin());
+        } else {
+            std::cerr << "Ignoring armor_y_offsets: expected four values" << std::endl;
+        }
+    }
+
+    float pnp_small_width = 0.135f;
+    float pnp_large_width = 0.225f;
+    float pnp_armor_height = 0.055f;
+    if (tracker_cfg["tracker"]["pnp"]) {
+        const auto pnp = tracker_cfg["tracker"]["pnp"];
+        pnp_small_width = pnp["small_width"].as<float>(pnp_small_width);
+        pnp_large_width = pnp["large_width"].as<float>(pnp_large_width);
+        pnp_armor_height = pnp["height"].as<float>(pnp_armor_height);
+    }
+
+    auto_aim::GimbalAimConfig gimbal_cfg;
+    double gimbal_command_rate_hz = 100.0;
+    if (tracker_cfg["tracker"]["gimbal"]) {
+        const auto gimbal = tracker_cfg["tracker"]["gimbal"];
+        const double pitch_min_degrees = gimbal["pitch_min_degrees"].as<double>(-70.0);
+        const double pitch_max_degrees = gimbal["pitch_max_degrees"].as<double>(70.0);
+        gimbal_cfg.pitch_min = pitch_min_degrees * CV_PI / 180.0;
+        gimbal_cfg.pitch_max = pitch_max_degrees * CV_PI / 180.0;
+        gimbal_cfg.max_yaw_velocity =
+            gimbal["max_yaw_velocity_degrees_per_sec"].as<double>(120.0) * CV_PI / 180.0;
+        gimbal_cfg.max_pitch_velocity =
+            gimbal["max_pitch_velocity_degrees_per_sec"].as<double>(80.0) * CV_PI / 180.0;
+        gimbal_cfg.max_yaw_acceleration =
+            gimbal["max_yaw_acceleration_degrees_per_sec2"].as<double>(600.0) *
+            CV_PI / 180.0;
+        gimbal_cfg.max_pitch_acceleration =
+            gimbal["max_pitch_acceleration_degrees_per_sec2"].as<double>(450.0) *
+            CV_PI / 180.0;
+        gimbal_cfg.max_yaw_jerk =
+            gimbal["max_yaw_jerk_degrees_per_sec3"].as<double>(5000.0) * CV_PI / 180.0;
+        gimbal_cfg.max_pitch_jerk =
+            gimbal["max_pitch_jerk_degrees_per_sec3"].as<double>(4000.0) * CV_PI / 180.0;
+        gimbal_cfg.yaw_response_gain =
+            gimbal["yaw_response_gain"].as<double>(gimbal_cfg.yaw_response_gain);
+        gimbal_cfg.pitch_response_gain =
+            gimbal["pitch_response_gain"].as<double>(gimbal_cfg.pitch_response_gain);
+        gimbal_cfg.feedforward_gain =
+            gimbal["feedforward_gain"].as<double>(gimbal_cfg.feedforward_gain);
+        gimbal_cfg.feedforward_time_constant =
+            gimbal["feedforward_time_constant"].as<double>(
+                gimbal_cfg.feedforward_time_constant);
+        gimbal_cfg.settle_angle = gimbal["settle_angle_degrees"].as<double>(0.6) *
+            CV_PI / 180.0;
+        gimbal_cfg.settle_velocity =
+            gimbal["settle_velocity_degrees_per_sec"].as<double>(5.0) * CV_PI / 180.0;
+        gimbal_cfg.max_dt = gimbal["max_control_dt"].as<double>(gimbal_cfg.max_dt);
+        gimbal_command_rate_hz = gimbal["command_rate_hz"].as<double>(100.0);
+    }
+
+    auto_aim::TargetSelectorConfig selector_cfg;
+    auto_aim::ShooterConfig shooter_cfg;
+    auto_aim::AimSignalFilterConfig aim_filter_cfg;
+    int max_control_lost_frames = 5;
+    double fire_angle_tolerance = 1.0 * CV_PI / 180.0;
+    const bool fire_enabled = std::getenv("ULTRA_VISION_DISABLE_FIRE") == nullptr;
+    const YAML::Node selector_node = tracker_cfg["tracker"]["selector"]
+        ? tracker_cfg["tracker"]["selector"]
+        : tracker_cfg["tracker"]["predictive_aim"];
+    if (selector_node) {
+        selector_cfg.enabled = selector_node["enabled"].as<bool>(true);
+        selector_cfg.projectile_speed = selector_node["projectile_speed"].as<double>(25.0);
+        selector_cfg.gravity = selector_node["gravity"].as<double>(9.81);
+        selector_cfg.command_latency = selector_node["command_latency"].as<double>(0.08);
+        selector_cfg.max_lead_time = selector_node["max_lead_time"].as<double>(0.50);
+        max_control_lost_frames =
+            selector_node["max_control_lost_frames"].as<int>(5);
+        selector_cfg.spin_omega_threshold =
+            selector_node["spin_omega_threshold"].as<double>(2.0);
+        selector_cfg.coming_angle = selector_node["coming_angle_degrees"].as<double>(60.0) *
+            CV_PI / 180.0;
+        selector_cfg.leaving_angle = selector_node["leaving_angle_degrees"].as<double>(20.0) *
+            CV_PI / 180.0;
+        selector_cfg.yaw_velocity =
+            selector_node["gimbal_yaw_velocity_degrees_per_sec"].as<double>(360.0) *
+            CV_PI / 180.0;
+        selector_cfg.pitch_velocity =
+            selector_node["gimbal_pitch_velocity_degrees_per_sec"].as<double>(180.0) *
+            CV_PI / 180.0;
+        selector_cfg.yaw_acceleration =
+            selector_node["gimbal_yaw_acceleration_degrees_per_sec2"].as<double>(1800.0) *
+            CV_PI / 180.0;
+        selector_cfg.pitch_acceleration =
+            selector_node["gimbal_pitch_acceleration_degrees_per_sec2"].as<double>(1200.0) *
+            CV_PI / 180.0;
+        selector_cfg.handoff_start_angle =
+            selector_node["handoff_start_angle_degrees"].as<double>(10.0) *
+            CV_PI / 180.0;
+        selector_cfg.handoff_duration =
+            selector_node["handoff_duration"].as<double>(selector_cfg.handoff_duration);
+        const YAML::Node shooter_node = tracker_cfg["tracker"]["shooter"];
+        shooter_cfg.min_fire_interval = shooter_node
+            ? shooter_node["min_fire_interval"].as<double>(0.10)
+            : selector_node["min_fire_interval"].as<double>(0.10);
+        shooter_cfg.ready_handoff_gain = shooter_node
+            ? shooter_node["ready_handoff_gain"].as<double>(
+                shooter_cfg.ready_handoff_gain)
+            : shooter_cfg.ready_handoff_gain;
+        shooter_cfg.end_handoff_gain = shooter_node
+            ? shooter_node["end_handoff_gain"].as<double>(shooter_cfg.end_handoff_gain)
+            : shooter_cfg.end_handoff_gain;
+        fire_angle_tolerance = (shooter_node
+            ? shooter_node["fire_angle_tolerance_degrees"].as<double>(3.0)
+            : selector_node["fire_angle_tolerance_degrees"].as<double>(3.0)) *
+            CV_PI / 180.0;
+    }
+    if (tracker_cfg["tracker"]["aim_filter"]) {
+        const auto aim = tracker_cfg["tracker"]["aim_filter"];
+        aim_filter_cfg.enabled = aim["enabled"].as<bool>(true);
+        aim_filter_cfg.process_noise_acceleration =
+            aim["process_noise_acceleration"].as<double>(
+                aim_filter_cfg.process_noise_acceleration);
+        aim_filter_cfg.measurement_noise = aim["measurement_noise"].as<double>(
+            aim_filter_cfg.measurement_noise);
+        aim_filter_cfg.reset_innovation =
+            aim["reset_innovation_degrees"].as<double>(20.0) * CV_PI / 180.0;
+        aim_filter_cfg.reset_timeout = aim["reset_timeout"].as<double>(
+            aim_filter_cfg.reset_timeout);
+        aim_filter_cfg.max_dt = aim["max_dt"].as<double>(aim_filter_cfg.max_dt);
+    }
 
     sim_receiver::VisionDateReceiver receiver(config_path("simulator.yaml"));
+    const char* simulator_host = std::getenv("ULTRA_VISION_SIM_HOST");
+    const char* simulator_port = std::getenv("ULTRA_VISION_SIM_PORT");
+    if (simulator_host || simulator_port) {
+        const std::string host = simulator_host ? simulator_host : "127.0.0.1";
+        const uint16_t port = static_cast<uint16_t>(std::max(
+            1, std::min(65535, simulator_port ? std::atoi(simulator_port) : 7666)));
+        receiver.overrideEndpoint(host, port);
+    }
+    if (const char* command_port = std::getenv("ULTRA_VISION_SIM_COMMAND_PORT")) {
+        receiver.overrideCommandEndpoint(static_cast<uint16_t>(std::max(
+            1, std::min(65535, std::atoi(command_port)))));
+    }
     receiver.connect();
+    receiver.sendGimbalCommand(0.0, 0.0);
 
     auto_aim::Tracker tracker(track_cfg);
     auto_aim::Detector detector(cv::Mat(), det_cfg);
+    auto_aim::GimbalController gimbal_controller(
+        gimbal_cfg,
+        [&receiver](double yaw, double pitch) {
+            return receiver.sendGimbalCommand(yaw, pitch);
+        },
+        gimbal_command_rate_hz);
+    auto_aim::TargetSelector target_selector(selector_cfg);
+    auto_aim::Shooter shooter(shooter_cfg);
+    auto_aim::AimSignalFilter aim_signal_filter(aim_filter_cfg);
+
+    std::ofstream estimate_recorder;
+    if (const char* estimate_path = std::getenv("ULTRA_VISION_ESTIMATE_CSV")) {
+        estimate_recorder.open(estimate_path, std::ios::out | std::ios::trunc);
+        if (estimate_recorder) {
+            estimate_recorder << "x,y,z,color,distance,time_us,plate_id\n";
+        } else {
+            std::cerr << "Failed to open estimate CSV: " << estimate_path << std::endl;
+        }
+    }
+
+    std::ofstream observation_recorder;
+    if (const char* observation_path = std::getenv("ULTRA_VISION_OBSERVATION_CSV")) {
+        observation_recorder.open(observation_path, std::ios::out | std::ios::trunc);
+        if (observation_recorder) {
+            observation_recorder
+                << "x,y,z,rx,ry,rz,tracker_x,tracker_y,tracker_z,"
+                   "cmd_yaw,cmd_pitch,time_us,plate_id,state\n";
+        } else {
+            std::cerr << "Failed to open observation CSV: " << observation_path << std::endl;
+        }
+    }
+
+    std::ofstream selector_recorder;
+    if (const char* selector_path = std::getenv("ULTRA_VISION_SELECTOR_CSV")) {
+        selector_recorder.open(selector_path, std::ios::out | std::ios::trunc);
+        if (selector_recorder) {
+            selector_recorder
+                << "time_us,center_x,center_y,center_z,yaw,omega,armor_id,"
+                   "armor_x,armor_y,armor_z,target_yaw,target_pitch,lead,"
+                   "target_yaw_velocity,target_pitch_velocity,gimbal_time,handoff,in_fire\n";
+        } else {
+            std::cerr << "Failed to open selector CSV: " << selector_path << std::endl;
+        }
+    }
 
     int processing_height = 0;
     cv::Mat camera_matrix;
@@ -224,14 +458,25 @@ int main(int argc, char* argv[])
     std::vector<auto_aim::Light> lights;
     std::vector<auto_aim::Armor> armors;
 
-    double last_fire_time = 0.0;
+    double commanded_yaw = 0.0;
+    double commanded_pitch = 0.0;
+    auto_aim::GimbalControllerSnapshot last_gimbal_command;
+    auto_aim::TargetDecision last_decision;
+    auto_aim::ShooterState shooter_state = auto_aim::ShooterState::IDLE;
+    auto_aim::ShooterErrorReason shooter_error =
+        auto_aim::ShooterErrorReason::NONE;
+    int aim_valid_updates = 0;
+    int aim_settled_updates = 0;
+    int plate_switches = 0;
     auto fps_start = std::chrono::steady_clock::now();
     int fps_frames = 0;
     int missing_frames = 0;
     int key = -1;
 
     while (key != 27 && key != 'e' && key != 'E') {
-        frame = receiver.getFrame();
+        uint64_t frame_sequence = 0;
+        uint64_t frame_timestamp_us = 0;
+        frame = receiver.getFrame(&frame_sequence, &frame_timestamp_us);
         if (frame.empty()) {
             ++missing_frames;
             if (missing_frames == 1 || missing_frames % 30 == 0) {
@@ -241,6 +486,19 @@ int main(int argc, char* argv[])
             continue;
         }
         missing_frames = 0;
+
+        last_gimbal_command = gimbal_controller.snapshotAt(frame_timestamp_us);
+        if (last_gimbal_command.valid) {
+            commanded_yaw = last_gimbal_command.yaw;
+            commanded_pitch = last_gimbal_command.pitch;
+        }
+        auto_aim::CameraPose camera_pose;
+        camera_pose.valid = last_gimbal_command.valid;
+        camera_pose.timestamp_valid = last_gimbal_command.valid;
+        camera_pose.timestamp = static_cast<double>(frame_timestamp_us) * 1e-6;
+        camera_pose.yaw = commanded_yaw;
+        camera_pose.pitch = commanded_pitch;
+        tracker.setCameraPose(camera_pose);
 
         if (max_processing_width > 0 && frame.cols > max_processing_width) {
             const double scale = static_cast<double>(max_processing_width) / frame.cols;
@@ -270,17 +528,168 @@ int main(int argc, char* argv[])
         int pnp_count = 0;
         for (auto& detected_armor : armors) {
             detected_armor.solve_result = auto_aim::solveArmorPnP(
-                detected_armor, camera_matrix, dist_coeffs);
+                detected_armor, camera_matrix, dist_coeffs,
+                pnp_small_width, pnp_large_width, pnp_armor_height);
             if (detected_armor.solve_result) ++pnp_count;
         }
 
-        const double timestamp = steadyTimestamp();
+        // Use the capture timestamp carried by the simulator frame. Syncing to
+        // processing completion time predicts the chassis tens of milliseconds
+        // into the future, which both offsets the rendered model and overdrives
+        // the gimbal during small-gyro motion.
+        const double timestamp = static_cast<double>(frame_timestamp_us) * 1e-6;
         tracker.update(armors, timestamp);
 
-        if (tracker.getState() == auto_aim::TrackerState::TRACKING &&
-            timestamp - last_fire_time >= 0.1) {
-            receiver.sendFireCommand();
-            last_fire_time = timestamp;
+        if (observation_recorder && tracker.hasObservation() &&
+            !tracker.getLastObservedArmor().tvec.empty()) {
+            const auto& observed = tracker.getLastObservedArmor();
+            const cv::Mat center = tracker.getTargetCenter();
+            observation_recorder << std::fixed << std::setprecision(6)
+                << observed.tvec.at<double>(0) << ','
+                << observed.tvec.at<double>(1) << ','
+                << observed.tvec.at<double>(2) << ','
+                << observed.rvec.at<double>(0) << ','
+                << observed.rvec.at<double>(1) << ','
+                << observed.rvec.at<double>(2) << ','
+                << center.at<double>(0) << ','
+                << center.at<double>(1) << ','
+                << center.at<double>(2) << ','
+                << commanded_yaw << ',' << commanded_pitch << ','
+                << frame_timestamp_us << ','
+                << tracker.getLastObservedPlateId() << ','
+                << static_cast<int>(tracker.getState()) << '\n';
+        }
+
+        if (estimate_recorder &&
+            tracker.getState() != auto_aim::TrackerState::LOST &&
+            tracker.getState() != auto_aim::TrackerState::DETECTING) {
+            const auto estimated_positions = tracker.getEstimatedArmorPositions();
+            estimate_recorder << std::fixed << std::setprecision(6);
+            for (int plate = 0; plate < 4; ++plate) {
+                if (estimated_positions[plate].rows != 3 ||
+                    estimated_positions[plate].cols != 1) {
+                    continue;
+                }
+                const double x = estimated_positions[plate].at<double>(0);
+                const double y = estimated_positions[plate].at<double>(1);
+                const double z = estimated_positions[plate].at<double>(2);
+                estimate_recorder << x << ',' << y << ',' << z << ",0,"
+                                  << std::sqrt(x * x + y * y + z * z) << ','
+                                  << frame_timestamp_us << ',' << plate << '\n';
+            }
+        }
+
+        const bool tracker_usable =
+            tracker.getState() == auto_aim::TrackerState::TRACKING ||
+            (tracker.getState() == auto_aim::TrackerState::TEMP_LOST &&
+             tracker.getLostCount() <= max_control_lost_frames);
+        // The selector consumes the estimator's world-frame state and produces
+        // one decision shared by the gimbal, firing logic, and visualization.
+        if (tracker_usable) {
+            const int previous_armor_id = last_decision.valid
+                ? last_decision.armor_id : -1;
+            auto_aim::TargetDecision decision;
+            if (selector_cfg.enabled) {
+                auto_aim::TargetEstimate estimate;
+                estimate.center = tracker.getTargetCenterWorldArray();
+                estimate.velocity = tracker.getTargetVelocityWorld();
+                estimate.yaw = tracker.getYawWorld();
+                estimate.omega = tracker.getOmega();
+                estimate.armor_radius = tracker.getArmorRadius();
+                decision = target_selector.select(
+                    estimate, commanded_yaw, commanded_pitch);
+            }
+            last_decision = decision;
+
+            if (selector_recorder && decision.valid) {
+                selector_recorder << std::fixed << std::setprecision(6)
+                    << frame_timestamp_us << ','
+                    << tracker.getTargetCenterWorldArray()[0] << ','
+                    << tracker.getTargetCenterWorldArray()[1] << ','
+                    << tracker.getTargetCenterWorldArray()[2] << ','
+                    << tracker.getYawWorld() << ','
+                    << tracker.getOmega() << ','
+                    << decision.armor_id << ','
+                    << decision.armor_position[0] << ','
+                    << decision.armor_position[1] << ','
+                    << decision.armor_position[2] << ','
+                    << decision.target_yaw << ','
+                    << decision.target_pitch << ','
+                    << decision.lead_time << ','
+                    << decision.target_yaw_velocity << ','
+                    << decision.target_pitch_velocity << ','
+                    << decision.gimbal_time << ','
+                    << decision.handoff_gain << ','
+                    << static_cast<int>(decision.in_fire_window) << '\n';
+            }
+
+            if (decision.valid && previous_armor_id >= 0 &&
+                decision.armor_id != previous_armor_id) {
+                ++plate_switches;
+            }
+
+            bool aim_ready = false;
+            double aim_yaw_error = 0.0;
+            double aim_pitch_error = 0.0;
+            if (decision.valid) {
+                const auto filtered_aim = aim_signal_filter.update(
+                    decision.target_yaw, decision.target_pitch,
+                    decision.armor_id, timestamp);
+                auto_aim::GimbalTargetAngles desired;
+                desired.valid = filtered_aim.valid;
+                desired.yaw = filtered_aim.yaw;
+                desired.pitch = filtered_aim.pitch;
+                desired.velocity_valid = true;
+                desired.yaw_velocity = decision.target_yaw_velocity;
+                desired.pitch_velocity = decision.target_pitch_velocity;
+                if (desired.valid) {
+                    ++aim_valid_updates;
+
+                    // The selector owns target choice and fire timing. The
+                    // controller only reports whether its current absolute
+                    // angle is aligned with the selector's planned intercept.
+                    const auto aim_snapshot = gimbal_controller.snapshot();
+                    const bool target_is_continuous = aim_snapshot.valid &&
+                        std::abs(auto_aim::GimbalAimer::normalizeAngle(
+                            desired.yaw - aim_snapshot.desired_yaw)) <=
+                            fire_angle_tolerance &&
+                        std::abs(desired.pitch - aim_snapshot.desired_pitch) <=
+                            fire_angle_tolerance;
+                    aim_ready = aim_snapshot.valid &&
+                        aim_snapshot.processed_generation ==
+                            aim_snapshot.target_generation &&
+                        target_is_continuous &&
+                        std::abs(aim_snapshot.yaw_error) <= fire_angle_tolerance &&
+                        std::abs(aim_snapshot.pitch_error) <= fire_angle_tolerance;
+                    aim_yaw_error = aim_snapshot.yaw_error;
+                    aim_pitch_error = aim_snapshot.pitch_error;
+                    if (aim_ready) ++aim_settled_updates;
+                    gimbal_controller.setTargetAngles(desired);
+                }
+            }
+
+            const auto shooter_output = shooter.update(
+                decision, aim_ready, timestamp);
+            shooter_state = shooter_output.state;
+            shooter_error = shooter_output.error_reason;
+            if (fire_enabled && shooter_output.fire) {
+                receiver.sendFireCommand();
+                std::cout << cv::format(
+                    "FIRE state=%s omega=%+.2f armor=%d lead=%.3fs "
+                    "yaw_err=%+.1fdeg pitch_err=%+.1fdeg",
+                    shooterStatusName(
+                        shooter_output.state, shooter_output.error_reason).c_str(),
+                    tracker.getOmega(),
+                    decision.armor_id,
+                    decision.lead_time,
+                    aim_yaw_error * 180.0 / CV_PI,
+                    aim_pitch_error * 180.0 / CV_PI)
+                          << std::endl;
+            }
+        } else if (!tracker_usable) {
+            const auto shooter_output = shooter.update({}, false, timestamp);
+            shooter_state = shooter_output.state;
+            shooter_error = shooter_output.error_reason;
         }
 
         if (tracker.getState() != auto_aim::TrackerState::LOST && tracker.getTargetCenter().rows == 3) {
@@ -348,6 +757,66 @@ int main(int argc, char* argv[])
                 cv::format("chassis omega=%+.2f rad/s", tracker.getOmega()),
                 cv::Point(8, 22), cv::FONT_HERSHEY_SIMPLEX, 0.55,
                 cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
+            if (last_gimbal_command.valid) {
+                cv::putText(
+                    image,
+                    cv::format("gimbal yaw=%+.3f pitch=%+.3f rad",
+                               last_gimbal_command.yaw, last_gimbal_command.pitch),
+                    cv::Point(8, 46), cv::FONT_HERSHEY_SIMPLEX, 0.48,
+                    cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
+            }
+            cv::putText(
+                image,
+                cv::format("shooter %s",
+                           shooterStatusName(shooter_state, shooter_error).c_str()),
+                cv::Point(8, 68), cv::FONT_HERSHEY_SIMPLEX, 0.48,
+                cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
+            if (last_decision.valid) {
+                const auto selected_center_camera = tracker.worldToCameraPoint(
+                    last_decision.armor_position);
+                const cv::Mat selected_center = (cv::Mat_<double>(3, 1) <<
+                    selected_center_camera[0],
+                    selected_center_camera[1],
+                    selected_center_camera[2]);
+                const double selected_half_width =
+                    last_decision.armor_id == observed_plate && large_armor
+                    ? 0.1125 : 0.0675;
+                const auto selected_corners = projectArmor(
+                    selected_center, last_decision.armor_id,
+                    tracker.worldToCameraYaw(last_decision.predicted_yaw), vertical_axis,
+                    selected_half_width, half_height,
+                    camera_matrix, dist_coeffs);
+                drawQuad(image, selected_corners, cv::Scalar(0, 165, 255), 2);
+                if (!selected_corners.empty()) {
+                    cv::putText(
+                        image,
+                        "SELECT P" + std::to_string(last_decision.armor_id),
+                        selected_corners[0] + cv::Point2f(2.0f, -5.0f),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.45,
+                        cv::Scalar(0, 165, 255), 1, cv::LINE_AA);
+                }
+
+                const auto aim_point_camera = tracker.worldToCameraPoint(
+                    last_decision.aim_point);
+                const cv::Mat lead_point = (cv::Mat_<double>(3, 1) <<
+                    aim_point_camera[0],
+                    aim_point_camera[1],
+                    aim_point_camera[2]);
+                cv::Point2f lead_image;
+                if (projectPoint(lead_point, camera_matrix, dist_coeffs, lead_image)) {
+                    cv::drawMarker(image, lead_image, cv::Scalar(255, 0, 255),
+                                   cv::MARKER_CROSS, 18, 2, cv::LINE_AA);
+                    cv::putText(
+                        image,
+                        cv::format("AIM P%d t=%.3fs d=%.2fm",
+                                   last_decision.armor_id,
+                                   last_decision.lead_time,
+                                   last_decision.distance),
+                        lead_image + cv::Point2f(8.0f, -8.0f),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.45,
+                        cv::Scalar(255, 0, 255), 1, cv::LINE_AA);
+                }
+            }
         } else {
             cv::putText(image, "No chassis estimate", cv::Point(8, 22),
                         cv::FONT_HERSHEY_SIMPLEX, 0.55,
@@ -358,11 +827,30 @@ int main(int argc, char* argv[])
         const auto now = std::chrono::steady_clock::now();
         const double elapsed = std::chrono::duration<double>(now - fps_start).count();
         if (elapsed >= 1.0) {
+            const char* tracker_state = "LOST";
+            if (tracker.getState() == auto_aim::TrackerState::DETECTING) {
+                tracker_state = "DETECTING";
+            } else if (tracker.getState() == auto_aim::TrackerState::TRACKING) {
+                tracker_state = "TRACKING";
+            } else if (tracker.getState() == auto_aim::TrackerState::TEMP_LOST) {
+                tracker_state = "TEMP_LOST";
+            }
             std::cout << "Processed FPS: " << fps_frames / elapsed
                       << ", armors: " << armors.size()
-                      << ", PnP: " << pnp_count << std::endl;
+                      << ", PnP: " << pnp_count
+                      << ", tracker: " << tracker_state
+                      << ", fresh: " << tracker.hasObservation()
+                      << ", lost: " << tracker.getLostCount()
+                      << ", omega: " << tracker.getOmega()
+                      << ", aim_settled: " << aim_settled_updates << "/"
+                      << aim_valid_updates
+                      << ", shooter: " << shooterStatusName(shooter_state, shooter_error)
+                      << ", plate_switches: " << plate_switches << std::endl;
             fps_start = now;
             fps_frames = 0;
+            aim_valid_updates = 0;
+            aim_settled_updates = 0;
+            plate_switches = 0;
         }
 
         cv::resize(image, image, cv::Size(640, 480), 0.0, 0.0, cv::INTER_AREA);

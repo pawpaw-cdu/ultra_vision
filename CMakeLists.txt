@@ -10,6 +10,11 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(ULTRA_VISION_BUILD_AUTO_AIM "Build the auto-aim executable" ON)
 option(ULTRA_VISION_BUILD_AUTO_BUFF "Build the energy-buff executable" ON)
+option(ULTRA_VISION_BUILD_TESTS "Build unit tests" OFF)
+
+if(ULTRA_VISION_BUILD_TESTS)
+  enable_testing()
+endif()
 
 # Use TCP simulator input by default on macOS, where the bundled Galaxy SDK is unavailable.
 # On Linux the hardware camera path remains the default.
