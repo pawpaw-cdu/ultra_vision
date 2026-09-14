@@ -487,7 +487,10 @@ int main(int argc, char* argv[])
         }
         missing_frames = 0;
 
-        last_gimbal_command = gimbal_controller.snapshotAt(frame_timestamp_us);
+        // Frame timestamps come from the simulator host, while command history
+        // is timestamped on the auto-aim machine. Never compare those clocks
+        // directly: use the newest locally generated command snapshot instead.
+        last_gimbal_command = gimbal_controller.snapshot();
         if (last_gimbal_command.valid) {
             commanded_yaw = last_gimbal_command.yaw;
             commanded_pitch = last_gimbal_command.pitch;
