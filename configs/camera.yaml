@@ -1,0 +1,51 @@
+# 相机配置
+
+camera:
+  name: "galaxy"            # 使用的相机类型：galaxy 或 hikcamera
+  device_index: 1          # 设备索引（从1开始）
+  serial_number: ""        # 可选，如果指定则优先使用序列号
+  timeout_ms: 1000         # 取图超时（毫秒）
+
+# 相机内参矩阵（3x3）和畸变系数
+simulator:
+  # Matches simulator/config/camera.yaml. The capture size can be changed
+  # with DAEDALUS_CAPTURE_WIDTH/HEIGHT; focal lengths are derived from FOV.
+  fov_degrees: 45.0
+  max_processing_width: 960
+  camera_matrix:
+    rows: 3
+    cols: 3
+    data: [579.411, 0.0, 320.0,
+           0.0, 579.411, 240.0,
+           0.0, 0.0, 1.0]
+
+  dist_coeffs:
+    rows: 5
+    cols: 1
+    data: [0.0, 0.0, 0.0, 0.0, 0.0]
+
+galaxy:
+  camera_matrix:
+    rows: 3                  # 大恒相机内参矩阵行数
+    cols: 3                  # 大恒相机内参矩阵列数
+    data: [1286.0, 0.0, 645.0,
+          0.0, 1288.0, 483.0,
+          0.0, 0.0, 1.0]
+
+  dist_coeffs:
+    rows: 5                  # 大恒相机畸变系数矩阵行数
+    cols: 1                  # 大恒相机畸变系数矩阵列数
+    data: [0.0, 0.0, 0.0, 0.0, 0.0]
+
+hikcamera:
+  camera_matrix:
+    rows: 3                  # 海康相机内参矩阵行数
+    cols: 3                  # 海康相机内参矩阵列数
+    data: [1286.0, 0.0, 645.0,
+          0.0, 1288.0, 483.0,
+          0.0, 0.0, 1.0]
+
+  dist_coeffs:
+    rows: 5                  # 海康相机畸变系数矩阵行数
+    cols: 1                  # 海康相机畸变系数矩阵列数
+    data: [0.0, 0.0, 0.0, 0.0, 0.0]

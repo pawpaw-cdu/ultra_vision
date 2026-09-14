@@ -1,0 +1,34 @@
+detector:
+  enemy_color: 0
+  binary_threshold: 121
+  light:
+    min_ratio: 0.01
+    max_ratio: 0.15
+    max_angle: 10.0
+    min_contour_points: 5
+  armor:
+    height_ratio_min: 0.70
+    height_ratio_max: 1.25
+    angle_diff_max: 30.0
+    width_to_height_min: 0.8
+    width_to_height_max: 3.0
+    large_armor_ratio_thresh: 3.0
+  color:
+    use_color_detect: true   # 是否启用颜色筛选
+    # 选择颜色空间: "hsv" 或 "bgr"
+    method: "bgr"
+    # HSV 阈值（当 method = "hsv" 时使用）
+    hsv:
+      red_low1: 0            # 红色 HSV 第一段 Hue 下限
+      red_high1: 35          # 红色 HSV 第一段 Hue 上限
+      red_low2: 135          # 红色 HSV 第二段 Hue 下限
+      red_high2: 180         # 红色 HSV 第二段 Hue 上限
+      blue_low: 90           # 蓝色 HSV Hue 下限
+      blue_high: 135         # 蓝色 HSV Hue 上限
+      sat_min: 80            # 最小饱和度，过滤低饱和区域
+      val_min: 80            # 最小明度，过滤过暗区域
+      area_ratio: 0.3        # 目标颜色像素占比阈值，超过该值认为颜色有效
+    # BGR 阈值（当 method = "bgr" 时使用）
+    bgr:
+      red_threshold: 1.0
+      blue_threshold: 1.0

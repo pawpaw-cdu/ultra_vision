@@ -1,0 +1,15 @@
+add_executable(standard_clock_test standard_clock_test.cpp)
+target_link_libraries(standard_clock_test PRIVATE ultra_vision_core)
+add_test(NAME standard_clock_test COMMAND standard_clock_test)
+
+add_executable(rotation_rate_estimator_test rotation_rate_estimator_test.cpp)
+target_link_libraries(rotation_rate_estimator_test PRIVATE ultra_vision_estimation)
+add_test(NAME rotation_rate_estimator_test COMMAND rotation_rate_estimator_test)
+
+add_executable(armor_ekf_test armor_ekf_test.cpp)
+target_link_libraries(armor_ekf_test PRIVATE ultra_vision_estimation)
+add_test(NAME armor_ekf_test COMMAND armor_ekf_test)
+
+add_executable(target_selector_test target_selector_test.cpp)
+target_link_libraries(target_selector_test PRIVATE ultra_vision_selection)
+add_test(NAME target_selector_test COMMAND target_selector_test)

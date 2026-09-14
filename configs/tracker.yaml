@@ -1,0 +1,100 @@
+tracker:
+  min_detect_frames: 3          # 进入稳定跟踪前需要连续检测到的帧数
+  max_lost_frames: 15           # 连续丢失超过该帧数后判定目标丢失
+  reacquire_frames: 3           # 判定丢失后仍允许按帧尝试重捕获的时间窗口
+  max_match_distance: 1.5       # 观测装甲板与预测位置的最大匹配距离，单位：米
+  reacquire_center_error: 0.25  # 重捕获时观测中心与预测中心的最大误差，单位：米
+  reacquire_max_dt: 0.15        # 重捕获时允许的最大时间间隔，约等于 3～5 帧
+  max_camera_pose_dt: 0.05      # 图像时间戳与云台姿态时间戳允许的最大差值，单位：秒
+
+  rotation_rate:
+    window: 0.35                # 径向角鲁棒拟合窗口，单位：秒
+    min_span: 0.12              # 输出角速度前要求的最短时间跨度，单位：秒
+    max_sample_gap: 0.25        # 超过该间隔后清空相位历史，单位：秒
+    max_rate: 10.0              # 允许的最大角速度，单位：弧度/秒
+    min_rate: 0.6               # 绝对值低于该值时视为静止，单位：弧度/秒
+    max_residual: 0.16          # 线性相位拟合的最大残差，单位：弧度
+    min_slopes: 4               # 鲁棒中位斜率所需的最少样本对数量
+
+  aim_filter:
+    enabled: true                    # 是否启用瞄准角递归回归滤波
+    process_noise_acceleration: 80.0 # 角加速度过程噪声，单位：弧度²/秒⁴
+    measurement_noise: 0.0025        # 原始瞄准角测量噪声方差，单位：弧度²
+    reset_innovation_degrees: 20.0   # 单帧角度突变超过该值时重新初始化滤波器
+    reset_timeout: 0.20              # 超过该时间未更新时重新初始化，单位：秒
+    max_dt: 0.10                     # 单次滤波允许使用的最大时间步长，单位：秒
+
+  kalman:
+    # 以下字段仅用于兼容旧版配置，当前 ArmorEKF 不直接使用
+    state_dim: 6                # 旧版卡尔曼状态维度
+    measure_dim: 4              # 旧版卡尔曼测量维度
+    init_error_cov: 10.0        # 旧版初始误差协方差
+
+    # ArmorEKF 参数
+    process_noise_pos: 1.0      # 底盘平移加速度过程噪声
+    process_noise_vel: 400.0    # 底盘角加速度过程噪声，用于适应小陀螺
+    measure_noise: 0.01         # 距离测量方差，单位：平方米
+    default_dt: 0.033           # 时间戳异常时使用的默认时间步长，单位：秒
+    armor_radius: 0.21          # 装甲板回转半径，单位：米
+    y_noise_mult: 30.0          # 旧版中心坐标更新中，垂直方向的噪声放大系数
+    p_cov_min: 0.001            # 协方差矩阵对角线的最小值，防止过度收敛
+    bearing_measure_noise: 0.0025  # 偏航角测量方差，单位：平方弧度
+    pitch_measure_noise: 0.005     # 俯仰角测量方差，单位：平方弧度
+    range_noise_distance_scale: 0.1  # 距离测量方差随距离平方增长的系数
+    angle_measure_noise: 0.04      # 装甲板径向角测量方差，单位：平方弧度
+    ypd_nis_threshold: 9.488       # 四维 YPDA 观测的卡方检验阈值，置信度约 95%
+    angle_match_weight: 0.08    # 角度误差转换为等价距离误差时的权重
+    max_angle_error: 0.70       # 装甲板候选最大角度误差，约 40 度
+    position_nis_threshold: 7.815  # 三维位置观测的卡方检验阈值，置信度约 95%
+    angle_nis_threshold: 3.841     # 一维角度观测的卡方检验阈值，置信度约 95%
+    # 标准机器人四块装甲板高度相同。该数组仅用于适配非常规模型，
+    # 当前模拟器模型已经统一高度，因此全部设为零。
+    armor_y_offsets: [0.0, 0.0, 0.0, 0.0]
+
+  # 模拟器 PnP 几何尺寸。数值根据 Daedalus 真值数据校准，
+  # 用于补偿轮廓中心与装甲板中心的定义差异。
+  pnp:
+    small_width: 0.134          # 小装甲板宽度，单位：米
+    large_width: 0.225          # 大装甲板宽度，单位：米
+    height: 0.057               # 装甲板高度，单位：米
+
+  gimbal:
+    pitch_min_degrees: -70.0       # 最小俯仰角，单位：度；为模拟器保留 10 度余量
+    pitch_max_degrees: 70.0        # 最大俯仰角，单位：度
+    max_yaw_velocity_degrees_per_sec: 360.0    # 最大偏航角速度，单位：度/秒
+    max_pitch_velocity_degrees_per_sec: 180.0  # 最大俯仰角速度，单位：度/秒
+    max_yaw_acceleration_degrees_per_sec2: 1800.0    # 最大偏航角加速度，单位：度/秒²
+    max_pitch_acceleration_degrees_per_sec2: 1200.0  # 最大俯仰角加速度，单位：度/秒²
+    max_yaw_jerk_degrees_per_sec3: 20000.0     # 最大偏航角加加速度，单位：度/秒³
+    max_pitch_jerk_degrees_per_sec3: 12000.0   # 最大俯仰角加加速度，单位：度/秒³
+    yaw_response_gain: 10.0        # 偏航角误差到修正角速度的比例增益，单位：1/秒
+    pitch_response_gain: 10.0      # 俯仰角误差到修正角速度的比例增益，单位：1/秒
+    feedforward_gain: 1.0          # 预测目标角速度的前馈增益，范围：0～1
+    feedforward_time_constant: 0.03  # 前馈速度低通时间常数，单位：秒
+    settle_angle_degrees: 1.2      # 判定瞄准稳定的角度误差阈值，单位：度
+    settle_velocity_degrees_per_sec: 5.0  # 判定瞄准稳定的角速度阈值，单位：度/秒
+    max_control_dt: 0.10           # 单次轨迹更新的最大时间步，避免检测空洞后一次追赶
+    command_rate_hz: 200.0         # 云台轨迹计算和发送频率，单位：赫兹
+
+  selector:
+    enabled: true                # 是否启用目标选择器
+    projectile_speed: 25.0       # 弹丸初速度，单位：米/秒
+    gravity: 9.81                # 重力加速度，单位：米/秒²
+    command_latency: 0.08        # 云台指令下发并生效的延迟，单位：秒
+    max_lead_time: 0.50          # 最大允许提前预测时间，单位：秒
+    max_control_lost_frames: 5   # 短暂检测丢失时继续使用预测结果的最大帧数
+    spin_omega_threshold: 2.0    # 超过该角速度后进入小陀螺选板模式，单位：弧度/秒
+    coming_angle_degrees: 60.0   # 装甲板进入可射击扇区的角度范围，单位：度
+    leaving_angle_degrees: 20.0  # 装甲板离开可射击扇区的判定角度，单位：度
+    gimbal_yaw_velocity_degrees_per_sec: 360.0    # 选板时用于估算偏航转动时间的最大角速度
+    gimbal_pitch_velocity_degrees_per_sec: 180.0  # 选板时用于估算俯仰转动时间的最大角速度
+    gimbal_yaw_acceleration_degrees_per_sec2: 1800.0    # 偏航转动时间估算使用的角加速度
+    gimbal_pitch_acceleration_degrees_per_sec2: 1200.0  # 俯仰转动时间估算使用的角加速度
+    handoff_start_angle_degrees: 10.0  # 接近射击窗口边缘时开始平滑收缩提前角的角度
+    handoff_duration: 0.20         # 换板尖点前用于平滑交接的时间，单位：秒
+
+  shooter:
+    min_fire_interval: 0.10        # 两次发射之间的最短时间间隔，单位：秒
+    ready_handoff_gain: 0.95       # 进入下一目标准备状态所需的提前角恢复比例
+    end_handoff_gain: 0.65         # 低于该提前角比例时进入射击结束状态
+    fire_angle_tolerance_degrees: 3.0  # 云台与选择器瞄点的最大允许角误差，单位：度
