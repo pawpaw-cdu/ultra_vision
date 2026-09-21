@@ -1,0 +1,19 @@
+# 大能量机关的测试相机预置：从背面看（相机离地 0.55 m，水平距离约 6 m）
+#
+# 两个机关面 FACE_1(小符) 与 FACE_2(大符) 只差 0.62 m，而且位移正好沿着转轴，
+# 所以任何一侧都只能看到一个；把小符那套相机位姿绕圆心镜像过去就切到大符，
+# `target` 指向 FACE_2 的圆心 (0.285, 2.447, 0.220)。
+scenario: energy_rune
+fov_degrees: 45.0
+
+energy_rune:
+  position: [4.637, 0.55, 4.424]
+  target: [0.285, 2.447, 0.22]
+
+armor_chassis:
+  position: [1.0, 0.25, 0.0]
+  target: [0.0, 0.15, 0.0]
+
+guided_dart:
+  position: [0.0, 3.0, 0.0]
+  target: [13.0, 9.0, -95.0]

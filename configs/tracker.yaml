@@ -15,6 +15,11 @@ tracker:
     min_rate: 0.6               # 绝对值低于该值时视为静止，单位：弧度/秒
     max_residual: 0.16          # 线性相位拟合的最大残差，单位：弧度
     min_slopes: 4               # 鲁棒中位斜率所需的最少样本对数量
+    # 该估计作为 EKF 角速度观测时的测量方差。实测该估计在小陀螺下偏低
+    # （|ω| 中位数 1.48，真值 3.0），而 EKF 自身由 armor_yaw 序列估计
+    # 可到 2.49，因此只把它当作弱先验使用，避免污染滤波器自己的估计。
+    measure_noise: 1.0        # 单位：弧度²/秒²
+    nis_threshold: 9.0          # 融合角速度观测时的 NIS 门限
 
   aim_filter:
     enabled: true                    # 是否启用瞄准角递归回归滤波
@@ -71,10 +76,10 @@ tracker:
     pitch_response_gain: 10.0      # 俯仰角误差到修正角速度的比例增益，单位：1/秒
     feedforward_gain: 1.0          # 预测目标角速度的前馈增益，范围：0～1
     feedforward_time_constant: 0.03  # 前馈速度低通时间常数，单位：秒
-    settle_angle_degrees: 1.2      # 判定瞄准稳定的角度误差阈值，单位：度
+    settle_angle_degrees: 0.6      # 判定瞄准稳定的角度误差阈值，单位：度
     settle_velocity_degrees_per_sec: 5.0  # 判定瞄准稳定的角速度阈值，单位：度/秒
     max_control_dt: 0.10           # 单次轨迹更新的最大时间步，避免检测空洞后一次追赶
-    command_rate_hz: 200.0         # 云台轨迹计算和发送频率，单位：赫兹
+    command_rate_hz: 100.0         # 云台轨迹计算和发送频率，单位：赫兹
 
   selector:
     enabled: true                # 是否启用目标选择器
@@ -83,6 +88,14 @@ tracker:
     command_latency: 0.08        # 云台指令下发并生效的延迟，单位：秒
     max_lead_time: 0.50          # 最大允许提前预测时间，单位：秒
     max_control_lost_frames: 5   # 短暂检测丢失时继续使用预测结果的最大帧数
+    # 延迟补偿分档：快速旋转时用更大的提前量（参考实现用 decision_speed +
+    # high/low_speed_delay_time 做同样的分档），慢速时用小值避免过头。
+    decide_speed: 7.0            # 判定"高速旋转"的角速度阈值，单位：弧度/秒
+    low_speed_latency: 0.06      # 低速档的指令延迟补偿，单位：秒
+    high_speed_latency: 0.13     # 高速档的指令延迟补偿，单位：秒
+    # 板号锁定：已选中的板只要仍在可打范围内就保持锁定，除非另一块明显更优
+    # （代价低于锁定板的该比例时才允许切换），防止在两块角度相近的板之间来回跳。
+    lock_switch_margin: 0.65
     spin_omega_threshold: 2.0    # 超过该角速度后进入小陀螺选板模式，单位：弧度/秒
     coming_angle_degrees: 60.0   # 装甲板进入可射击扇区的角度范围，单位：度
     leaving_angle_degrees: 20.0  # 装甲板离开可射击扇区的判定角度，单位：度

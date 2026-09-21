@@ -4,7 +4,7 @@ detector:
   light:
     min_ratio: 0.01
     max_ratio: 0.15
-    max_angle: 10.0
+    max_angle: 30.0
     min_contour_points: 5
   armor:
     height_ratio_min: 0.70
@@ -28,7 +28,40 @@ detector:
       sat_min: 80            # 最小饱和度，过滤低饱和区域
       val_min: 80            # 最小明度，过滤过暗区域
       area_ratio: 0.3        # 目标颜色像素占比阈值，超过该值认为颜色有效
-    # BGR 阈值（当 method = "bgr" 时使用）
+  # BGR 阈值（当 method = "bgr" 时使用）
     bgr:
       red_threshold: 1.0
       blue_threshold: 1.0
+
+  # 神经网络装甲板检测器（YOLO11 四点模型，OpenVINO 部署）。
+  # enabled: true 时用它替代上面的传统灯条/装甲板流程；两者输出同一种
+  # Armor 类型，后续 PnP、整车估计和控制链完全不变。
+  neural:
+    enabled: true
+    model_path: "models/openvino/yolov5.xml"   # 相对路径按 configs 的上级目录解析
+    device: "CPU"                             # CPU / GPU / AUTO
+    output_format: "rp24"                     # yolo11 | rp24
+    # 实测权衡（同一套仿真场景 / 确定性复位）：
+    #   rp24  (yolov5+MobileNetV3): 推理 15-21 ms，检测 15.1 fps，观测误差 median 10.0 cm
+    #   yolo11 (38 类)            : 推理 56-78 ms，检测  4.0 fps，观测误差 median  1.6 cm
+    # 即：轻量模型快 3.8 倍，但定位精度差约 6 倍。追求帧率用 rp24，追求精度用 yolo11。
+    input_size: 640
+    score_threshold: 0.25
+    nms_threshold: 0.5
+    min_confidence: 0.25
+    # 默认不做颜色过滤：模型会把未点亮的装甲板判成 extinguish(灰)，
+    # 按颜色筛会直接丢掉这些有效目标（sp_vision 的神经网络路径也不筛颜色，
+    # 只校验编号与大小）。需要只打某一方时，交给目标选择层去做。
+    filter_by_color: false
+    performance_mode: "latency"               # latency / throughput
+    num_threads: 4                            # 实测 4 线程最优（默认 8 会与仿真器抢核）
+    num_streams: 1                            # 0 = OpenVINO 默认
+    # 角点精修：以网络输出的四角为先验，在局部 ROI 内重新提取灯条并用灯条端点
+    # 重建角点；几何一致性不通过时自动退回网络原值（详见 keypoint_refiner.cpp）。
+    refine:
+      enabled: true
+      binary_threshold: 150                   # 局部 ROI 的灰度二值化阈值
+      margin_ratio: 0.15                      # ROI 相对网络框的外扩比例
+      max_center_shift_ratio: 0.08            # 精修后板中心最大位移（相对板宽）
+    use_roi: false
+    roi: {x: 0, y: 0, width: -1, height: -1}

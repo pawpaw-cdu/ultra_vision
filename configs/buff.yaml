@@ -1,0 +1,380 @@
+# 能量机关（大小符）跟踪与激活配置
+#
+# 由 src/auto_buff/ 的 rune_demo 读取。检测模型直接复用 sp_vision_25
+# 已训练导出的 yolo11_buff_int8（单类 "fanblade"，每个扇叶 6 个关键点），
+# 因此这里不需要训练流程；models/train.py 是历史遗留的空壳。
+#
+# 几何量默认取仿真模型（POWER.glb）的实测值：扇叶靶心回转半径 0.700 m、
+# 靶面半宽 0.127 m、臂上关键点半径 0.220 m。实车需要在现场重新标定后修改。
+
+rune:
+  enabled: true
+  mode: small              # small（小符，60°/s 匀速）| large（大符，变速）
+  visualize: true
+  simulator_config: simulator.yaml   # 与 configs/simulator.yaml 共用的 TCP 端点
+
+  # 相机内参：与 configs/camera.yaml 的 simulator 段一致（640x480, FOV 45°）。
+  # 换成实车相机时，把大恒/海康标定结果填在这里。
+  camera:
+    camera_matrix: [579.411, 0.0, 320.0,
+                    0.0, 579.411, 240.0,
+                    0.0, 0.0, 1.0]
+    distort_coeffs: [0.0, 0.0, 0.0, 0.0, 0.0]
+    # 标定分辨率；输入帧尺寸与之不同（例如回放录制视频）时，按比例缩放内参，
+    # 保证几何自洽。实车相机请改成真实标定分辨率并关闭该行为。
+    calibration_width: 640
+    calibration_height: 480
+    auto_scale_intrinsics: true
+
+  # 关键点网络（相对路径按 configs 的上级目录解析）。
+  #
+  # 当前用的是深大 RobotPilots 的 v8_pose 五点模型（models/openvino/
+  # RuneDetectionModel-master/model/model-0624.onnx）：输入 640x480 RGB、
+  # 归一化到 0~1（input_scale = 1/255，与深大 RP-26Rune 的推理适配器一致），
+  # 输出 [1, 18, 6300] =
+  # 3 类分数 + 5 点 × (x, y, conf)。类别 0=未激活，1=小符已激活，2=大符已激活。
+  # 5 个关键点里 k0/k1/k3/k4 是靶面四点（图像上逆时针），k2 是 R 标（机关
+  # 旋转中心）——见模型仓库 pic/ 的标注图，不是 README 正文写的"第 5 点"。
+  #
+  # 旧的 sp_vision 六点模型（assets/yolo11_buff_{fp16,int8}.xml，17 通道、
+  # 单类 fanblade）仍然支持：把 output_layout 改回 sp_vision_6kpt、
+  # num_keypoints: 6、keypoints_have_confidence: false、input_scale 也保持 0.00392
+  # 即可。本机 fp16 p50 19.5~21.6 ms、int8 25.8~29.7 ms（ARM CPU 上 int8
+  # 不占优），可用 rune_model_bench 复测。
+  model:
+    path: models/openvino/RuneDetectionModel-master/model/model-0624.onnx
+    device: CPU
+    input_size: 640
+    input_height: 480
+    output_layout: v8_pose_5kpt
+    num_classes: 3
+    num_keypoints: 5
+    keypoint_confidence_threshold: 0.8   # 逐点置信度下限（作者默认 0.8）
+    min_valid_keypoints: 3               # 有效关键点少于此值判该框无效
+    keypoints_have_confidence: true
+    class_scores_are_logits: false
+    # 检出阈值：深大 RP-26Rune 部署配置用 0.65（kconf 0.5 / 五点全可用）；
+    # 本机保持 kconf 0.8 + 至少 3 点（网络在离域画面上会有"关键点塌缩"的
+    # 假框，0.8 能滤掉一部分，见 min_plate_radius_px）。
+    # 注意：YAML 里重复的键在本工程用的 yaml-cpp 里是**先出现的生效**，
+    # 之前这里重复写了 kconf/min_valid，实际用的是第一组（0.8/3）——
+    # 已删掉重复项，避免"改了配置却没生效"。
+    score_threshold: 0.65
+    nms_threshold: 0.4                   # 旧六点布局按框 IoU 抑制
+    nms_center_dist_px: 30.0             # 五点布局按中心点距离抑制（作者参考实现值）
+    min_plate_radius_px: 3.0             # 剔退"关键点塌缩"的退化框
+    pad_value: 114         # 模型导出元数据 fit_to_window_letterbox 的填充值
+    # 输入像素缩放（像素值 × input_scale）。深大参考实现（RP-26Rune
+    # src/app_plugin/detector）是 u8 NHWC → f32 RGB → scale(255)，即归一化到
+    # 0~1；本机实测也确认：喂 0~255 时网络会给出高置信度的离域误检（画面
+    # 底部反光、暗扇叶），关键点塌缩；归一化后 R 标点误差 0.4~0.7 px、
+    # 靶面半径 13.8 px（真值 13.6 px）。
+    input_scale: 0.00392
+    # 相机的测试距离决定 rune 在画面里的占比；模型只在训练尺度（约 1/3 画面宽）
+    # 附近稳定出框。近了就把整帧放进更大的灰底画布再送网络（不重采样，PnP 精度不变）：
+    #   8.25 m -> 1.0    6.9 m -> 1.6    6.05 m -> 2.0
+    # <1 是"数字变焦"：中心裁剪再 letterbox，把远处（画面里只有几十像素）的
+    # 符放大回训练尺度。仿真 6 m 处的小符约占画面 1/9 宽，用 0.5（2 倍变焦）。
+    # 实测（2026-09-24，小符 20 s ×3 轮对照，见 docs/energy_rune_issue_audit.md §11）：
+    #   1.0 → 有新观测的帧 22%、class0 可用 25%、PnP 距离误差 +0.2%
+    #   1.6 → 有新观测的帧 36%、class0 可用 44%、PnP 距离误差 +2.8%（预算 <+4.3%）
+    # 观测帧 +64%，是本轮唯一被证实有效的检出增益。--pad 可随时 A/B。
+    input_pad_scale: 1.6
+    # 逐帧自适应画布缩放（2026-09-24 实测，§47）：五点模型的召回几乎只取决于
+    # "机关在 640 宽的输入里有多大"，同一个视频里换一个缩放系数，召回能差 4~9 倍：
+    #   buff_two    (7.0 m, 轨道 125 px)  1.0 → 2%    0.7 → 18%   0.6 → 16%  0.4 → 3%
+    #   buff_three  (3.4 m, 轨道 291 px)  1.0 → 61%   1.6 → 81%   1.8 → 71%  2.4 → 3%
+    #   simulator low (6 m, 轨道 65 px)   1.0 → 73%   1.3 → 90%   1.6 → 76%  2.0 → 4%
+    # 三组的峰值都落在"网络输入里轨道半径 ≈ 50~60 px"。打开后不再需要按距离手调：
+    # 上一帧的轨道半径（由靶面尺寸反推）→ 反解缩放系数 → 把机关钉在训练尺度上；
+    # 拿不到尺度或连续丢帧超过 input_pad_sweep_after_lost 时，按 input_pad_sweep
+    # 的阶梯轮流试，重新捕获后交回规则。
+    input_pad_adaptive: false
+    input_pad_target_orbit_px: 58.0
+    input_pad_scale_min: 0.4
+    input_pad_scale_max: 2.6
+    input_pad_sweep_after_lost: 6
+    input_pad_sweep: [1.0, 1.5, 0.7, 2.1, 0.5, 1.8]
+    num_threads: 4
+
+  detector:
+    max_lost_frames: 20    # 连续丢失帧数上限（sp_vision LOSE_MAX）
+    gray_threshold: 100    # 圆心精定位的二值化阈值
+    dilate_size: 5
+    center_mask_ratio: 0.8
+    center_extrapolation: 1.4   # 由扇叶中心 + 臂点外推圆心
+    # 默认只跟踪置信度最高的扇叶（与 sp_vision 一致）；打开后会同时跟踪所有
+    # 点亮的扇叶，为激活状态机提供“哪几个扇叶亮着”的信息。
+    # 打开：网络在离域画面上会给暗扇叶/反光更高置信度，必须把所有候选都
+    # 交给"亮点判据 + 锁定滞回"来选，否则 detectBest 会先按置信度把真正
+    # 点亮的那片丢掉（仿真实测：置信度排序命中率 29%，亮点排序 78%）。
+    multi_candidate: true
+    fallback_single_blade: true
+    prefer_bright_blade: true     # 只在“真正发亮”的扇叶上锁定（网络也会点亮未点亮的靶心图案）
+    blade_roi_ratio: 0.6          # 亮度判据取靶心周围多大的框
+    # 选靶锁定（借鉴 sp_vision 选板锁定 + 自瞄 lock_switch_margin）：
+    # 保持当前锁定的扇叶，只有另一候选明显更亮且连续多帧确认才换，
+    # 否则亮度接近的两片会来回易主，云台表现为左右拉扯。
+    lock_switch_margin: 1.35
+    lock_switch_delta: 12.0
+    lock_switch_frames: 3
+    lock_max_miss: 3
+    # 只有未激活(class 0)的扇叶算可打目标；仿真自绘图案分类不可靠时可关掉兜底。
+    require_inactive_class: true
+    # 我们自己的颜色：0=红（观测精修的颜色差掩膜看 R−B）1=蓝（看 B−R）。
+    our_color: 0
+    # 扇叶状态分类（经典特征，华南虎/SCUT 的"点亮面积区间"思路；见
+    # src/auto_buff/rune_blade_state.hpp）。**默认阈值不可信**：2026-09-24 用
+    # tools/buff_state_probe 在实拍标注帧上量到"未激活目标片 0.252"与
+    # "已激活片 0.180~0.283"几乎完全重叠（§47），所以先只写进 CSV 观察，
+    # 不要拿它当开火闸门，等有同帧同尺度的样本再标定。
+    blade_state:
+      red_minus_blue: 60.0
+      roi_half_ratio: 0.35
+      plate_orbit_ratio: 0.214   # 轨道半径 = 靶面半径 / 该值（实测 62.2 px ↔ 291 px）
+      unlit_below: 0.06
+      active_above: 0.22
+      arm_samples: 9
+      arm_lit_fraction: 0.5
+    # 观测精修（来自深大 RP-26Rune 的"颜色差轮廓 → 语义分割 → 描述子可用性"
+    # 思路，实现在 src/auto_buff/rune_refiner.{hpp,cpp}）：
+    #   * 描述子闸门：灯臂轮廓实心度/长宽比、装甲板实心度、贴边 —— 判定
+    #     "这一帧的几何能不能信"；
+    #   * 圆心融合：R 标轮廓的 fitEllipse 中心与网络 k2 加权平均（两者相差
+    #     max_center_gap_px 之外就不融合，避免把误检引进来）。
+    # 默认 enabled=false：先做 A/B（tools/rune_ab.sh 或 rune_sim_test.sh 对照），
+    # 确认曲线与命中率都变好再打开。RED 阈值 30 是仿真器画面实测值
+    # （他们的 50 在仿真器上只剩 11% 可用灯臂）。
+    refiner:
+      # 观测精修（深大 RuneObservationRefiner 的思路）。2026-09-24 实测后打开：
+      #   * 实拍 buff_three：hub 帧间抖动 中位 2.47→1.26 px、p90 5.53→3.69 px；
+      #   * 仿真：hub 抖动 6.80→5.22 px，发弹 14→18，计分不变（无回退）。
+      # 之前默认关是因为"深大的颜色阈值在仿真上只剩 11% 可用"，但**门限要按实测标定**：
+      # 实测 k2 与轮廓圆心之差 中位 6.5 px/p90 9.1 px，而融合门限写的 4 px ⇒ 只有 21%
+      # 的帧融合；放宽到 10 px 后 90% 的帧都融合，hub 才稳下来。
+      enabled: true
+      roi_scale: 1.4
+      red_minus_blue_threshold: 30.0
+      blue_minus_red_threshold: 62.0
+      armor_area_relative_error: 0.35
+      light_arm_line_samples: 15
+      armor_min_solidity: 0.80
+      arm_min_solidity: 0.66
+      arm_expect_aspect: 5.0
+      arm_aspect_tolerance: 0.42
+      require_usable: false   # true = 几何不可信的帧直接丢（让滤波器滑行）
+      fuse_center: true
+      fuse_weight_contour: 0.5
+      # 融合前置：是否要求装甲板轮廓先过描述子闸门。实测两者相反 ——
+      #   仿真：开 → hub 抖动 中位 5.89→4.15 px、p90 35.8→25.4 px（有效）；
+      #   实拍：开 → **一帧都融合不了**（0/625），hub 抖动退回 2.47 px（丢掉了
+      #         融合带来的 1.26 px）。因为深大的 solidity/aspect 阈值是配他们相机/光照的，
+      #         在我们实拍上一次都没过（与灯臂 2/631 同源，§41）。
+      # 部署目标是实车 ⇒ 默认关；等把描述子换成"按实拍标定的尺度/圆度闸门"再打开。
+      fuse_requires_armor_usable: false
+      max_center_gap_px: 10.0    # 实测 k2↔轮廓圆心 中位 6.5 / p90 9.1 px（§41）
+      border_margin_px: 2
+    # 靶面几何精修：网络四点当 ROI，ROI 内用经典方法（Otsu 亮区 → 轮廓 → 最小外接
+    # 矩形）重建四个**边中点**关键点；只有几何一致性通过才采信（否则保留网络结果）。
+    # 与自瞄侧 perception/keypoint_refiner 同一模式（网络补召回、经典提精度）。
+    plate_refiner:
+      # 尺度保持模式（§45）：只借经典结果的**中心**（可选**朝向**），四个点的**尺寸
+      # 保持网络原值** —— 因为 Otsu 亮区与网络标注的"图案边中点"不是同一个几何量，
+      # 直接替换四点会把深度拉远 +9.6%~+24%（§44 实测）。
+      enabled: true
+      preserve_network_scale: true
+      center_weight: 0.5      # 0=只用网络中心，1=只用经典中心
+      rotation_weight: 0.0    # 先只修中心；朝向修正见 §45 的 A/B
+      margin_ratio: 0.25
+      use_otsu: true
+      morph_size: 3
+      min_area_ratio: 0.25
+      max_area_ratio: 3.0
+      max_center_shift_ratio: 0.25
+      min_size_ratio: 0.6
+      max_size_ratio: 1.6
+    # 类别优先 + 亮点裕度：网络会把点亮片误判成 class1（离线实测 23% 帧），
+    # 硬过滤会丢真目标；非 class0 候选的亮点分要超过最佳 class0 候选这么多倍才采信。
+    inactive_class_margin: 1.3
+    # 没有 class0（未激活）观测时，是否"救回"一帧去追一个 class!=0 的候选。
+    # **默认关**：三家参考实现都不这么做（sp_vision 按亮片数+位置连续性选靶、
+    # rm_vision_core 在 inactive 为空时本帧不给目标、RP-26Rune 要求至少一片
+    # 未激活才做配准），已激活片只当几何参考。实测多片已激活时网络会在相邻
+    # 亮片之间逐帧换框，这一路"救回"就是把瞄准点拖到已激活片上的直接原因；
+    # 而实拍上新模型从不输出 class 1/2（buff_three 336 帧 class0 / 0 帧 class1），
+    # 这一路在实拍上永远用不到。见 docs §50。
+    rescue_missing_inactive: false
+    # "这一片可以打"的锁存时间（秒）：类别的/几何的可打证据出现过就保持这么久，
+    # 不必本帧再看到一次。4 片已激活时网络对最后那片的检出率只有 ~19%，而开火
+    # 请求是 0.7 s 节流的脉冲，不锁存就几乎对不上：实测最后一片窗口里"本帧可打"
+    # 只占 6~10% 的帧。估计器在此期间是外推的（小符 60°/s），瞄点仍在预测扇叶上
+    # （实测 96~99% 的帧瞄的是扇叶而非符心）。见 docs §51。
+    engageable_latch_s: 0.8
+    # 五点模型的靶面点索引顺序（对应 PnP 物点的 外→右→内→左）。
+    # 深大语义是 0=top 1=left 2=point_R 3=right 4=bottom，绕靶心一圈即
+    # 0→1→4→3。标定方法：用 PnP 解出的圆心反投影到图像，应当落在网络给出的
+    # R 标 (k2) 上——本机实测 0,1,4,3 时偏差 7~8 px（就是关键点噪声量级），
+    # 而旋转一位（1,4,3,0）会偏 90 px（整片扇叶），见 tools 里的标定说明。
+    plate_point_order: "0,1,4,3"
+    # 已锁定时只跟"离当前瞄准最近"的那片（大符两片同时点亮，靠亮度会比会来回跳）
+    lock_break_px: 60.0      # 锁定的"距离解绑"半径（px）。试过放大到 90（想让大符两片同时点亮时不来回跳），实测反而更差（scored 7/5→3/4），已回退；大符的双片仲裁要按数据另做。
+    recenter_after_frames: 15     # 连续多少帧没有可用目标才回标定位姿（最后兜底）
+    # 丢目标时先把相机停在"最后已知符心"（符心在世界系静止，信息仍然有效），
+    # 超过这个时间（秒）才回标定位姿。这样不会因为一次短暂丢帧就丢掉估计器。
+    park_on_center_max_age_s: 1.5
+    # 喂给轨迹生成器的目标角速度包络（度/秒）：换片/观测接管会造成目标角阶跃，
+    # 前馈尖峰会把生成器推进超调振荡（实测下发角 6↔38° 来回摆）。
+    max_target_velocity_deg_s: 200.0
+    # 换靶阶跃帧清零速度前馈（压超调用，A/B 可关）。
+    zero_feedforward_on_step: true
+    # 扇叶 ID 闸门：锁定的槽位已在"已激活"集合里就不开火（防止打旧靶）。
+    # 2026-09-24 更新：**默认打开**。早期 A/B（ON 18%/36% vs OFF 40%/40%）判它更差，
+    # 那是因为当时的槽位记账靠网络 class 1/2（新模型下这条路是死的）而且选靶在
+    # 跳片；现在记账有几何来源（"换片 ⇒ 被换下的那片已激活"，§49）、选靶几何优先
+    # （§51），实测反过来：命中有效率 28~34% → 42~58%，小符完整激活轮数 1/8 → 3/12，
+    # 大符完整激活 0 → 2（35 发 / 8 次有效命中），实拍 buff_three 跟踪率不变。
+    # 仍准的判据在 CSV：slot_id / slot_activated_mask / slot_votes。
+    fire_block_on_hit_slot: true
+    # 相位关联选片（大符每轮两片同时点亮）：用"上次关联相位 + 自估角速度×dt"
+    # 预测本帧相位，取最接近的候选；残差超过 tolerance 就丢弃这一帧观测，
+    # 交给状态估计滑行。实测（大符 25 s）：没这层时两片会逐帧易主，观测相位
+    # 出现 ±130° 跳变，EKF 角速度被打到 ±95 rad/s，瞄准角帧间 p90 13°。
+    # 关掉它会退回"亮度竞争 + 像素锁定"。
+    phase_assoc_enable: true
+    phase_assoc_tolerance_deg: 34.0
+    phase_assoc_rate_min: 0.00       # 大符角速度物理下限：模型 a*sin+b 可以掉到 0（原来写 0.30 会丢掉一半观测）
+    phase_assoc_rate_max: 2.09       # 大符峰值角速度（rad/s）
+    phase_assoc_nominal_rate: 1.1775 # 重新捕获时的初值（深大 expect_phase_linear_velocity）
+    phase_assoc_max_gap_s: 0.6       # 观测间隔超过它就重新捕获
+    phase_assoc_rate_smooth: 0.35    # 自估角速度的 EMA 权重
+    phase_assoc_rate_margin: 0.25    # 关联时角速度区间的放宽比例
+    # 短暂丢帧时用运动模型滑行，不重置相位。**这个值直接决定"云台乱飘"**：
+    # 实测检测占空比只有 ~40%，间隔常 >0.4 s；若滑行 12 帧就判无效，云台会在
+    # "停靠符心 ↔ 甩回扇叶"之间以 2~5 Hz 来回（10~17°/步，就是肉眼看到的乱飘）。
+    # 小符角速度是已知常量、大符有正弦模型，滑行 30 帧（~1.2 s）误差仍然可控，
+    # 所以放宽到 30，只在真正长丢失时才回中/回标定位姿。
+    max_coast_frames: 30
+    max_distance_jump_ratio: 0.35 # 观测距离相对当前估计跳变超过该比例即判为野值
+    max_center_jump_deg: 8.0     # 圆心在世界系里是常量：观测的圆心跳变超过它就判野值（原 20° 太松，实测会放进 150px 的假圆心，形成"云台摆→换片→圆心跳→更摆"的正反馈）
+
+  geometry:
+    target_radius_m: 0.700      # 圆心 -> 靶心
+    # 靶面"四点到靶心"的距离（等距四点，不是角点！object_points_ 用的是边中点）。
+    # 这个模型给的四点是**点亮图案**的边中点，实测标定（见 issue_audit §14）：
+    #   比值 靶面半径/轨道偏移 = 0.2084 × 轨道半径 0.700 = 0.1459 m
+    #   用 PnP 深度反推 = 0.141 m  → 取 0.145。改之前是 0.160（偏大 ⇒ 深度 +13%）。
+    target_half_width_m: 0.148
+    arm_point_radius_m: 0.220   # 第 6 个关键点的半径
+    # 深度校正：PnP 在远距离上会把靶面关键点缩小（8 m 处低 27%），用"靶心
+    # 到 R 标的像素偏移 + 已知回转半径"给出独立距离，弹道提前量才不会被整格
+    # 带偏。min_plate_offset_px 以下偏移太小、数值不稳，退回 PnP 结果。
+    # 深度覆盖：标定 h 之后裸 PnP 已经更准（中位 +2.2% / p90 6.63 / 方位散布 ±6%），
+    # 而"用 hub↔靶心偏移覆盖"会引入 ±20% 的方位依赖长尾（§13）。默认关。
+    correct_depth_with_radius: false
+    # 用回转椭圆拟合的半长轴测距（消掉瞬时偏移在轨道远侧被透视压短导致的 +20% 长尾，
+    # 见 docs/energy_rune_issue_audit.md §13）。攒不够样本时自动退回瞬时偏移。
+    correct_depth_with_orbit_fit: true
+    min_plate_offset_px: 8.0
+    # 观测距离闸门：超出这个范围的观测直接判为不可解（仿真里画面底部的反光
+    # 会被误检成扇叶，深度校正后能算出 20~50 m）。
+    min_distance_m: 1.5
+    max_distance_m: 15.0
+    R_camera2gimbal: [1.0, 0.0, 0.0,
+                      0.0, 1.0, 0.0,
+                      0.0, 0.0, 1.0]
+    t_camera2gimbal: [0.0, 0.0, 0.0]
+
+  aimer:
+    yaw_offset_deg: 0.0
+    pitch_offset_deg: 0.0
+    fire_gap_time: 0.7      # 两次开火的最小间隔（秒）。0.45 是试出来的、证据不足，
+                            # 先保持基线的 0.7；开火语义按 docs/energy_rune_vs_rp26.md #8 重做后再定
+    predict_time: 0.12      # 额外提前量（秒）：覆盖下发延迟（每条 GIMBAL 都要新建连接）
+    # 观测寿命（秒）：超过这段时间没有新的解算结果，瞄准改为"瞄圆心"（参考实现
+    # temp.data_life=0.2）。否则外推会把云台按 60°/s 一路甩出画面再触发归位。
+    observation_life_s: 0.2
+    # 时间基准（A/B 实测，各 3 轮；同一 run 序号场景可复现，命中序列都是 30/22/30）：
+    #   曝光时刻 + 推理后采样（物理完整）：
+    #       瞬时延迟 → aim p90 6.02°、甩飞 2 帧（推理耗时是变化的 40~55 ms，等于给
+    #                  云台加噪声）
+    #       平滑延迟 → aim p90 4.78°、甩飞 0 帧  ← 当前默认
+    #   到达时刻 + 推理前采样（少算传播延迟）：aim p90 5.05°、甩飞 0 帧
+    # 结论：延迟补偿要用**平滑后的**延迟，而不是当帧瞬时值。
+    frame_time_from_exposure: true
+    # 配合上一项：把"帧到瞄准延迟"做 EMA 平滑后再用于提前量（消除推理耗时的抖动）。
+    smooth_lead_latency: true
+    bullet_speed: 25.0      # m/s，仿真弹丸初速
+    gravity: 9.81
+    switch_angle_deg: 5.0   # 判定换叶的角度阈值
+    max_mistakes: 3         # 连续跳变超过该次数后强制重新捕获
+    max_flight_time_error: 0.03  # 两遍弹道解算允许的飞行时间差（秒）
+    # 参考 sp_vision planner：延迟补偿按目标转速分档（大符最快 120°/s）
+    decision_speed_degrees_per_sec: 90.0
+    low_speed_delay: 0.06
+    high_speed_delay: 0.13
+    fire_thresh_degrees: 1.5      # 开火时云台与瞄点允许的最大角误差
+    # 云台指令闸门：仿真器把 GIMBAL 当绝对角执行，单帧野值不能把相机甩出去
+    max_slew_deg_per_frame: 8.0
+    aim_yaw_limit_deg: 50.0
+    aim_pitch_limit_deg: 35.0
+    round_window_s: 2.5           # 一轮点亮窗口（规则 2.5 s），超窗口的弹丸不打
+    fire_start_delay_s: 0.15      # 新靶点亮后先稳定一会儿再打
+    round_end_frames: 5           # 连续无点亮扇叶多少帧判定本轮结束
+    blade_slot_jump_px: 25.0      # 命中靶心图像位移超过该值即判定换轮（72° 换叶）
+    slot_lattice_reset_silence_s: 5.0  # 槽位格点静默复位：只清"已激活"记账，保留编号
+    # "本轮结束"的判据：连续这么久没有任何解算结果才算机关复位。**不要**沿用
+    # 回合记账的 5 帧（≈165 ms）：检出占空比 ~80% 时它会把记账每 0.3~0.5 s
+    # 清一次（2026-09-24 实测：607 个已锚定帧里 42% 的掩码是 00000，见 §49）。
+    slot_lattice_round_end_s: 0.8
+    slot_activate_votes: 4        # 槽位"已激活"的投票阈值（每帧+2、每4帧-1）
+    # 换片 ⇒ "刚才还在瞄的那片"已经激活（几何证据：它不再是被点亮的那片）。
+    # 这是深大五点模型下**唯一**可用的激活来源：实拍上网络对已激活片根本不出框
+    # （§48），命中反馈又依赖裁判系统。2026-09-24 实测（30 s 小符 ×2，见 §49）：
+    # 掩码一致率 23.4% → 见审计文档；开火闸门因此才敢重新打开。
+    slot_book_retired_on_switch: true
+    # 换片时是否把整张已激活掩码跟着旋转。槽位号 = 物理片号（换片不改变它），
+    # 再旋转属于重复补偿，会把"我们打过的那片"错记到新靶位上 —— 单测
+    # testLatticeRetiredSlotBooksActivation 钉住了这一点，默认不旋转。
+    slot_rotate_booking_on_switch: false
+    post_hit_switch_phase_rad: 0.30    # 命中保持(hold)的解禁阈值：靶心图像相位跳变
+    post_hit_hold_max_s: 1.2           # 命中保持最长时间（没确认换片也放行，防卡死）
+    # 解除禁火还要求看到"已激活片"作证。实测 3+3 轮（30 s 小符）：
+    #   开：计分 5.7/轮、打旧靶 11.3/轮；关：5.0/轮、9.7/轮 —— 比值一样，判据
+    #   几乎不改变决策（"能看到 class 1/2 候选"本来就几乎每帧成立）。默认关，
+    #   开关留着做后续实验。
+    post_hit_require_active_witness: false
+
+  # 云台下发：由控制层的 100 Hz 轨迹生成器执行（加加速度受限 + 速度前馈），
+  # 视觉帧率只负责更新目标角，不再直接产生角度阶跃，避免顿挫。
+  # 参数含义与 configs/tracker.yaml 的 tracker.gimbal 完全一致。
+  gimbal:
+    pitch_min_degrees: -70.0
+    pitch_max_degrees: 70.0
+    # 能量机关的约束：靶心绕心以最高 120°/s 转（大符），换叶时目标角会整跳
+    # 72°/144°。所以速度要 ≥2× 靶心转速（否则稳态滞后），加速度/加加速度要
+    # 保证一次换叶在 ~0.2 s 内到位，但仍有加加速度限制以免"弹"。
+    max_yaw_velocity_degrees_per_sec: 360.0
+    max_pitch_velocity_degrees_per_sec: 180.0
+    max_yaw_acceleration_degrees_per_sec2: 1800.0
+    max_pitch_acceleration_degrees_per_sec2: 1200.0
+    max_yaw_jerk_degrees_per_sec3: 20000.0
+    max_pitch_jerk_degrees_per_sec3: 12000.0
+    # 位置环增益：稳态靠前馈（靶心角速度）跟上，比例项只负责消残差，
+    # 所以可以取大一些加快收敛，加加速度/速度限幅负责不过冲。
+    yaw_response_gain: 25.0
+    pitch_response_gain: 20.0
+    feedforward_gain: 1.0
+    feedforward_time_constant: 0.02
+    settle_angle_degrees: 0.5
+    settle_velocity_degrees_per_sec: 6.0
+    max_control_dt: 0.10
+    command_rate_hz: 100.0
+
+  # 瞄准角递归滤波（与 tracker.yaml 的 aim_filter 同义）
+  aim_filter:
+    enabled: true
+    process_noise_acceleration: 60.0
+    measurement_noise: 0.0025
+    reset_innovation_degrees: 20.0
+    reset_timeout: 0.20
+    max_dt: 0.10

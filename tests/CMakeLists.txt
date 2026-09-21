@@ -1,15 +1,34 @@
-add_executable(standard_clock_test standard_clock_test.cpp)
-target_link_libraries(standard_clock_test PRIVATE ultra_vision_core)
-add_test(NAME standard_clock_test COMMAND standard_clock_test)
+# 单元测试（对齐 sp_vision 的 tests/：测试不进算法目录，统一放这里）。
+#
+#   buff_target_test  —— 估计器/瞄准的数值行为（解析观测，无图像、无仿真器）
+#   buff_state_test   —— 纯状态类：回合/保持/窗口、槽位记账、瞄准兜底、椭圆拟合
 
-add_executable(rotation_rate_estimator_test rotation_rate_estimator_test.cpp)
-target_link_libraries(rotation_rate_estimator_test PRIVATE ultra_vision_estimation)
-add_test(NAME rotation_rate_estimator_test COMMAND rotation_rate_estimator_test)
+add_executable(buff_target_test
+    buff_target_test.cpp
+    ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_types.cpp
+    ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_target.cpp
+    ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_aimer.cpp
+)
+target_include_directories(buff_target_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}
+    ${OpenCV_INCLUDE_DIRS}
+    ${Eigen3_INCLUDE_DIRS}
+)
+target_link_libraries(buff_target_test PRIVATE ${OpenCV_LIBS} Eigen3::Eigen)
+add_test(NAME buff_target_test COMMAND buff_target_test)
 
-add_executable(armor_ekf_test armor_ekf_test.cpp)
-target_link_libraries(armor_ekf_test PRIVATE ultra_vision_estimation)
-add_test(NAME armor_ekf_test COMMAND armor_ekf_test)
-
-add_executable(target_selector_test target_selector_test.cpp)
-target_link_libraries(target_selector_test PRIVATE ultra_vision_selection)
-add_test(NAME target_selector_test COMMAND target_selector_test)
+add_executable(buff_state_test
+    buff_state_test.cpp
+    ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_aim_fallback.cpp
+    ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_orbit_fit.cpp
+    ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_round_guard.cpp
+    ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_slot_lattice.cpp
+    ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_target_selector.cpp
+)
+target_include_directories(buff_state_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${OpenCV_INCLUDE_DIRS}
+)
+target_link_libraries(buff_state_test PRIVATE ${OpenCV_LIBS})
+add_test(NAME buff_state_test COMMAND buff_state_test)

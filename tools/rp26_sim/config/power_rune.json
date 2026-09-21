@@ -1,0 +1,175 @@
+{
+  "camera": {
+    "_comment": "仿真器相机 640x480 / 垂直FOV45deg / 无畸变（tools/sim/rune_camera_*.yaml）；实车参数见 RP-26Rune-main/config/power_rune.json",
+    "width": 640,
+    "height": 480,
+    "cam": {
+      "type_id": "opencv-matrix",
+      "rows": 3,
+      "cols": 3,
+      "dt": "d",
+      "data": [
+        579.411,
+        0.0,
+        319.5,
+        0.0,
+        579.411,
+        239.5,
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    "dis": {
+      "type_id": "opencv-matrix",
+      "rows": 1,
+      "cols": 5,
+      "dt": "d",
+      "data": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  },
+  "detect": {
+    "extand_rotated_rect": 1.4
+  },
+  "feature_extract": {
+    "_sim_adapt": "仿真器画面里点亮灯臂的 R-B 反差比他们实车相机低：他们的 50 在仿真器上只能留下 11% 可用的未激活扇叶，30 能到 96%（对照见 tools/rp26_sim/sweep.py 的 baseline / mask30）。",
+    "red_minus_blue2bin_threshold": 30.0,
+    "blue_minus_red2bin_threshold": 62
+  },
+  "feature_constrain": {
+    "armor_module_area_relative_error_threshold": 0.35,
+    "light_arm_line_samples": 15
+  },
+  "contour_descriptor": {
+    "solidity_threshold_ellipse": 0.8,
+    "solidity_threshold_rectangular": 0.66,
+    "expect_aspect_ratio": 5.0,
+    "approx_error_tolerance": 0.01,
+    "aspect_ratio_relative_error_threshold": 0.42
+  },
+  "project": {
+    "_comment_size": "他们的代码只用 max_img_* 做 ROI 裁剪上界和预分配缓冲；置成足够大即可与分辨率和解耦（见 PowerRunePlane.cpp:827/1345）。",
+    "max_img_width": 4096,
+    "max_img_hight": 3072,
+    "sample_stride": 2,
+    "distance_transform_roi_scale": 1.3,
+    "anchor_reproj_weight": 7.0,
+    "max_chamfer_residual": 50.0,
+    "k_axis_y_constraint_weight_total": 500,
+    "half_interval": 0.5235987756
+  },
+  "plane": {
+    "min_plane_points_window_size": 1
+  },
+  "small_phase_estimate": {
+    "_sim_adapt": "他们的相位滤波器要求相邻观测间隔 ≤0.1 s 且连续 20 帧（为他们的相机+网络设计）。本平台一轮点灯只有 2.5 s、观测间隙常有 0.5 s，永远锁不上；按本平台观测间隙放宽到 0.25 s / 10 帧。",
+    "max_data_interval": 0.25,
+    "prepare_time": 180,
+    "min_size_to_confirm_rotation": 10,
+    "target_switch_threshold": 0.87,
+    "min_size_to_filter": 2,
+    "expect_angular_velocity": 1.0472,
+    "angular_tolerance_factor": 3.0,
+    "P_init": 1.0,
+    "Q_base": 1.0,
+    "R_base": 0.025
+  },
+  "big_phase_motion_estimate": {
+    "max_time_interval": 3.0,
+    "prepare_time": 180,
+    "window_settling_time": 8.0,
+    "min_data_size_to_build_motion_model": 100,
+    "acceptable_time_interval_to_confirm_rotation": 0.15,
+    "target_switch_threshold": 0.77,
+    "expect_phase_linear_velocity": 1.1775,
+    "highest_time_weight": 1.0,
+    "lowwest_time_weight": 0.2,
+    "filter_window_size": 7,
+    "speed_angular_frequency_init": 1.942,
+    "phase_cos_coefficient_init": -0.3322528,
+    "phase_sin_coefficient_init": 0.3322528,
+    "phase_linear_velocity_init": 1.1775,
+    "phase_constant_offset_radians_init": 0,
+    "omega_lower_bound": 1.884,
+    "omega_upper_bound": 2.0,
+    "outer_max_iterations": 20,
+    "inner_max_iterations": 40,
+    "robust_scale_factor": 2.5,
+    "inner_tolerance": 0.01,
+    "lambda_init": 0.01,
+    "lambda_min": 1e-06,
+    "lambda_max": 1000000.0,
+    "outer_tolerance": 1e-05,
+    "max_omega_step": 0.05,
+    "diff_eps_min": 0.0001,
+    "diff_eps_rel_init": 0.001
+  },
+  "temp": {
+    "_sim_adapt": "data_life=0.2 s 意味着观测断流 0.2 s 就退化为瞄符心且禁止开火；本平台观测间隙常有 0.5 s，故放宽。",
+    "data_life": 0.6,
+    "recover_time": 0.4
+  },
+  "small_rune_decision_module": {
+    "_sim_adapt": "开火状态机（初始冷却 0.3 s、连发阈值 0.04 s）是给 100~200 Hz 连续观测设计的；稀疏观测下每次重建目标都会重置冷却，一轮最多 1 发。按本平台改到 0.05/0.2/0.3 s 后，30 s 开火数 2 → 13 发。",
+    "max_life_time": 5.7,
+    "target_switch_threshold": 0.3,
+    "critical_timeout": 5.0,
+    "fire_cooldown_time_init": 0.05,
+    "fire_cooldown_time": 0.3,
+    "fire_remaining_time_threshold": 0.2
+  },
+  "big_rune_decision_module": {
+    "max_life_time": 20.0,
+    "target_switch_threshold": 0.3,
+    "critical_timeout": 5.0,
+    "fire_cooldown_time_init": 0.3,
+    "fire_cooldown_time": 0.7,
+    "fire_remaining_time_threshold": 0.04,
+    "switch_confirm_count": 5
+  },
+  "rune_ballistic_model": {
+    "_sim_adapt": "仿真器弹丸是 25 m/s + LinearDamping(0.05)（等效阻力系数约 0.043）、没有马格努斯；他们实车的 0.42 阻力在 6 m 上会多抬 ~6° 俯仰（实测俯仰偏差 +6°）。",
+    "drag_coefficient": 0.043,
+    "air_density": 1.3,
+    "reference_area": 0.000227,
+    "small_bullet_mass": 0.0032,
+    "radius": 0.7,
+    "bullet_flying_speed": 25.0,
+    "grivaty": 9.7887,
+    "flying_time_max": 1.0,
+    "gune_length": 0.0988,
+    "magnus_acceleration": 0.0,
+    "delay_time": 0.06,
+    "gimbal_pitch_max": 0.61
+  },
+  "offset": {
+    "_comment": "仿真器弹丸沿相机光轴发射（没有枪管-相机偏置），补偿角置 0；实车是 0.5deg。",
+    "yaw": 0.0,
+    "pitch": 0
+  },
+  "debug": {
+    "POWER_RUNE_DEBUG": 1,
+    "POWER_RUNE_BULLISTIC_DEBUG": 0,
+    "POWER_RUNE_DEBUG_DETECT": 1,
+    "POWER_RUNE_DEBUG_REBUILD": 1,
+    "POWER_RUNE_DEBUG_TRACK": 1,
+    "POWER_RUNE_DEBUG_FIRE": 1,
+    "POWER_RUNE_DEBUG_DETECT_SHOW_NN_IMG": 0,
+    "POWER_RUNE_DEBUG_DETECT_SHOW_BIN_IMG": 1,
+    "POWER_RUNE_DEBUG_DETECT_SHOW_SINGLE_BLADE_IMG": 1,
+    "POWER_RUNE_DEBUG_REBUILD_REPROJECT_IMG": 1,
+    "POWER_RUNE_DEBUG_REBUILD_3D_CAMERA_FOXGLOVE": 0,
+    "POWER_RUNE_DEBUG_REBUILD_3D_CAR_FOXGLOVE": 1,
+    "POWER_RUNE_DEBUG_TRACK_RUNE_PLANE_VECTOR_FOXGLOVE": 1,
+    "POWER_RUNE_DEBUG_TRACK_PHASE_FOXGLOVE": 1,
+    "POWER_RUNE_DEBUG_TRACK_PREDICT_ERROR": 1,
+    "POWER_RUNE_DEBUG_FIRE_PREDICT_TARGET_FOXGLOVE": 1,
+    "POWER_RUNE_DEBUG_FIRE_EXPECT_YAW_PITCH_FOXGLOVE": 1
+  }
+}

@@ -1,0 +1,20 @@
+# 能量机关仿真的测试相机预置：实战距离（约 6.05 m）
+#
+# 8~9 m 只是为了迁就关键点模型的训练尺度才拉出来的距离，实战开符一般在 5~7 m。
+# 拉近后靶面像素更多、R 标（圆心）也能稳定检出，PnP 与圆心精定位都更准；
+# 代价是 rune 在画面里占比变大，需要配合 model.input_pad_scale 把模型输入
+# 尺度拉回训练区间（经验值：pad ≈ 8.25 / 距离，6.05 m 约 1.36）。
+scenario: energy_rune
+fov_degrees: 45.0
+
+energy_rune:
+  position: [-4.512, 2.45, -4.424]
+  target: [-0.16, 2.45, -0.22]
+
+armor_chassis:
+  position: [1.0, 0.25, 0.0]
+  target: [0.0, 0.15, 0.0]
+
+guided_dart:
+  position: [0.0, 3.0, 0.0]
+  target: [13.0, 9.0, -95.0]
