@@ -1,15 +1,15 @@
 # Ultra Vision
 
-RoboMaster vision project for armor auto-aim and energy-buff detection.
+RoboMaster 视觉工程：装甲板自瞄 + 能量机关（buff）识别。
 
-## Build
+## 构建
 
 ```bash
 cmake -S . -B build
 cmake --build build -j
 ```
 
-Build only one module if needed:
+只编一个模块：
 
 ```bash
 cmake --build build --target auto_aim -j
@@ -17,26 +17,25 @@ cmake --build build --target energy_demo -j
 cmake --build build --target hsv_tuner -j
 ```
 
-The top-level CMake searches for OpenCV, yaml-cpp, and the bundled Daheng
-Galaxy SDK. The SDK architecture defaults to `armv8` on ARM Linux and `amd64`
-elsewhere; override it with:
+顶层 CMake 会去找 OpenCV、yaml-cpp，以及随仓库带的**大恒 Galaxy SDK**。SDK 架构默认：
+ARM Linux 用 `armv8`，其它平台用 `amd64`；要改就显式指定：
 
 ```bash
 cmake -S . -B build -DULTRA_VISION_DAHENG_ARCH=amd64
 ```
 
-`auto_aim` uses the bundled Galaxy SDK on Linux by default. On macOS it uses
-the TCP simulator receiver because the Galaxy SDK is Linux-only.
+Linux 上 `auto_aim` 默认用随仓库的 Galaxy SDK；macOS 上因为 Galaxy SDK 只有 Linux 版，
+改用 TCP 仿真接收端。
 
-## Run
+## 运行
 
 ```bash
 ./build/auto_aim
 ./build/src/auto_buff/energy_demo
 ```
 
-`auto_aim` reads configs from `ULTRA_VISION_CONFIG_DIR` when set, or from the
-first command-line argument, and otherwise uses the source `configs/` directory.
+`auto_aim` 读配置的顺序：环境变量 `ULTRA_VISION_CONFIG_DIR` → 第一个命令行参数 →
+源码目录下的 `configs/`。
 
 ### 代码结构（对齐 sp_vision：公共能力下沉，应用层只留 IO）
 
@@ -147,15 +146,12 @@ ctest --test-dir build_sim -R gimbal      # 协议帧 + 伪终端整链路
 csv / control / overlay / resize），并对 pnp+ekf 同时给出**线程 CPU 时间**：
 墙钟远大于 CPU 时间说明是机器在抢 CPU，不是算法变慢 —— 看性能数据前先过这一关。
 
-Both `auto_aim` entries -- the hardware camera build (`node.cpp`) and the TCP
-simulator build (`node_sim.cpp`) -- share one whole-chassis `Tracker`, the same
-`config_loader.hpp` parsing of `detector.yaml`/`tracker.yaml`, and the same
-`visualization/projection.hpp` overlay of the estimated chassis model. The
-hardware entry has no gimbal or IMU feedback yet, so it keeps the default
-identity `CameraPose` and estimates in the camera frame; inject
-`tracker.setCameraPose()` before `update()` to move the same estimator into the
-gimbal/world frame. Frames are processed at native resolution, so the PnP
-intrinsics stay consistent with the image.
+`auto_aim` 的两个入口——真机（`node.cpp`）和 TCP 仿真（`node_sim.cpp`）——共用同一套
+**整车 Tracker**、同一套 `config_loader.hpp` 对 `detector.yaml`/`tracker.yaml` 的解析，
+以及同一套 `visualization/projection.hpp` 的估计车体叠加显示。真机入口目前还没有云台/IMU
+反馈，所以保留默认的单位阵 `CameraPose`，在**相机系**里做估计；要在云台系/世界系里估计，
+在 `update()` 之前调用 `tracker.setCameraPose()` 注入即可。图像按原生分辨率处理，PnP
+用的内参和画面始终一致。
 
 ### 配置放哪里（和 sp_vision 一致）
 
@@ -175,22 +171,21 @@ intrinsics stay consistent with the image.
 diff /tmp/before /tmp/after      # 有效的值必须一行不差
 ```
 
-`energy_demo` accepts an optional config directory followed by a video path:
+`energy_demo` 可以跟一个配置目录 + 一个视频路径：
 
 ```bash
 ./build/src/auto_buff/energy_demo src/auto_buff/config src/auto_buff/result.mp4
 ```
 
-`hsv_tuner` opens camera 0 by default, or accepts a video path as its only
-argument. `Show Red` and `Show Blue` select which colors contribute to the
-mask, and pressing `e` prints the tuned red/blue HSV ranges as YAML:
+`hsv_tuner` 默认打开 0 号相机，也可以只用一个视频路径当参数。界面上的 `Show Red` /
+`Show Blue` 决定哪些颜色参与生成掩膜；按 `e` 会把调好的红/蓝 HSV 阈值按 YAML 打印出来：
 
 ```bash
 ./build/hsv_tuner
 ./build/hsv_tuner test_vid_pic/buff_test.mp4
 ```
 
-## Tests
+## 测试
 
 ```bash
 cmake -S . -B build -DULTRA_VISION_BUILD_TESTS=ON
@@ -198,79 +193,68 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-Two of them exist specifically to catch the failures this project has actually
-hit:
+其中有两个测试是专门为**这个项目真踩过的坑**写的：
 
-* `detector_golden_test` pins both detectors on recorded frames
-  (`src/auto_aim/test/assets/`). Two blocking detector bugs — a light-bar tilt
-  formula that scored vertical bars as 180 degrees, and an uninitialised
-  `Light::color` read by the armor pairing filter — were invisible because no
-  test ever asserted on detector output. Expectations live in
-  `detector_expectations.csv`; the network classes are checked exactly, the
-  classical counts with "at least" semantics.
-* `truth_regression_selftest` checks the metric code of
-  `tools/truth_regression.py`, which turns a joint-test recording into a
-  per-stage accuracy report against the simulator's own `dataset.csv`:
+* `detector_golden_test` 把两个检测器钉死在录制帧上（`src/auto_aim/test/assets/`）。
+  之前有两个卡死的检测器 bug——灯条倾斜角公式把竖直灯条算成 180°，以及 `Light::color`
+  未初始化就被装甲板配对过滤器读到——之所以一直没被发现，就是因为没有任何测试对检测器
+  输出做过断言。期望值放在 `detector_expectations.csv`：神经网络的类别**精确匹配**，
+  传统检测的数量按"至少"比较。
+* `truth_regression_selftest` 检查 `tools/truth_regression.py` 的度量代码，它把一次联调
+  录制的数据，按阶段生成对仿真器自己 `dataset.csv` 的精度报告：
 
 ```bash
-# with a simulator run recorded to CSVs
+# 前提：仿真跑过一遍并录了 CSV
 python3 tools/truth_regression.py --truth truth.csv \
     --observation observation.csv --estimate estimate.csv --selector selector.csv
 ```
 
-It reports observation error (detector + PnP), chassis-center error (estimator)
-and plate radius (geometry model), and exits non-zero when a stage exceeds its
-threshold.
+它报告观测误差（检测器 + PnP）、车体中心误差（估计器）和板半径（几何模型），任一阶段
+超出阈值就以非零码退出。
 
-* `armor_ekf_uv_test` pins the UV (pixel-space reprojection) observation added in
-  `Kalman/armor_ekf.hpp`: pure math, no simulator. It checks that the predicted
-  armour corners project onto the same geometry the detector labels, and that the
-  filter converges (position/yaw/yaw-rate) from 1 px corner noise. The A/B switch
-  is `tracker.kalman.uv_observation` (default off, see `docs/uv_observation.md`);
-  `tools/auto_aim_sim_test.sh --uv 0|1` runs the simulator comparison and prints
-  the per-stage errors.
+* `armor_ekf_uv_test` 钉住 `Kalman/armor_ekf.hpp` 里新增的 UV（像素域重投影）观测：
+  纯数学、不需要仿真。它检查预测的装甲板角点投影回去是否和检测器标注的几何对齐，以及
+  滤波器能否从 1 px 的角点噪声里收敛（位置/yaw/yaw 角速度）。A/B 开关是
+  `tracker.kalman.uv_observation`（默认关，见 `docs/uv_observation.md`）；
+  `tools/auto_aim_sim_test.sh --uv 0|1` 跑仿真对比并打印各阶段误差。
 
-Note for macOS/Homebrew: `opencv` there is the current major version (5.x) and
-4.x lives in the keg-only `opencv@4`. The top-level CMake prefers `opencv@4`
-when it is installed, because a stale `opencv` keg can reference an ffmpeg
-soname that is no longer present, in which case every OpenCV-linked binary —
-tests included — refuses to start with a missing `libavformat.*.dylib`. If
-neither is usable:
+macOS/Homebrew 注意：那里的 `opencv` 是当前大版本（5.x），4.x 在 keg-only 的 `opencv@4`
+里。顶层 CMake 在装了 `opencv@4` 时优先用它——因为旧的 `opencv` keg 可能引用一个已经不
+存在的 ffmpeg soname，那种情况下所有链接 OpenCV 的程序（包括测试）都会因为找不到
+`libavformat.*.dylib` 起不来。两个都用不了的话：
 
 ```bash
 brew install opencv@4          # keg-only, does not disturb an existing `opencv`
 cmake -S . -B build -DOpenCV_DIR=$(brew --prefix opencv@4)/lib/cmake/opencv4
 ```
 
-## Simulator
+## 仿真器
 
-The auto-aim target can use the TCP simulator instead of the Galaxy camera.
-macOS enables this mode by default; Linux and explicit builds use:
+自瞄的目标源可以不用大恒相机，改走 TCP 仿真器。macOS 默认就是这个模式；Linux 或想显式
+开启：
 
 ```bash
 cmake -S . -B build_sim -DULTRA_VISION_AUTO_AIM_SIMULATOR=ON -DULTRA_VISION_BUILD_AUTO_BUFF=OFF
 cmake --build build_sim --target auto_aim -j
 ```
 
-For a two-host setup, start the simulator on the rendering host with the remote
-profile. It keeps the calibrated `1440x1080` capture size while limiting the
-TCP stream to JPEG quality 80 and 20 FPS:
+双机模式：在渲染机上用 remote profile 起仿真器。它保持标定好的 `1440x1080` 采集尺寸，
+同时把 TCP 流限制在 JPEG 质量 80、20 FPS：
 
 ```bash
 cd /path/to/simulator_system/simulator
 ./run_remote.sh
 ```
 
-On Windows, use `run_remote.ps1` from PowerShell or `run_remote.bat` from CMD.
-For a local single-host run, use `run_host.sh` instead. The profile values can
-still be overridden through `DAEDALUS_CAPTURE_FPS` and
-`DAEDALUS_JPEG_QUALITY`, for example:
+Windows 上用 PowerShell 跑 `run_remote.ps1`，或 CMD 跑 `run_remote.bat`；单机本地跑用
+`run_host.sh`。profile 里的数值仍可用 `DAEDALUS_CAPTURE_FPS` / `DAEDALUS_JPEG_QUALITY`
+覆盖，例如：
 
 ```bash
 DAEDALUS_CAPTURE_FPS=15 DAEDALUS_JPEG_QUALITY=70 ./run_remote.sh
 ```
 
-Then run the receiver on the algorithm host:
+然后在算法机上跑接收端：
 
 ```bash
 
@@ -278,30 +262,19 @@ cd /path/to/Ultra_Vision
 ./build_sim/auto_aim
 ```
 
-The simulator prints a periodic `[tcp]` line with `clients`, `encoded_fps`,
-`frame_avg`, `bandwidth`, `encode_avg`, and `replaced`. This distinguishes a
-network/encoder bottleneck from receiver-side decoding or algorithm load. The
-stream only encodes frames while at least one client is connected; when the
-link cannot keep up, it replaces stale queued frames instead of dropping the
-client.
+仿真器会周期性打印一行 `[tcp]`，含 `clients`、`encoded_fps`、`frame_avg`、`bandwidth`、
+`encode_avg`、`replaced`——用来区分"网络/编码瓶颈"和"接收端解码或算法负载"。只有至少连了
+一个客户端时才会编码帧；链路跟不上时，它替换掉队列里过期的帧，而不是把客户端踢掉。
 
-The simulator endpoint is configured in `configs/simulator.yaml`. After stable
-tracking is established, `node_sim` aims at the filtered visible armor plate and
-sends `GIMBAL <yaw> <pitch>` to TCP port 7667. Angles are absolute radians,
-with positive yaw turning right and positive pitch turning up. The pitch limits
-are configured under `tracker.gimbal` in `configs/tracker.yaml`. The receiver
-enters tracking mode after stable detections and sends `FIRE` to the same port
-at up to 10 Hz. Press `Esc` or `e` to exit.
+仿真端点配在 `configs/simulator.yaml`。跟踪稳定后，`node_sim` 会朝滤波后的可见装甲板
+瞄准，并把 `GIMBAL <yaw> <pitch>` 发到 TCP 7667 端口。角度是**绝对弧度**，yaw 正方向
+向右、pitch 正方向向上；pitch 限幅在 `configs/tracker.yaml` 的 `tracker.gimbal` 下配。
+接收端在稳定检测后进入跟踪模式，并以最高 10 Hz 向同一端口发 `FIRE`。按 `Esc` 或 `e` 退出。
 
-The same configuration section also sets the visual-servo yaw/pitch gains,
-maximum angle step per processed frame, and deadbands. The command state is
-updated only after a newer image frame arrives, which prevents an asynchronous
-TCP command from being mistaken for a camera pose that has already been applied.
-Commands use one persistent TCP connection rather than reconnecting for every
-message; if that connection breaks, the receiver reconnects it automatically.
+同一段配置里还配视觉伺服的 yaw/pitch 增益、每处理帧的最大角度步长和保护死区。命令状态只在
+**有新图像帧到达之后**才更新，这样可以避免把一条异步 TCP 命令误当成"已经生效的相机姿态"。
+命令走**一条常驻 TCP 连接**，不是每条消息重连；连接断了接收端会自动重连。
 
-Angle calculation lives in `src/auto_aim/control/gimbal_aimer.*`. It only
-converts a target position and the current absolute gimbal angle into a new
-absolute angle. TCP transmission remains in
-`sim_receiver::VisionDateReceiver::sendGimbalCommand()`, so the solver can be
-reused with a real gimbal control backend without simulator dependencies.
+角度解算在 `src/auto_aim/control/gimbal_aimer.*`：它只做"目标位置 + 当前云台绝对角 →
+新的绝对角"这一件事。TCP 发送仍在 `sim_receiver::VisionDateReceiver::sendGimbalCommand()`，
+所以这套解算器可以不带仿真依赖地复用到真机云台后端。
