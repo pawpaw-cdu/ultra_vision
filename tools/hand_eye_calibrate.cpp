@@ -1,42 +1,57 @@
-// 手眼标定：**相机 → 云台** 外参（R_camera2gimbal / t_camera2gimbal）。
-// 对齐 sp_vision 的 calibration/calibrate_handeye.cpp：静态标定物 + 多组云台姿态，
-// 用 robot-world/hand-eye 法解出来（OpenCV cv::calibrateRobotWorldHandEye）。
+// 相机 → 云台外参标定（hand-eye），针对「C 板回传**编码器绝对角**」的情况重写。
 //
-// 为什么需要：相机装在云台上，光心相对云台旋转中心有平移和偏转。不补这个外参时
-//   · 距离越远、偏角越大，瞄准点系统性偏（偏 1° 在 7 m 处就是 12 cm）；
-//   · 底盘/云台转动时，观测反旋到世界系也会带着这个偏差一起转。
-// 仿真里相机就在云台光心，所以外参是单位阵、零平移，标定结果应当接近单位阵（可用来验流程）。
+// 与上一版的区别（上一版是为了应付"陀螺积分 yaw 一直漂"的临时状态）：
+//   1) 不再需要任何漂移补偿（ZUPT / settle / 拟合 β）——编码器角不漂；
+//   2) 编码器绝对角会在 ±180° 折返，所以样本先**解缠**，跨度判据按解缠后的值算；
+//   3) 新增 yaw/pitch **标度自标定**（--fit-yaw-scale / --fit-pitch-scale）：C 板那边的角
+//      如果有减速比/单位/符号问题，解出来的 κ 会直接告诉你差多少倍（κ=0.5 就是差 2 倍，
+//      κ<0 就是符号反了）；
+//   4) 新增**半分交叉验证**：一半样本拟合、另一半检验，检验残差必须和拟合残差同量级才允许
+//      写盘（防"残差很小但换一半样本就崩"的过拟合解）；
+//   5) 新增**平移可辨识度 σt**：由残差 + 雅可比算平移三轴 1σ，>0.1 m 说明该方向没有信息量
+//      （转动范围不够），直接提示，而不是给一个乱跑的 |t|。
 //
-// 两种用法：
-//   ① **现场实时标定（推荐）**：一个进程里直接开相机 + 串口，
-//      空格采一组 → 立刻解算并显示残差/外参；s 存 yaml；u 撤销；q 退出。
-//        ./hand_eye_calibrate --live [--config-dir configs] [--out hand_eye.yaml]
-//   ② 离线复算：读一个 {i}.jpg + {i}.yaml（云台 yaw/pitch）的文件夹，用于复盘/CI。
-//        ./hand_eye_calibrate <数据文件夹> [--config-dir configs] [--out hand_eye.yaml]
-//   自检（不需要硬件）：  ./hand_eye_calibrate --selftest
+// 用法：
+//   hand_eye_calibrate --auto                 自动采样（推荐）
+//   hand_eye_calibrate --live                 手动：空格采样 / s 存盘 / u 撤销 / q 退出
+//   hand_eye_calibrate --monitor              实时对表：画面里的真实转角 vs 回传角（含比值）
+//   hand_eye_calibrate <样本目录>              离线复算 + 交叉验证
+//   hand_eye_calibrate --selftest             合成数据自检（含 ±180 折返与标度错误）
 //
-// 标定物默认用**黑白标定板**（棋盘格/圆点阵，见 configs/calibration.yaml）：
-// 几十个角点 + 亚像素定位，位姿精度比拿装甲板当标定物高一个量级（板子位姿的误差会
-// 1:1 变成外参误差）。`--target armor` 可以退回用装甲板（手边没标定板时的应急）。
-// 内参要先标好（tools/calibrate_camera），否则手眼会把内参误差一起吸进去。
+// 选项：--config-dir configs --out hand_eye.yaml --min-samples 20 --min-step 3
+//       --yaw-span 25 --pitch-span 12 --save-frames <目录>
+//       --fit-yaw-scale --fit-pitch-scale
+//
+// 模型（与 tracker 的 cameraToBaseRotation 完全一致）：
+//   p_base = Ry(yaw)·Rx(pitch) · (R_camera2gimbal · p_cam + t_camera2gimbal)
+// 标定物静止时，各组样本的 p_base 应重合成一点 → 最小化这个"离散度"。
+// 残差 = 板心投回底盘系后到中位点的平均距离（mm），<10 mm 可用。
 
+#include <yaml-cpp/yaml.h>
+
+#include <algorithm>
 #include <array>
-#include <limits>
+#include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <deque>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <limits>
+#include <memory>
+#include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <opencv2/core/ocl.hpp>
 #include <opencv2/opencv.hpp>
-#include <yaml-cpp/yaml.h>
 
-#include "perception/armor_source.hpp"
 #include "config_loader.hpp"
 #include "io/gimbal/gimbal.hpp"
-#include "visualization/projection.hpp"
+
 #if defined(ULTRA_VISION_USE_HIK_CAMERA)
 #include "io/camera/HikCamera.hpp"
 using CameraType = rm_ultra::HikCamera;
@@ -47,7 +62,6 @@ using CameraType = rm_ultra::GalaxyCamera;
 
 namespace
 {
-    /// 帧到手时刻（单调时钟）。取姿态时用它，而不是"处理完这帧之后"的时间。
     using FrameTime = std::chrono::steady_clock::time_point;
 
 #if defined(ULTRA_VISION_USE_HIK_CAMERA) || defined(ULTRA_VISION_USE_GALAXY_CAMERA)
@@ -65,20 +79,6 @@ namespace
     }
 #endif
 
-    struct Sample
-    {
-        double yaw = 0.0;      // 云台绝对 yaw（rad，C 板回传）
-        double pitch = 0.0;    // 云台绝对 pitch
-        cv::Mat rvec;          // 标定物在**相机系**的姿态（PnP）
-        cv::Mat tvec;          // 标定物在**相机系**的位置
-        // 该帧**时刻**的云台姿态（世界←云台），由帧时间戳 + IMU 四元数插值而来。
-        // 有它就用它——直接避开"处理完这帧才读姿态"造成的 10~40 ms 错配；
-        // 没有（离线回放/只存了 yaw pitch 的旧数据）就退回 gimbalToBase(yaw,pitch)。
-        cv::Matx33d R_wb;
-        bool has_R_wb = false;
-        double time_s = 0.0;   // 采样时刻（会话起点为 0），用来扣除 yaw 的线性漂移
-    };
-
     /// @brief 云台→底盘（base）的旋转：与 tracker 的 cameraToBase 同约定（Y 后 X）。
     cv::Matx33d gimbalToBase(double yaw, double pitch)
     {
@@ -89,48 +89,6 @@ namespace
                            0.0, cp, -sp,
                            -sy, cy * sp, cy * cp);
     }
-
-#if defined(ULTRA_VISION_USE_HIK_CAMERA) || defined(ULTRA_VISION_USE_GALAXY_CAMERA)
-    /// @brief 量 yaw 的漂移率（°/s）。C 板回传的 yaw 是陀螺积分量，静止时自己会爬
-    ///        （这台机器实测 ~0.2°/s），pitch 有重力基准所以不漂。云台静止时量一段时间的
-    ///        斜率就是零偏；顺便看 pitch 有没有动，用来判断这段里云台是不是真的没被碰。
-    double measureYawDrift(io::Gimbal& gimbal, double seconds, bool* pitch_still)
-    {
-        std::vector<std::pair<double, double>> points;   // (t, yaw°)
-        double pitch_min = 1e9, pitch_max = -1e9;
-        const auto start = std::chrono::steady_clock::now();
-        while (std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() <
-               seconds) {
-            io::ImuSample imu;
-            if (gimbal.latestImu(imu)) {
-                const double t = std::chrono::duration<double>(std::chrono::steady_clock::now() -
-                                                               start)
-                                     .count();
-                points.emplace_back(t, imu.yaw * 180.0 / CV_PI);
-                pitch_min = std::min(pitch_min, imu.pitch * 180.0 / CV_PI);
-                pitch_max = std::max(pitch_max, imu.pitch * 180.0 / CV_PI);
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        }
-        if (pitch_still != nullptr) *pitch_still = (pitch_max - pitch_min) < 0.5;
-        if (points.size() < 10) return 0.0;
-        const double n = static_cast<double>(points.size());
-        double mt = 0.0, my = 0.0;
-        for (const auto& p : points) { mt += p.first; my += p.second; }
-        mt /= n; my /= n;
-        double num = 0.0, den = 0.0;
-        for (const auto& p : points) { num += (p.first - mt) * (p.second - my); den += (p.first - mt) * (p.first - mt); }
-        return den > 1e-9 ? num / den : 0.0;
-    }
-#endif
-
-    /// @brief 取一组样本的"云台姿态"：优先用帧时刻的 IMU 姿态，否则退回 yaw/pitch 参数化。
-    cv::Matx33d attitudeOf(const Sample& sample)
-    {
-        if (sample.has_R_wb) return sample.R_wb;
-        return gimbalToBase(sample.yaw, sample.pitch);
-    }
-
     /// @brief wxyz 四元数 → 旋转矩阵。
     cv::Matx33d quaternionToRotation(double w, double x, double y, double z)
     {
@@ -148,108 +106,11 @@ namespace
 
     /// @brief 解 R_camera2gimbal / t_camera2gimbal（单位：米）。
     ///
-    /// 做法：6 参数（旋转向量 + 平移）高斯-牛顿，最小化"标定物在**底盘系**里的位置
-    /// 在各组姿态之间的离散度"—— 标定物是静止的，理想外参下它们应重合成同一点。
+    /// 做法：6 参数（旋转向量 + 平移）高斯-牛顿，最小化"标定物在**底盘系**里的位置\n    /// 在各组姿态之间的离散度"—— 标定物是静止的，理想外参下它们应重合成同一点。
     /// 为什么不用 cv::calibrateRobotWorldHandEye：它的 LI 解法对采样分布很挑（我们这组
     /// 数据直接抛 determinant(R) is null），而且它的输出是 gripper→cam 还要自己转置；
     /// 自己写只有 40 行，残差含义明确，任何姿态组合都能给出"质量有多差"。
-    /// @brief 解 R_camera2gimbal / t_camera2gimbal（单位：米）+ yaw 漂移率。
-    ///
-    /// 做法：**7 参数**（旋转向量 + 平移 + yaw 漂移率 β）高斯-牛顿，最小化"标定物在
-    /// **底盘系**里的位置在各组姿态之间的离散度"——标定物静止，理想外参下它们应合成一点。
-    ///
-    /// 为什么多出 β：C 板回传的 yaw 是陀螺积分量，静止时自己会漂（这台实测 0.02~0.2 °/s，
-    /// 而且速率会变），表现为"回传 yaw = 真实 yaw + ∫β dt"。把 β 当未知量一起解，等于让数据
-    /// 自己告诉我们这段时间漂了多少；解出来的 β 直接可读、可对账（pitch 有重力基准，不用管）。
-    bool solve(const std::vector<Sample>& samples, cv::Matx33d& R_cam2gimbal,
-               cv::Vec3d& t_cam2gimbal, double& residual_mm, double initial_drift_rad_s = 0.0,
-               double* drift_out = nullptr)
-    {
-        if (samples.size() < 8) return false;
-        constexpr int kParams = 7;
-        // 参数：rotvec(0..2) + t(3..5) + yaw 漂移率 β(6, rad/s)
-        double params[kParams] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, initial_drift_rad_s};
-        auto reconstruct = [&samples](const double* p) {
-            cv::Matx33d R;
-            cv::Rodrigues(cv::Vec3d(p[0], p[1], p[2]), R);
-            const cv::Vec3d t(p[3], p[4], p[5]);
-            const double beta = p[6];
-            std::vector<cv::Vec3d> centers;
-            centers.reserve(samples.size());
-            for (const auto& sample : samples) {
-                // 扣掉漂移：回传姿态 = Rz(+β t) · 真实姿态 → 左乘 Rz(−β t) 还原
-                const double a = -beta * sample.time_s;
-                const cv::Matx33d Rz(std::cos(a), -std::sin(a), 0.0, std::sin(a), std::cos(a), 0.0,
-                                     0.0, 0.0, 1.0);
-                const cv::Vec3d p_cam(sample.tvec);
-                const cv::Vec3d p_gimbal = R * p_cam + t;
-                centers.push_back(Rz * attitudeOf(sample) * p_gimbal);
-            }
-            return centers;
-        };
-        auto residuals = [&reconstruct](const double* p, std::vector<double>& out) {
-            const auto centers = reconstruct(p);
-            cv::Vec3d mean(0, 0, 0);
-            for (const auto& c : centers) mean += c;
-            mean *= 1.0 / static_cast<double>(centers.size());
-            out.clear();
-            out.reserve(centers.size() * 3);
-            for (const auto& c : centers) {
-                const cv::Vec3d d = c - mean;
-                out.push_back(d[0]);
-                out.push_back(d[1]);
-                out.push_back(d[2]);
-            }
-        };
-
-        std::vector<double> r;
-        residuals(params, r);
-        for (int iteration = 0; iteration < 80; ++iteration) {
-            const int n = static_cast<int>(r.size());
-            std::vector<double> jacobian(static_cast<std::size_t>(n) * kParams, 0.0);
-            const double step = 1e-6;
-            for (int k = 0; k < kParams; ++k) {
-                double probe[kParams];
-                for (int i = 0; i < kParams; ++i) probe[i] = params[i];
-                probe[k] += step;
-                std::vector<double> shifted;
-                residuals(probe, shifted);
-                for (int i = 0; i < n; ++i) {
-                    jacobian[static_cast<std::size_t>(i) * kParams + k] = (shifted[i] - r[i]) / step;
-                }
-            }
-            cv::Matx<double, kParams, kParams> jtj(0.0);
-            cv::Vec<double, kParams> jtr(0.0);
-            for (int i = 0; i < n; ++i) {
-                for (int a = 0; a < kParams; ++a) {
-                    const double ja = jacobian[static_cast<std::size_t>(i) * kParams + a];
-                    jtr[a] += ja * r[i];
-                    for (int b = 0; b < kParams; ++b) {
-                        jtj(a, b) += ja * jacobian[static_cast<std::size_t>(i) * kParams + b];
-                    }
-                }
-            }
-            // 漂移率这一列量纲小得多，给它单独一点正则，避免被旋转/平移项淹没
-            for (int a = 0; a < kParams; ++a) jtj(a, a) *= 1.0 + 1e-6;
-            for (int a = 0; a < kParams; ++a) jtj(a, a) += 1e-9;
-            cv::Vec<double, kParams> delta;
-            cv::solve(jtj, -jtr, delta, cv::DECOMP_CHOLESKY);
-            for (int a = 0; a < kParams; ++a) params[a] += delta[a];
-            residuals(params, r);
-            double norm = 0.0;
-            for (double value : r) norm += value * value;
-            if (norm < 1e-12) break;
-        }
-
-        cv::Rodrigues(cv::Vec3d(params[0], params[1], params[2]), R_cam2gimbal);
-        t_cam2gimbal = cv::Vec3d(params[3], params[4], params[5]);
-        if (drift_out != nullptr) *drift_out = params[6];
-        double sum_sq = 0.0;
-        for (double value : r) sum_sq += value * value;
-        residual_mm = std::sqrt(sum_sq / static_cast<double>(r.size() / 3)) * 1000.0;
-        return true;
-    }
-
+    /// @brief 旋转矩阵 → wxyz 四元数（|w| 取正，便于人读）。
     /// @brief 标定板参数（configs/calibration.yaml）
     struct BoardConfig
     {
@@ -334,8 +195,7 @@ namespace
                                               0.01));
         }
 
-        // SB / 经典检测的**角点顺序**可能差一个转置（行列互换）—— 这正是"板子找到了、
-        // 位姿却差 90°"的经典原因。两种顺序各解一次 PnP，取**重投影误差更小**的那个；
+        // SB / 经典检测的**角点顺序**可能差一个转置（行列互换）—— 这正是"板子找到了、\n        // 位姿却差 90°"的经典原因。两种顺序各解一次 PnP，取**重投影误差更小**的那个；
         // 矩形板（cols≠rows）能把两者区分开。选中的顺序会写回 corners，保证画框/采样一致。
         const auto object_points = boardObjectPoints(board);
         auto reprojectionRms = [&](const std::vector<cv::Point2f>& points, const cv::Mat& r,
@@ -390,17 +250,349 @@ namespace
         return true;
     }
 
-    /// @brief 结果的物理合理性检查。返回空串表示通过，否则返回原因。
-    ///        标定最坑的地方就是"残差看着不大、解却是错的"：病态解靠一个巨大的平移加一个
-    ///        补偿性的大旋转就能把残差压下去。相机装在云台上，物理上 |t| 就是几厘米、
-    ///        旋转就是几度，超出这个量级一定是内参没标 / 采样退化。
-    std::string sanityProblem(const std::vector<Sample>& samples, const cv::Matx33d& R,
-                              const cv::Vec3d& t)
+
+    struct Sample
     {
-        const double translation = cv::norm(t);
-        cv::Mat rotation_vector;
-        cv::Rodrigues(cv::Mat(R), rotation_vector);
-        const double rotation_deg = cv::norm(cv::Vec3d(rotation_vector)) * 180.0 / CV_PI;
+        double yaw = 0.0;      // 云台绝对 yaw（rad，**已解缠**；编码器角会在 ±180° 折返）
+        double pitch = 0.0;    // 云台绝对 pitch（rad）
+        cv::Mat rvec;          // 标定物在相机系的姿态（PnP）
+        cv::Mat tvec;          // 标定物在相机系的位置
+        double time_s = 0.0;   // 采样时刻（会话起点为 0，只用于日志/排序）
+    };
+
+    /// @brief 把角度折到 (−π, π]。
+    double wrapPi(double value)
+    {
+        while (value > CV_PI) value -= 2.0 * CV_PI;
+        while (value <= -CV_PI) value += 2.0 * CV_PI;
+        return value;
+    }
+
+    /// @brief 按参考值把 yaw 解缠（编码器绝对角在 ±180° 处会跳变）。
+    double unwrapYaw(double yaw, double reference)
+    {
+        double out = yaw;
+        while (out - reference > CV_PI) out -= 2.0 * CV_PI;
+        while (out - reference < -CV_PI) out += 2.0 * CV_PI;
+        return out;
+    }
+
+    /// @brief 整组样本按第一个样本解缠。
+    void unwrapSamples(std::vector<Sample>& samples)
+    {
+        if (samples.empty()) return;
+        const double reference = samples.front().yaw;
+        for (auto& sample : samples) sample.yaw = unwrapYaw(sample.yaw, reference);
+    }
+
+    /// @brief 标定参数：yaw/pitch 是否也当未知量一起解（查标度/符号/减速比）。
+    struct FitOptions
+    {
+        bool fit_yaw_scale = false;
+        bool fit_pitch_scale = false;
+        /// @brief 平移上限（米）。物理上 |t| 就是几个厘米；不加约束时优化器会滑进
+        ///        "|t| 好几米 + 补偿性大旋转"的退化盆（残差看着还行但完全是垃圾解）。
+        double t_max = 0.30;
+        /// @brief 外参旋转上限（rad）。相机是**朝前**装在云台上的，所以相机光轴系到云台系的
+        ///        固定旋转只能是几十度的安装偏差。模型里有 `(R,t)→(S·R,S·t)` 配 `yaw→-yaw`
+        ///        的镜像对称（残差完全等价），只有这个物理先验能把它排除掉。
+        double rot_max = 0.5;
+    };
+
+    /// @brief 标定结果。
+    struct Fit
+    {
+        cv::Matx33d R = cv::Matx33d::eye();   // 相机 → 云台
+        cv::Vec3d t{0.0, 0.0, 0.0};           // 米
+        double yaw_scale = 1.0;
+        double pitch_scale = 1.0;
+        double residual_mm = 0.0;             // 拟合残差（板心散布）
+        cv::Vec3d t_sigma{0.0, 0.0, 0.0};     // 平移三轴 1σ（米）
+        double cross_validate_mm = -1.0;      // 半分交叉验证的检验残差（mm）
+        bool ok = false;
+    };
+
+    /// @brief 一组样本在各组姿态下的"云台姿态"（世界←云台）。
+    std::vector<cv::Matx33d> attitudesOf(const std::vector<Sample>& samples, double yaw_scale,
+                                         double pitch_scale)
+    {
+        std::vector<cv::Matx33d> out;
+        out.reserve(samples.size());
+        for (const auto& sample : samples) {
+            out.push_back(gimbalToBase(yaw_scale * sample.yaw, pitch_scale * sample.pitch));
+        }
+        return out;
+    }
+
+    /// @brief 板心投回底盘系（用给定外参）。
+    std::vector<cv::Vec3d> projectToBase(const std::vector<Sample>& samples,
+                                         const std::vector<cv::Matx33d>& attitudes,
+                                         const cv::Matx33d& R, const cv::Vec3d& t)
+    {
+        std::vector<cv::Vec3d> out;
+        out.reserve(samples.size());
+        for (std::size_t i = 0; i < samples.size(); ++i) {
+            const cv::Vec3d p_cam(samples[i].tvec);
+            out.push_back(attitudes[i] * (R * p_cam + t));
+        }
+        return out;
+    }
+
+    /// @brief 散布（mm）：各点到中位点的平均距离。板静止时该项应为 0。
+    double spreadMm(const std::vector<cv::Vec3d>& points, const cv::Vec3d& reference)
+    {
+        if (points.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& point : points) sum += cv::norm(point - reference);
+        return sum / static_cast<double>(points.size()) * 1000.0;
+    }
+
+    cv::Vec3d medianPoint(std::vector<cv::Vec3d> points)
+    {
+        if (points.empty()) return {0.0, 0.0, 0.0};
+        auto mid = [](std::vector<double>& values) {
+            std::sort(values.begin(), values.end());
+            return values[values.size() / 2];
+        };
+        std::vector<double> xs, ys, zs;
+        for (const auto& point : points) {
+            xs.push_back(point[0]);
+            ys.push_back(point[1]);
+            zs.push_back(point[2]);
+        }
+        return {mid(xs), mid(ys), mid(zs)};
+    }
+
+    /// @brief 高斯-牛顿求解。参数：rotvec(3) + t(3) [+ yaw 标度] [+ pitch 标度]。
+    bool solve(const std::vector<Sample>& samples, const FitOptions& options, Fit& fit)
+    {
+        if (samples.size() < 8) return false;
+        const int kFree = 6 + (options.fit_yaw_scale ? 1 : 0) + (options.fit_pitch_scale ? 1 : 0);
+        constexpr int kMax = 8;
+
+        double params[kMax] = {0, 0, 0, 0, 0, 0, 1.0, 1.0};
+        int yaw_index = options.fit_yaw_scale ? 6 : -1;
+        int pitch_index = -1;
+        if (options.fit_pitch_scale) {
+            pitch_index = options.fit_yaw_scale ? 7 : 6;
+        }
+
+        auto rebuild = [&](const double* p) {
+            cv::Matx33d R;
+            cv::Rodrigues(cv::Vec3d(p[0], p[1], p[2]), R);
+            const cv::Vec3d t(p[3], p[4], p[5]);
+            const double ky = yaw_index >= 0 ? p[yaw_index] : 1.0;
+            const double kp = pitch_index >= 0 ? p[pitch_index] : 1.0;
+            return projectToBase(samples, attitudesOf(samples, ky, kp), R, t);
+        };
+        auto residuals = [&](const double* p, std::vector<double>& out) {
+            const auto points = rebuild(p);
+            const cv::Vec3d centre = medianPoint(points);
+            out.clear();
+            out.reserve(points.size() * 3);
+            for (const auto& point : points) {
+                const cv::Vec3d d = point - centre;
+                out.push_back(d[0]);
+                out.push_back(d[1]);
+                out.push_back(d[2]);
+            }
+        };
+
+        std::vector<double> r;
+        residuals(params, r);
+        double lambda = 1e-3;
+        for (int iteration = 0; iteration < 120; ++iteration) {
+            const int n = static_cast<int>(r.size());
+            std::vector<double> jacobian(static_cast<std::size_t>(n) * kFree, 0.0);
+            const double step = 1e-6;
+            for (int k = 0; k < kFree; ++k) {
+                double probe[kMax];
+                for (int i = 0; i < kMax; ++i) probe[i] = params[i];
+                probe[k] += step;
+                std::vector<double> shifted;
+                residuals(probe, shifted);
+                for (int i = 0; i < n; ++i) {
+                    jacobian[static_cast<std::size_t>(i) * kFree + k] = (shifted[i] - r[i]) / step;
+                }
+            }
+            cv::Mat jtj = cv::Mat::zeros(kFree, kFree, CV_64F);
+            cv::Mat jtr = cv::Mat::zeros(kFree, 1, CV_64F);
+            for (int i = 0; i < n; ++i) {
+                for (int a = 0; a < kFree; ++a) {
+                    const double ja = jacobian[static_cast<std::size_t>(i) * kFree + a];
+                    jtr.at<double>(a, 0) += ja * r[i];
+                    for (int b = 0; b < kFree; ++b) {
+                        jtj.at<double>(a, b) += ja * jacobian[static_cast<std::size_t>(i) * kFree + b];
+                    }
+                }
+            }
+            for (int a = 0; a < kFree; ++a) {
+                jtj.at<double>(a, a) *= 1.0 + 1e-6;
+                jtj.at<double>(a, a) += 1e-9;
+            }
+            cv::Mat delta;
+            if (!cv::solve(jtj, -jtr, delta, cv::DECOMP_CHOLESKY)) break;
+            double candidate[kMax];
+            for (int i = 0; i < kMax; ++i) candidate[i] = params[i];
+            for (int a = 0; a < kFree; ++a) candidate[a] += delta.at<double>(a, 0);
+            // 平移硬约束：超过 t_max 就按比例压回边界（投影高斯-牛顿），把解锁在物理区域内
+            const double t_norm = std::sqrt(candidate[3] * candidate[3] +
+                                            candidate[4] * candidate[4] +
+                                            candidate[5] * candidate[5]);
+            if (t_norm > options.t_max && t_norm > 1e-12) {
+                const double ratio = options.t_max / t_norm;
+                candidate[3] *= ratio;
+                candidate[4] *= ratio;
+                candidate[5] *= ratio;
+            }
+            // 旋转也约束在物理范围内（见 FitOptions::rot_max 的说明）
+            const double rot_norm = std::sqrt(candidate[0] * candidate[0] +
+                                              candidate[1] * candidate[1] +
+                                              candidate[2] * candidate[2]);
+            if (rot_norm > options.rot_max && rot_norm > 1e-12) {
+                const double ratio = options.rot_max / rot_norm;
+                candidate[0] *= ratio;
+                candidate[1] *= ratio;
+                candidate[2] *= ratio;
+            }
+
+            std::vector<double> candidate_residuals;
+            residuals(candidate, candidate_residuals);
+            double squared = 0.0;
+            for (double value : candidate_residuals) squared += value * value;
+            if (squared < [&] { double s = 0.0; for (double value : r) s += value * value; return s; }()) {
+                for (int i = 0; i < kMax; ++i) params[i] = candidate[i];
+                residuals(params, r);
+                lambda = std::max(lambda * 0.5, 1e-10);
+            } else {
+                lambda *= 5.0;
+            }
+            if (lambda > 1e6) break;
+        }
+
+        cv::Rodrigues(cv::Vec3d(params[0], params[1], params[2]), fit.R);
+        fit.t = cv::Vec3d(params[3], params[4], params[5]);
+        fit.yaw_scale = yaw_index >= 0 ? params[yaw_index] : 1.0;
+        fit.pitch_scale = pitch_index >= 0 ? params[pitch_index] : 1.0;
+        if (yaw_index >= 0 && std::abs(fit.yaw_scale) < 0.05) fit.yaw_scale = 0.05;   // 防退化
+
+        const auto attitudes = attitudesOf(samples, fit.yaw_scale, fit.pitch_scale);
+        const auto points = projectToBase(samples, attitudes, fit.R, fit.t);
+        fit.residual_mm = spreadMm(points, medianPoint(points));
+
+        // 平移可辨识度：σ²(JᵀJ)⁻¹ 的对角线（只取平移三轴）
+        {
+            const int n = static_cast<int>(r.size());
+            std::vector<double> jacobian(static_cast<std::size_t>(n) * kFree, 0.0);
+            const double step = 1e-6;
+            for (int k = 0; k < kFree; ++k) {
+                double probe[kMax];
+                for (int i = 0; i < kMax; ++i) probe[i] = params[i];
+                probe[k] += step;
+                std::vector<double> shifted;
+                residuals(probe, shifted);
+                for (int i = 0; i < n; ++i) {
+                    jacobian[static_cast<std::size_t>(i) * kFree + k] = (shifted[i] - r[i]) / step;
+                }
+            }
+            cv::Mat jtj = cv::Mat::zeros(kFree, kFree, CV_64F);
+            for (int i = 0; i < n; ++i) {
+                for (int a = 0; a < kFree; ++a) {
+                    const double ja = jacobian[static_cast<std::size_t>(i) * kFree + a];
+                    for (int b = 0; b < kFree; ++b) {
+                        jtj.at<double>(a, b) += ja * jacobian[static_cast<std::size_t>(i) * kFree + b];
+                    }
+                }
+            }
+            cv::Mat inverse;
+            cv::invert(jtj, inverse, cv::DECOMP_SVD);
+            // 秩检查：JᵀJ 接近奇异时伪逆会给出一堆假的很小的 σt（实测出现过 1e-8 mm 这种
+            // 数字），此时直接把 σt 报成"不可辨识"。
+            cv::SVD svd(jtj);
+            const double smax = svd.w.at<double>(0);
+            const double smin = svd.w.at<double>(svd.w.rows - 1);
+            const bool rank_deficient = !(smax > 0.0) || (smin / smax) < 1e-8;
+            const double sigma2 = fit.residual_mm * fit.residual_mm * 1e-6;   // mm² → m²
+            for (int axis = 0; axis < 3; ++axis) {
+                if (rank_deficient) {
+                    fit.t_sigma[axis] = 999.0;
+                    continue;
+                }
+                const double variance = sigma2 * inverse.at<double>(3 + axis, 3 + axis);
+                fit.t_sigma[axis] = variance > 0.0 ? std::sqrt(variance) : 999.0;
+            }
+        }
+        fit.ok = true;
+        return true;
+    }
+
+    /// @brief yaw 标度扫描：固定若干候选 κ 各解一次（6 参数），看残差最小在哪。
+    ///        比"把 κ 当自由参数"稳得多——自由参数会和旋转/平移互相补偿（实测会解成 -0.08
+    ///        这种垃圾）；扫描里每个 κ 下的 R/t 都是最优的，残差曲线才说明问题。
+    ///        返回使得残差最小的 κ。
+    double scanYawScale(const std::vector<Sample>& samples, const FitOptions& options,
+                        bool verbose)
+    {
+        static const double candidates[] = {-1.6, -1.3, -1.15, -1.05, -1.0, -0.95, -0.85,
+                                            -0.7,  -0.5, -0.25,  0.25,  0.4,  0.5,  0.6,
+                                             0.7,   0.8,  0.85,  0.9,  0.95, 1.0,  1.05,
+                                             1.1,   1.25, 1.5,   2.0,  4.0};
+        double best_scale = 1.0;
+        double best_residual = 1e18;
+        if (verbose) std::cout << "[hand_eye] yaw 标度扫描（残差 mm）：" << std::endl;
+        for (double scale : candidates) {
+            std::vector<Sample> scaled = samples;
+            for (auto& sample : scaled) sample.yaw *= scale;
+            FitOptions fixed = options;
+            fixed.fit_yaw_scale = false;
+            fixed.fit_pitch_scale = false;
+            Fit fit;
+            if (!solve(scaled, fixed, fit)) continue;
+            if (verbose) {
+                std::cout << "     κ=" << std::setw(5) << scale << " → 残差 " << fit.residual_mm
+                          << " mm，|t|=" << cv::norm(fit.t) << " m" << std::endl;
+            }
+            if (fit.residual_mm < best_residual) {
+                best_residual = fit.residual_mm;
+                best_scale = scale;
+            }
+        }
+        return best_scale;
+    }
+
+    /// @brief 半分交叉验证：奇偶各半互相拟合/检验，返回检验残差（mm）。
+    ///        检验时用**训练集**的板心位置当参考点，所以它测的是"外参能不能推广到没见过的样本"。
+    double crossValidate(const std::vector<Sample>& samples, const FitOptions& options,
+                         double* in_sample_mm = nullptr)
+    {
+        if (samples.size() < 16) return -1.0;
+        std::vector<Sample> even, odd;
+        for (std::size_t i = 0; i < samples.size(); ++i) {
+            (i % 2 == 0 ? even : odd).push_back(samples[i]);
+        }
+        double total = 0.0;
+        double training_total = 0.0;
+        int folds = 0;
+        for (int fold = 0; fold < 2; ++fold) {
+            const auto& train = fold == 0 ? even : odd;
+            const auto& test = fold == 0 ? odd : even;
+            Fit fit;
+            if (!solve(train, options, fit)) continue;
+            const auto train_attitudes = attitudesOf(train, fit.yaw_scale, fit.pitch_scale);
+            const cv::Vec3d centre = medianPoint(projectToBase(train, train_attitudes, fit.R, fit.t));
+            const auto test_attitudes = attitudesOf(test, fit.yaw_scale, fit.pitch_scale);
+            total += spreadMm(projectToBase(test, test_attitudes, fit.R, fit.t), centre);
+            training_total += fit.residual_mm;
+            ++folds;
+        }
+        if (folds == 0) return -1.0;
+        if (in_sample_mm != nullptr) *in_sample_mm = training_total / folds;
+        return total / folds;
+    }
+
+    /// @brief 结果的物理合理性检查。返回空串表示通过。
+    std::string sanityProblem(const std::vector<Sample>& samples, const Fit& fit)
+    {
         double yaw_min = 1e9, yaw_max = -1e9, pitch_min = 1e9, pitch_max = -1e9;
         for (const auto& sample : samples) {
             yaw_min = std::min(yaw_min, sample.yaw);
@@ -410,1000 +602,845 @@ namespace
         }
         const double yaw_span = (yaw_max - yaw_min) * 180.0 / CV_PI;
         const double pitch_span = (pitch_max - pitch_min) * 180.0 / CV_PI;
-        if (translation > 0.5) {
-            return "解出的平移 " + std::to_string(translation) +
-                   " m 远大于相机到云台的实际距离（应 <0.2 m）";
-        }
-        if (rotation_deg > 20.0) {
-            return "解出的旋转 " + std::to_string(rotation_deg) +
-                   "° 太大（相机安装偏差通常只有几度）";
+        const double translation = cv::norm(fit.t);
+        if (translation > 0.3) {
+            std::ostringstream out;
+            out << "解出的平移 " << translation << " m 远大于相机光心到云台旋转中心的实际距离（应 <0.3 m）";
+            return out.str();
         }
         if (std::min(yaw_span, pitch_span) < 8.0) {
-            return "采样姿态单薄：yaw 跨度 " + std::to_string(yaw_span) + "°，pitch 跨度 " +
-                   std::to_string(pitch_span) +
-                   "°（两个轴都要 ≥8°，否则问题退化、解会沿平坦方向乱滑）";
+            std::ostringstream out;
+            out << "采样姿态单薄：yaw 跨度 " << yaw_span << "°，pitch 跨度 " << pitch_span
+                << "°（两个轴都要 ≥8°）";
+            return out.str();
         }
         return {};
     }
 
-    /// @brief 把标定结果写到 yaml（粘到 configs/camera.yaml 对应相机段即可）。
-    void writeYaml(const std::string& output, const std::vector<Sample>& samples,
-                   const cv::Matx33d& R, const cv::Vec3d& t, double residual_mm,
-                   double drift_rad_s = 0.0)
+    /// @brief 打印一次拟合的全部关键指标。
+    void printFit(const std::vector<Sample>& samples, const Fit& fit, const std::string& tag)
+    {
+        const double translation = cv::norm(fit.t);
+        std::cout << tag << "样本 " << samples.size() << " 组：残差 " << fit.residual_mm
+                  << " mm，|t| = " << translation << " m，σt=(" << fit.t_sigma[0] * 1000.0 << ", "
+                  << fit.t_sigma[1] * 1000.0 << ", " << fit.t_sigma[2] * 1000.0 << ") mm";
+        if (fit.cross_validate_mm >= 0.0) {
+            std::cout << "，交叉验证 " << fit.cross_validate_mm << " mm";
+        }
+        if (fit.yaw_scale != 1.0) {
+            std::cout << "，yaw 修正系数 " << fit.yaw_scale << "（回传侧标度约 "
+                      << 1.0 / fit.yaw_scale << "）";
+        }
+        if (fit.pitch_scale != 1.0) {
+            std::cout << "，pitch 修正系数 " << fit.pitch_scale << "（回传侧标度约 "
+                      << 1.0 / fit.pitch_scale << "）";
+        }
+        std::cout << std::endl;
+        if (std::max({fit.t_sigma[0], fit.t_sigma[1], fit.t_sigma[2]}) > 0.1) {
+            std::cout << "      ↑ 平移还不可辨识（σt>0.1 m）：把 yaw 扫得更宽、pitch 多分几档"
+                      << std::endl;
+        }
+        if (fit.cross_validate_mm >= 0.0 &&
+            fit.cross_validate_mm > std::max(20.0, 3.0 * fit.residual_mm)) {
+            std::cout << "      ↑ 交叉验证明显比拟合差 → 这一版是过拟合解，别用" << std::endl;
+        }
+    }
+
+    /// @brief 写结果 yaml（可直接粘到 configs/camera.yaml 的 hikcamera 段）。
+    void writeYaml(const std::string& output, const std::vector<Sample>& samples, const Fit& fit,
+                   const std::string& comment = {})
     {
         std::ofstream out(output);
+        out << std::setprecision(10);
         out << "# 由 tools/hand_eye_calibrate 生成（" << samples.size() << " 组样本，残差 "
-            << residual_mm << " mm，yaw 漂移 " << drift_rad_s * 180.0 / CV_PI
-            << " °/s）—— 粘到 configs/camera.yaml 对应相机段\n";
+            << fit.residual_mm << " mm";
+        if (fit.cross_validate_mm >= 0.0) out << "，交叉验证 " << fit.cross_validate_mm << " mm";
+        out << "，|t| " << cv::norm(fit.t) << " m";
+        if (fit.yaw_scale != 1.0) out << "，yaw 标度 " << fit.yaw_scale;
+        if (fit.pitch_scale != 1.0) out << "，pitch 标度 " << fit.pitch_scale;
+        out << "）—— 粘到 configs/camera.yaml 的 hikcamera 段\n";
+        if (!comment.empty()) out << "# " << comment << "\n";
         out << "R_camera2gimbal: [";
         for (int row = 0; row < 3; ++row) {
-            for (int col = 0; col < 3; ++col) {
-                out << (row || col ? "," : "") << R(row, col);
+            for (int column = 0; column < 3; ++column) {
+                out << (row || column ? "," : "") << fit.R(row, column);
             }
         }
         out << "]\n";
-        out << "t_camera2gimbal: [" << t[0] << "," << t[1] << "," << t[2] << "]\n";
+        out << "t_camera2gimbal: [" << fit.t[0] << "," << fit.t[1] << "," << fit.t[2] << "]\n";
         std::cout << "[hand_eye] 已写 " << output << std::endl;
     }
 
-    /// @brief 体检 + 存盘（不通过就只打印原因，不写文件，避免把垃圾粘进配置）
-    void saveIfSane(const std::string& output, const std::vector<Sample>& samples,
-                    const cv::Matx33d& R, const cv::Vec3d& t, double residual_mm,
-                    double drift_rad_s = 0.0)
+    /// @brief 体检 + 交叉验证都通过才写盘。
+    bool saveIfGood(const std::string& output, const std::vector<Sample>& samples, const Fit& fit)
     {
-        const std::string problem = sanityProblem(samples, R, t);
+        const std::string problem = sanityProblem(samples, fit);
         if (!problem.empty()) {
-            std::cout << "[hand_eye] **结果不合物理常识，不写盘**：" << problem << "\n"
-                      << "[hand_eye] 最常见原因：① 相机内参还没标（先跑 calibrate_camera，"
-                         "把结果写进 configs/camera.yaml）；② 采样只扫了一个轴。" << std::endl;
-            return;
+            std::cout << "[hand_eye] **不写盘**：" << problem << std::endl;
+            return false;
         }
-        writeYaml(output, samples, R, t, residual_mm, drift_rad_s);
+        if (fit.residual_mm > 20.0) {
+            std::cout << "[hand_eye] **不写盘**：残差 " << fit.residual_mm
+                      << " mm 太大（目标 <10 mm；先查标定板平整度、内参、yaw 通道）" << std::endl;
+            return false;
+        }
+        if (fit.cross_validate_mm >= 0.0 && fit.cross_validate_mm > std::max(20.0, 3.0 * fit.residual_mm)) {
+            std::cout << "[hand_eye] **不写盘**：交叉验证 " << fit.cross_validate_mm
+                      << " mm 远大于拟合残差 " << fit.residual_mm << " mm（过拟合）" << std::endl;
+            return false;
+        }
+        writeYaml(output, samples, fit);
+        return true;
     }
 
-    /// @brief 合成数据自检：已知外参 + 随机云台姿态 → 解回来（带 1 mm 噪声）。
-    int selftest()
+    /// @brief 运行参数。
+    struct Options
     {
-        const cv::Matx33d truth_R(0.9998, 0.0175, -0.0087,   // 约 1° 偏转
-                                  -0.0174, 0.9997, 0.0175,
-                                  0.0090, -0.0173, 0.9998);
-        const cv::Vec3d truth_t(0.045, 0.105, 0.035);        // 4.5/10.5/3.5 cm 偏置
-        const cv::Vec3d target_base(2.0, 0.0, 5.0);          // 标定物在底盘系里的位置
-        std::vector<Sample> samples;
-        for (int i = 0; i < 16; ++i) {
-            // **必须绕两个轴都有变化**：只在一条 (yaw,pitch) 直线上采，旋转轴几乎
-            // 只有一个，手眼问题退化。现场采集同理：yaw 大幅扫，pitch 在其中几组单独变。
-            const double yaw = 0.55 * std::sin(0.9 * i);
-            const double pitch = 0.30 * std::cos(1.7 * i + 0.4);
-            // 标定物在**底盘系**固定（位置 + 姿态），随云台姿态变化的是它在相机系的位姿：
-            //   R_base2gimbal = R_gimbal2base^T,  t_base2gimbal = 0
-            //   p_gimbal = R_base2gimbal · p_base,   R_target2gimbal = R_base2gimbal · R_target2base
-            //   p_cam    = R_c2g^T · (p_gimbal − t_c2g),  R_target2cam = R_c2g^T · R_target2gimbal
-            const cv::Matx33d R_base2gimbal = gimbalToBase(yaw, pitch).t();
-            const cv::Vec3d p_gimbal = R_base2gimbal * target_base;
-            const cv::Vec3d p_cam = truth_R.t() * (p_gimbal - truth_t);
-            const cv::Matx33d R_target2gimbal = R_base2gimbal;   // 标定物姿态 = 底盘姿态
-            const cv::Matx33d R_target2cam = truth_R.t() * R_target2gimbal;
-            Sample sample;
-            sample.yaw = yaw;
-            sample.pitch = pitch;
-            cv::Mat rvec;
-            cv::Rodrigues(cv::Mat(R_target2cam), rvec);
-            sample.rvec = rvec;
-            sample.tvec = cv::Mat(cv::Vec3d(p_cam + cv::Vec3d(0.001, -0.001, 0.001)));  // 1 mm 噪声
-            samples.push_back(sample);
-        }
-        cv::Matx33d R;
-        cv::Vec3d t;
-        double residual = 0.0;
-        if (!solve(samples, R, t, residual)) return 1;
-        cv::Mat rotation_delta;
-        cv::Rodrigues(cv::Mat(R * truth_R.t()), rotation_delta);
-        const double rotation_error = cv::norm(cv::Vec3d(rotation_delta));
-        const double translation_error = cv::norm(t - truth_t);
-        std::printf("hand_eye_calibrate --selftest: 残差 %.2f mm，旋转误差 %.2f°，平移误差 %.1f mm\n",
-                    residual, rotation_error * 180.0 / CV_PI, translation_error * 1000.0);
-        if (rotation_error > 0.02 || translation_error > 0.005 || residual > 5.0) {
-            std::printf("FAILED: 合成数据没解回来\n");
-            return 1;
-        }
-        // ---- ② yaw 漂移 + 7 参数：回传 yaw = 真姿态 × Rz(+β·t)，看 β 能不能解回来 ----
-        {
-            const double drift_deg_s = 0.2;                     // 模拟 C 板那种漂移
-            const double drift_rad_s = drift_deg_s * CV_PI / 180.0;
-            cv::Matx33d R_cg = cv::Matx33d::eye();              // 真外参（转动用几度的小量）
-            cv::Rodrigues(cv::Vec3d(0.03, -0.02, 0.15), R_cg);
-            const cv::Vec3d t_cg(0.03, -0.01, 0.05);            // 真平移 5 cm
-            // 靶标要**离开 yaw 轴**（否则绕 z 的转动根本不影响靶心位置，β 不可观测）
-            const cv::Vec3d p_world(1.2, 0.35, -1.8);           // 静止靶标在世界里的位置
-            std::vector<Sample> samples;
-            for (int i = 0; i < 16; ++i) {
-                const double yaw = (-18.0 + 36.0 * i / 15.0) * CV_PI / 180.0;
-                const double pitch = (-8.0 + 16.0 * (i % 4) / 3.0) * CV_PI / 180.0;
-                const cv::Matx33d R_wb = gimbalToBase(yaw, pitch);
-                const cv::Vec3d p_cam = R_cg.t() * (R_wb.t() * p_world - t_cg);
-                const double t_s = i * 6.0;                      // 每组间隔 6 秒
-                const double a = drift_rad_s * t_s;              // 漂移：左乘 Rz(+βt)
-                const cv::Matx33d Rz(std::cos(a), -std::sin(a), 0.0, std::sin(a), std::cos(a), 0.0,
-                                     0.0, 0.0, 1.0);
-                Sample sample;
-                sample.yaw = yaw + drift_rad_s * t_s;
-                sample.pitch = pitch;
-                sample.time_s = t_s;
-                sample.R_wb = Rz * R_wb;                         // 这就是"回传姿态"
-                sample.has_R_wb = true;
-                sample.tvec = (cv::Mat_<double>(3, 1) << p_cam[0], p_cam[1], p_cam[2]);
-                samples.push_back(sample);
-            }
-            cv::Matx33d R_hat;
-            cv::Vec3d t_hat;
-            double residual = 0.0;
-            double beta = 0.0;
-            const bool ok = solve(samples, R_hat, t_hat, residual, 0.0, &beta);
-            const double translation_error = cv::norm(t_hat - t_cg) * 1000.0;
-            cv::Mat delta_rvec;
-            cv::Rodrigues(R_hat * R_cg.t(), delta_rvec);
-            const double rotation_error = cv::norm(cv::Vec3d(delta_rvec));
-            std::printf("yaw 漂移自检：β 真值 %.3f °/s → 解出 %.3f °/s（误差 %.0f%%），"
-                        "残差 %.2f mm，平移误差 %.1f mm，转动误差 %.2f°\n",
-                        drift_deg_s, beta * 180.0 / CV_PI,
-                        100.0 * std::abs(beta - drift_rad_s) / drift_rad_s, residual,
-                        translation_error, rotation_error * 180.0 / CV_PI);
-            if (!ok || std::abs(beta - drift_rad_s) / drift_rad_s > 0.25 || residual > 2.0 ||
-                translation_error > 10.0) {
-                std::printf("FAILED: yaw 漂移补偿没解回来\n");
-                return 1;
-            }
-        }
+        int min_samples = 20;
+        double min_step_deg = 3.0;
+        double yaw_span_target = 25.0;
+        double pitch_span_target = 12.0;
+        std::string frame_dir;
+        double yaw_scale_fixed = 1.0;   // --yaw-scale：给回传 yaw 乘一个固定标度（含符号）
+        double max_rms = 0.8;           // --max-rms：单帧板重投影 rms 上限（px）
+        FitOptions fit;
+    };
 
-        std::printf("通过\n");
-        return 0;
+    /// @brief 从 configs/serial.yaml 读 yaw 符号（+1/-1）。C 板编码器 yaw 的正方向如果和
+    ///        tracker 约定（正 yaw = 右转）相反，就在这里填 -1 —— 工具和 tracker 共用这一项，
+    ///        免得两边各拍一个符号、谁也说不清。
+    double loadYawSign(const std::string& config_dir)
+    {
+        std::ifstream probe(config_dir + "/serial.yaml");
+        if (!probe) return 1.0;
+        const YAML::Node file = YAML::LoadFile(config_dir + "/serial.yaml");
+        const YAML::Node serial = file["serial"] ? file["serial"] : file;
+        return serial["yaw_sign"].as<double>(1.0) < 0.0 ? -1.0 : 1.0;
     }
-} // namespace
 
 #if defined(ULTRA_VISION_USE_HIK_CAMERA) || defined(ULTRA_VISION_USE_GALAXY_CAMERA)
-// ---- 现场实时标定：相机 + 串口 + 每采一组立刻解算 ----
-int collectLive(const std::string& config_dir, const std::string& output, int min_samples,
-                bool board_mode, bool use_frame_time_attitude, double yaw_drift_deg_s,
-                double drift_seconds)
-{
-    const BoardConfig board = loadBoardConfig(config_dir);
-    const YAML::Node camera_file = YAML::LoadFile(config_dir + "/camera.yaml");
-    const YAML::Node detector_file = YAML::LoadFile(config_dir + "/detector.yaml");
-    const YAML::Node tracker_file = YAML::LoadFile(config_dir + "/tracker.yaml");
-    const YAML::Node serial_file = YAML::LoadFile(config_dir + "/serial.yaml");
+    /// @brief 相机 + 串口 + 配置，各模式共用。
+    struct Hardware
+    {
+        CameraType camera;
+        std::unique_ptr<io::Gimbal> gimbal;
+        cv::Mat camera_matrix;
+        cv::Mat dist_coeffs;
+        BoardConfig board;
+        double yaw_sign = 1.0;
+        bool ok = false;
+    };
 
-    auto_aim::ArmorSourceConfig source_cfg;
-    source_cfg.classical = auto_aim::loadDetectorConfig(detector_file);
-    source_cfg.pnp = auto_aim::loadPnpGeometry(tracker_file);
-    source_cfg.dynamic_roi = false;   // 标定时目标就在画面里，别让 ROI/阶梯重捕干扰采样
-#ifdef ULTRA_VISION_USE_OPENVINO
-    // 板子模式下用不到神经网络，别加载模型（省启动时间与 CPU）
-    source_cfg.use_neural = !board_mode && auto_aim::neuralDetectorEnabled(detector_file);
-    source_cfg.neural = auto_aim::loadNeuralDetectorConfig(detector_file, config_dir);
-#endif
-    const std::string camera_name = camera_file["camera"]["name"].as<std::string>("hikcamera");
-    const YAML::Node intrinsics = camera_file[camera_name];
-    const cv::Mat camera_matrix = auto_aim::readMatFromYaml(intrinsics["camera_matrix"]);
-    const cv::Mat dist_coeffs = auto_aim::readMatFromYaml(intrinsics["dist_coeffs"]);
-    auto_aim::ArmorSource source(source_cfg, camera_matrix, dist_coeffs);
+    /// @brief 打开相机 + 串口。相机/串口都不可拷贝，所以用出参就地构造。
+    bool openHardware(Hardware& hardware, const std::string& config_dir)
+    {
+        const YAML::Node camera_file = YAML::LoadFile(config_dir + "/camera.yaml");
+        const YAML::Node serial_file = YAML::LoadFile(config_dir + "/serial.yaml");
+        const std::string camera_name = camera_file["camera"]["name"].as<std::string>("hikcamera");
+        hardware.camera_matrix = auto_aim::readMatFromYaml(camera_file[camera_name]["camera_matrix"]);
+        hardware.dist_coeffs = auto_aim::readMatFromYaml(camera_file[camera_name]["dist_coeffs"]);
+        hardware.board = loadBoardConfig(config_dir);
+        hardware.yaw_sign = loadYawSign(config_dir);
+        if (!hardware.camera.init("", camera_file["camera"]["device_index"].as<int>(1))) {
+            std::cerr << "[hand_eye] 打不开相机（被 MVS 客户端/别的进程占着？）" << std::endl;
+            return false;
+        }
+        if (const YAML::Node hik = camera_file[camera_name]) {
+            hardware.camera.setAutoExposure(hik["auto_exposure"].as<bool>(false));
+            hardware.camera.setExposureTime(hik["exposure_ms"].as<double>(6.0) * 1000.0);
+            hardware.camera.setGain(hik["gain"].as<double>(12.0));
+        }
+        hardware.gimbal = std::make_unique<io::Gimbal>(auto_aim::loadSerialConfig(serial_file));
+        if (!hardware.gimbal->connected()) {
+            std::cerr << "[hand_eye] 下位机链路没通：标定需要 C 板回传的 yaw/pitch" << std::endl;
+            return false;
+        }
+        hardware.ok = true;
+        return true;
+    }
 
-    CameraType camera;
-    const int device_index = camera_file["camera"]["device_index"].as<int>(1);
-    if (!camera.init("", device_index)) {
-        std::cerr << "[hand_eye] 打不开相机" << std::endl;
-        return 1;
+    /// @brief 一帧的观测量。
+    struct Observation
+    {
+        bool found = false;
+        bool full = false;
+        double rms = -1.0;
+        double tilt_deg = 0.0;
+        double dist_m = 0.0;
+        std::vector<cv::Point2f> corners;
+        cv::Mat rvec;
+        cv::Mat tvec;
+        double yaw = 0.0;       // 解缠 + 符号修正后的 yaw（rad，用于求解）
+        double yaw_raw = 0.0;   // **原始**回传 yaw（解缠后，未做符号修正）——存盘用这个，
+                                // 离线复算再按 configs/serial.yaml 的 yaw_sign 应用一次，
+                                // 避免"采集时取了反、存盘又取反"的双重取反
+        double pitch = 0.0;
+        bool have_pose = false;
+    };
+
+    /// @brief 检测标定板 + 取该帧时刻的云台角（yaw 已解缠）。
+    Observation observeAt(Hardware& hardware, const cv::Mat& frame, FrameTime frame_time,
+                          double yaw_reference)
+    {
+        Observation observation;
+        // 姿态先取：没找到板的时候也要能显示"这一帧的云台角"（监控模式靠它看比值）
+        io::ImuSample pose;
+        if (hardware.gimbal->imuAt(frame_time, pose)) {
+            observation.yaw_raw = unwrapYaw(pose.yaw, yaw_reference);
+            observation.yaw = hardware.yaw_sign * observation.yaw_raw;
+            observation.pitch = pose.pitch;
+            observation.have_pose = true;
+        }
+        if (!detectBoard(frame, hardware.board, hardware.camera_matrix, hardware.dist_coeffs,
+                         observation.corners, observation.rvec, observation.tvec,
+                         &observation.rms)) {
+            return observation;
+        }
+        observation.found = true;
+        observation.full = true;
+        for (const auto& corner : observation.corners) {
+            if (corner.x < 20.0 || corner.y < 20.0 || corner.x > frame.cols - 20.0 ||
+                corner.y > frame.rows - 20.0) {
+                observation.full = false;
+                break;
+            }
+        }
+        cv::Mat rotation;
+        cv::Rodrigues(observation.rvec, rotation);
+        const cv::Mat normal = rotation * (cv::Mat_<double>(3, 1) << 0.0, 0.0, 1.0);
+        observation.tilt_deg =
+            std::acos(std::min(1.0, std::abs(normal.at<double>(2)))) * 180.0 / CV_PI;
+        observation.dist_m = cv::norm(observation.tvec);
+        return observation;
     }
-    if (const YAML::Node hik = camera_file["hikcamera"]) {
-        camera.setAutoExposure(hik["auto_exposure"].as<bool>(false));
-        camera.setExposureTime(hik["exposure_ms"].as<double>(6.0) * 1000.0);
-        camera.setGain(hik["gain"].as<double>(12.0));
+
+    /// @brief 画预览 + 状态，返回按下的键（-1 = 没按）。
+    int drawPreview(const cv::Mat& frame, const Observation& observation,
+                    const std::vector<Sample>& samples, const Fit& fit, const Options& options,
+                    double yaw_span, double pitch_span, const char* status)
+    {
+        cv::Mat display = frame.clone();
+        for (const auto& corner : observation.corners) {
+            cv::circle(display, corner, 4,
+                       observation.full ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 165, 255), -1);
+        }
+        cv::putText(display,
+                    cv::format("samples=%d  rms=%.2fpx  dist=%.2fm  tilt=%.0fdeg", 
+                               static_cast<int>(samples.size()), observation.rms,
+                               observation.dist_m, observation.tilt_deg),
+                    cv::Point(16, 40), cv::FONT_HERSHEY_SIMPLEX, 0.9,
+                    observation.found ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 0, 255), 2);
+        cv::putText(display,
+                    cv::format("yaw=%+.1f pitch=%+.1f  span %.1f/%.1f  %s",
+                               observation.yaw * 180.0 / CV_PI, observation.pitch * 180.0 / CV_PI,
+                               yaw_span, pitch_span, status),
+                    cv::Point(16, 80), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 255), 2);
+        if (fit.ok) {
+            cv::putText(display,
+                        cv::format("residual=%.1fmm  t=(%.3f,%.3f,%.3f)m  sigt=%.0fmm",
+                                   fit.residual_mm, fit.t[0], fit.t[1], fit.t[2],
+                                   std::max({fit.t_sigma[0], fit.t_sigma[1], fit.t_sigma[2]}) * 1000.0),
+                        cv::Point(16, 120), cv::FONT_HERSHEY_SIMPLEX, 0.8,
+                        cv::Scalar(255, 200, 0), 2);
+        }
+        cv::putText(display, "[space]=force sample  [s]=save  [u]=undo  [q]=quit",
+                    cv::Point(16, 160), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(200, 200, 200),
+                    2);
+        cv::putText(display, "(click this window first, keys go to the focused window)",
+                    cv::Point(16, 192), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(160, 160, 160), 2);
+        cv::resize(display, display, cv::Size(), 0.5, 0.5);
+        cv::imshow("hand_eye", display);
+        (void)options;
+        return cv::waitKey(1);
     }
-    io::Gimbal gimbal(auto_aim::loadSerialConfig(serial_file));
-    if (!gimbal.connected()) {
-        std::cerr << "[hand_eye] 下位机链路没通：标定需要云台绝对角（C 板回传的 yaw/pitch）"
+
+    void spansOf(const std::vector<Sample>& samples, double& yaw_span, double& pitch_span)
+    {
+        yaw_span = 0.0;
+        pitch_span = 0.0;
+        if (samples.empty()) return;
+        double yaw_min = 1e9, yaw_max = -1e9, pitch_min = 1e9, pitch_max = -1e9;
+        for (const auto& sample : samples) {
+            yaw_min = std::min(yaw_min, sample.yaw);
+            yaw_max = std::max(yaw_max, sample.yaw);
+            pitch_min = std::min(pitch_min, sample.pitch);
+            pitch_max = std::max(pitch_max, sample.pitch);
+        }
+        yaw_span = (yaw_max - yaw_min) * 180.0 / CV_PI;
+        pitch_span = (pitch_max - pitch_min) * 180.0 / CV_PI;
+    }
+
+    /// @brief 收尾：不管是怎么退出的（采够/按 q/按 ESC），都做一次解算 + 写盘。
+    ///        上一版按 q 直接 break，什么都不输出（实测踩过：采了 64 组按 q 退出后没结果）。
+    void finishRun(const std::string& output, const std::vector<Sample>& samples,
+                   const Options& options, double yaw_span, double pitch_span)
+    {
+        std::cout << "[hand_eye] 收尾：共 " << samples.size() << " 组样本，覆盖 yaw " << yaw_span
+                  << "° / pitch " << pitch_span << "°" << std::endl;
+        if (samples.size() < 8) {
+            std::cout << "[hand_eye] 样本不足 8 组，不出结果（样本帧仍在，可用目录模式离线复算）"
+                      << std::endl;
+            return;
+        }
+        Fit fit;
+        if (!solve(samples, options.fit, fit)) return;
+        double in_sample = 0.0;
+        fit.cross_validate_mm = crossValidate(samples, options.fit, &in_sample);
+        printFit(samples, fit, "[hand_eye] 最终解算：");
+        std::cout << "[hand_eye] R_camera2gimbal = [";
+        for (int row = 0; row < 3; ++row) {
+            for (int column = 0; column < 3; ++column) {
+                std::cout << (row || column ? "," : "") << fit.R(row, column);
+            }
+        }
+        std::cout << "]" << std::endl;
+        std::cout << "[hand_eye] t_camera2gimbal = [" << fit.t[0] << "," << fit.t[1] << ","
+                  << fit.t[2] << "] m" << std::endl;
+        saveIfGood(output, samples, fit);
+    }
+
+    /// @brief 自动采样：板子静止、云台转动，满足判据就记一组；采够覆盖自动解算+写盘。
+    int collectAuto(const std::string& config_dir, const std::string& output, const Options& options)
+    {
+        Hardware hardware;
+        if (!openHardware(hardware, config_dir)) return 1;
+        // 默认也把样本帧存下来：万一中途退出/结果不达标，数据不会丢（可以用目录模式离线复算）。
+        const std::string frame_dir = options.frame_dir.empty() ? "hand_eye_samples"
+                                                                : options.frame_dir;
+        std::system(("mkdir -p " + frame_dir).c_str());
+        std::cout << "[hand_eye] 样本帧会存到 " << frame_dir << "/（{i}.jpg + {i}.yaml）"
                   << std::endl;
-        return 1;
-    }
 
-    // yaw 漂移补偿（同 auto 模式）
-    const auto session_start = std::chrono::steady_clock::now();
-    double drift = yaw_drift_deg_s;
-    if (std::isnan(drift)) {
-        std::cout << "[hand_eye] 先量 yaw 漂移率：请别碰云台 " << drift_seconds << " 秒…" << std::endl;
-        bool pitch_still = false;
-        drift = measureYawDrift(gimbal, drift_seconds, &pitch_still);
-        std::cout << "[hand_eye] yaw 漂移率 = " << drift << " °/s（pitch "
-                  << (pitch_still ? "没动" : "动了，这段可能被碰过") << "）" << std::endl;
-    }
-    const double drift_rad_s = drift * CV_PI / 180.0;
+        std::cout << "[hand_eye] yaw 符号（configs/serial.yaml 的 yaw_sign）= " << hardware.yaw_sign
+                  << std::endl;
+        std::cout << "[hand_eye] 自动采样：标定板（" << hardware.board.pattern << " "
+                  << hardware.board.cols << "x" << hardware.board.rows
+                  << "）摆在画面里**别动**，然后慢慢转云台：yaw 扫一大段（跨度 ≥"
+                  << options.yaw_span_target << "°）、pitch 分几档（≥" << options.pitch_span_target
+                  << "°）。采够 " << options.min_samples << " 组自动收工；窗口提示 OK 时可移动。"
+                  << "想手动补一组：点一下图像窗口再按空格（s=存盘，u=撤销，q=退出）。"
+                  << std::endl;
 
-    std::vector<Sample> samples;
-    cv::Mat frame;
-    uint64_t sequence = 0;
-    double last_yaw = 0.0;
-    double last_pitch = 0.0;
-    int last_detections = 0;
-    double last_distance = 0.0;
-    int preview_frames = 0;
-    std::cout << "[hand_eye] 实时标定：把**标定板静止**摆在画面里（" << board.pattern << " "
-              << board.cols << "x" << board.rows << "），云台在 yaw/pitch 上多转几个角度（至少 "
-              << min_samples << " 组，必须绕两个不同轴）；画面里显示板子重投影 rms，"
-              << "空格=采一组，s=存盘，q=退出" << std::endl;
+        std::vector<Sample> samples;
+        std::deque<cv::Vec3d> recent;
+        constexpr int kRecent = 4;
+        const auto session_start = std::chrono::steady_clock::now();
+        double yaw_reference = 0.0;
+        bool have_reference = false;
+        Fit fit;
+        auto last_status = std::chrono::steady_clock::now();
 
-    // 预览用降采样图：全分辨率每帧"找板 + imshow"在 NUC 上会掉到个位数帧。
-    // 采样那一刻再在**全分辨率**上重解一次 —— 交互流畅、标定精度不打折。
-    constexpr int kPreviewWidth = 640;
-    double preview_scale = 1.0;
-    int preview_errors = 0;
-    auto preview_timer = std::chrono::steady_clock::now();
-    while (true) {
-        FrameTime frame_time;
-        if (!getImageTimed(camera, frame, frame_time, 500) || frame.empty()) continue;
-        ++sequence;
-        const auto state = gimbal.state();
-        io::ImuSample imu;
-        const bool have_imu = use_frame_time_attitude ? gimbal.imuAt(frame_time, imu)
-                                                      : gimbal.latestImu(imu);
-        cv::Matx33d R_wb_now = imu.w != 0.0 ? quaternionToRotation(imu.w, imu.x, imu.y, imu.z)
-                                            : gimbalToBase(state.yaw, state.pitch);
-        if (have_imu) {
-            last_yaw = imu.yaw;
-            last_pitch = imu.pitch;
-        } else if (state.valid) {
-            last_yaw = state.yaw;
-            last_pitch = state.pitch;
-        }
-
-        cv::Mat preview;
-        cv::Mat preview_matrix;
-        if (board_mode && frame.cols > kPreviewWidth) {
-            preview_scale = static_cast<double>(kPreviewWidth) / frame.cols;
-            cv::resize(frame, preview, cv::Size(), preview_scale, preview_scale, cv::INTER_AREA);
-            preview_matrix = camera_matrix.clone();
-            preview_matrix.at<double>(0, 0) *= preview_scale;
-            preview_matrix.at<double>(1, 1) *= preview_scale;
-            preview_matrix.at<double>(0, 2) *= preview_scale;
-            preview_matrix.at<double>(1, 2) *= preview_scale;
-        } else {
-            preview_scale = 1.0;
-            preview = frame;
-            preview_matrix = camera_matrix;
-        }
-
-        // 找板**隔帧跑**：手动对板子不需要每帧都检测，省下的时间全给显示（帧率翻倍）。
-        // 中间帧沿用上一帧结果，画面上的角点不会闪。
-        static bool have_target = false;
-        static cv::Mat rvec;
-        static cv::Mat tvec;
-        static std::vector<cv::Point2f> board_corners;
-        static double board_rms = -1.0;
-        const bool run_detect = !board_mode || (sequence % 2 == 1);
-        const auto before_detect = std::chrono::steady_clock::now();
-        if (board_mode) {
-            if (run_detect) {
-                board_corners.clear();
-                have_target = detectBoard(preview, board, preview_matrix, dist_coeffs,
-                                          board_corners, rvec, tvec, &board_rms,
-                                          /*allow_classic_fallback=*/false);
-                last_detections = have_target ? board.cols * board.rows : 0;
-            }
-        } else {
-            const auto result = source.update(preview, sequence, 0, {},
-                                              auto_aim::TrackerState::LOST,
-                                              /*image_will_be_modified=*/true);
-            const auto_aim::Armor* best = nullptr;
-            double best_area = 0.0;
-            for (const auto& armor : result.armors) {
-                if (!armor.solve_result) continue;
-                const double area = cv::norm(armor.right.top - armor.left.top) *
-                    cv::norm(armor.left.top - armor.left.bottom);
-                if (area > best_area) { best_area = area; best = &armor; }
-            }
-            if (best != nullptr) {
-                have_target = true;
-                rvec = best->rvec.clone();
-                tvec = best->tvec.clone();
-            }
-            last_detections = static_cast<int>(result.armors.size());
-        }
-        const double detect_ms = run_detect
-            ? std::chrono::duration<double, std::milli>(
-                  std::chrono::steady_clock::now() - before_detect).count()
-            : 0.0;
-        last_distance = have_target ? cv::norm(tvec) : 0.0;
-
-        int key = -1;
-        for (const auto& corner : board_corners) {
-            cv::circle(preview, corner, 3, cv::Scalar(0, 255, 0), -1);
-        }
-        cv::putText(preview,
-                    cv::format("samples=%d  board=%d pts  rms=%.2fpx  dist=%.2fm  detect=%.0fms",
-                               static_cast<int>(samples.size()), last_detections, board_rms,
-                               last_distance, detect_ms),
-                    cv::Point(12, 32), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 255), 2);
-        cv::putText(preview,
-                    cv::format("yaw=%+.1f pitch=%+.1f deg  [space]=采集 [s]=存盘 [u]=撤销 [q]=退出",
-                               last_yaw * 180.0 / CV_PI, last_pitch * 180.0 / CV_PI),
-                    cv::Point(12, 68), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 0), 2);
-        cv::imshow("hand_eye_calibrate", preview);
-        key = cv::waitKey(1);
-
-        {
-            const auto now = std::chrono::steady_clock::now();
-            if (std::chrono::duration<double>(now - preview_timer).count() >= 1.0) {
-                preview_timer = now;
-                std::cout << "[hand_eye] 预览帧率 ~" << preview_frames << " fps（detect "
-                          << detect_ms << " ms）" << std::endl;
-                preview_frames = 0;
-            }
-            ++preview_frames;
-        }
-        (void)preview_errors;
-
-        if (key == ' ' && have_target && state.valid) {
-            Sample sample;
-            const double t_s = std::chrono::duration<double>(frame_time - session_start).count();
-            sample.time_s = t_s;
-            sample.yaw = have_imu ? imu.yaw : state.yaw;   // 原始回传角（β 在 solve 里估）
-            sample.pitch = have_imu ? imu.pitch : state.pitch;
-            sample.R_wb = R_wb_now;
-            sample.has_R_wb = have_imu;
-            sample.rvec = rvec.clone();
-            sample.tvec = tvec.clone();
-            // 预览是降采样图；采样这一刻在**全分辨率**上重解，拿最高精度的位姿进样本
-            if (board_mode && preview_scale < 0.999) {
-                std::vector<cv::Point2f> full_corners;
-                cv::Mat full_rvec;
-                cv::Mat full_tvec;
-                double full_rms = -1.0;
-                if (detectBoard(frame, board, camera_matrix, dist_coeffs, full_corners, full_rvec,
-                                full_tvec, &full_rms)) {
-                    sample.rvec = full_rvec.clone();
-                    sample.tvec = full_tvec.clone();
-                    board_rms = full_rms;
+        while (true) {
+            cv::Mat frame;
+            FrameTime frame_time;
+            if (!getImageTimed(hardware.camera, frame, frame_time, 500) || frame.empty()) continue;
+            if (!have_reference) {
+                io::ImuSample pose;
+                if (hardware.gimbal->latestImu(pose)) {
+                    yaw_reference = pose.yaw;
+                    have_reference = true;
                 }
+                continue;
             }
-            samples.push_back(sample);
-            std::cout << "[hand_eye] 采第 " << samples.size() << " 组：板重投影 rms=" << board_rms
-                      << " px  yaw="
-                      << sample.yaw * 180.0 / CV_PI << "° pitch=" << sample.pitch * 180.0 / CV_PI
-                      << "° dist=" << cv::norm(sample.tvec) << " m" << std::endl;
-            if (samples.size() >= static_cast<std::size_t>(min_samples)) {
-                cv::Matx33d R; cv::Vec3d t; double residual = 0.0;
-                if (solve(samples, R, t, residual)) {
-                    std::cout << "[hand_eye] 即时解算（" << samples.size() << " 组）：残差 " << residual
-                              << " mm，t=(" << t[0] << "," << t[1] << "," << t[2] << ") m"
+            const Observation observation =
+                observeAt(hardware, frame, frame_time, yaw_reference);
+
+            // 静止判据：最近 4 帧板心抖动 <8 mm（板的位姿变化直接反映相机在不在动）
+            double jitter_mm = 1e9;
+            if (observation.found && observation.full) {
+                recent.push_back(cv::Vec3d(observation.tvec));
+                while (static_cast<int>(recent.size()) > kRecent) recent.pop_front();
+                if (static_cast<int>(recent.size()) == kRecent) {
+                    jitter_mm = 0.0;
+                    for (const auto& point : recent) {
+                        jitter_mm = std::max(jitter_mm, cv::norm(point - recent.back()) * 1000.0);
+                    }
+                }
+            } else {
+                recent.clear();
+            }
+            const bool still = jitter_mm < 8.0;
+            const bool slow = observation.have_pose;
+
+            // 新鲜度：和已采样本的 yaw/pitch 都差得够远
+            double nearest_deg = 1e9;
+            for (const auto& sample : samples) {
+                const double dy = (sample.yaw - observation.yaw) * 180.0 / CV_PI;
+                const double dp = (sample.pitch - observation.pitch) * 180.0 / CV_PI;
+                nearest_deg = std::min(nearest_deg, std::hypot(dy, dp));
+            }
+            const bool novel = nearest_deg > options.min_step_deg;
+
+            double yaw_span = 0.0, pitch_span = 0.0;
+            spansOf(samples, yaw_span, pitch_span);
+            const char* status = !observation.found    ? "NO BOARD"
+                                  : !observation.full  ? "BOARD CUT"
+                                  : observation.rms > options.max_rms ? "RMS HIGH"
+                                  : !still             ? "MOVING"
+                                  : !novel             ? "SAME POSE"
+                                                       : "OK";
+            const int key = drawPreview(frame, observation, samples, fit, options, yaw_span,
+                                        pitch_span, status);
+            if (key == 'q' || key == 27) {
+                finishRun(output, samples, options, yaw_span, pitch_span);
+                break;
+            }
+            if (key == 'u' && !samples.empty()) {
+                samples.pop_back();
+                std::cout << "[hand_eye] 撤销一组，剩 " << samples.size() << " 组" << std::endl;
+                continue;
+            }
+            if (key == 's') {   // 手动存盘：立刻解算并写 hand_eye.yaml
+                if (samples.size() >= 8 && solve(samples, options.fit, fit)) {
+                    double in_sample = 0.0;
+                    fit.cross_validate_mm = crossValidate(samples, options.fit, &in_sample);
+                    printFit(samples, fit, "[hand_eye] 手动存盘：");
+                    saveIfGood(output, samples, fit);
+                } else {
+                    std::cerr << "[hand_eye] 样本不足（需 ≥8 组）" << std::endl;
+                }
+                continue;
+            }
+            // 手动补采：空格强制记一组（跳过"静止/新鲜"判据），但板子必须完整、rms 别太离谱
+            const bool force = key == ' ';
+            const bool accept = observation.found && observation.full && slow &&
+                                observation.rms < options.max_rms && novel && (force || still);
+            if (accept) {
+                Sample sample;
+                sample.yaw = observation.yaw;
+                sample.pitch = observation.pitch;
+                sample.rvec = observation.rvec.clone();
+                sample.tvec = observation.tvec.clone();
+                sample.time_s = std::chrono::duration<double>(frame_time - session_start).count();
+                samples.push_back(sample);
+                std::cout << "[hand_eye] " << (force ? "手动" : "自动") << "采第 " << samples.size()
+                          << " 组：yaw="
+                          << sample.yaw * 180.0 / CV_PI << "° pitch="
+                          << sample.pitch * 180.0 / CV_PI << "° rms=" << observation.rms
+                          << "px dist=" << cv::norm(sample.tvec) << "m 覆盖(yaw " << yaw_span
+                          << "° / pitch " << pitch_span << "°)" << std::endl;
+                {
+                    const std::string stem = frame_dir + "/" + std::to_string(samples.size());
+                    cv::imwrite(stem + ".jpg", frame);
+                    std::ofstream pose_out(stem + ".yaml");
+                    pose_out << std::setprecision(10) << observation.yaw_raw << " "
+                             << observation.pitch << " " << sample.time_s << "\n";
+                }
+                if (samples.size() >= 8) {
+                    if (solve(samples, options.fit, fit)) {
+                        double in_sample = 0.0;
+                        fit.cross_validate_mm = crossValidate(samples, options.fit, &in_sample);
+                        printFit(samples, fit, "[hand_eye] 即时解算：");
+                        if (samples.size() >= 12 && samples.size() % 4 == 0) {
+                            scanYawScale(samples, options.fit, false);
+                        }
+                        if (sanityProblem(samples, fit).empty() &&
+                            samples.size() >= static_cast<std::size_t>(options.min_samples) &&
+                            yaw_span >= options.yaw_span_target &&
+                            pitch_span >= options.pitch_span_target && saveIfGood(output, samples, fit)) {
+                            std::cout << "[hand_eye] 覆盖够 + 体检通过，标定结束。" << std::endl;
+                            break;
+                        }
+                        if (samples.size() >= static_cast<std::size_t>(options.min_samples) &&
+                            yaw_span >= options.yaw_span_target &&
+                            pitch_span >= options.pitch_span_target) {
+                            std::cout << "[hand_eye] 覆盖够了但这个解没过质检（见上面一行），"
+                                         "继续采样；按 q 退出也会做一次收尾解算。" << std::endl;
+                        }
+                    }
+                }
+            } else {
+                const auto now = std::chrono::steady_clock::now();
+                if (std::chrono::duration<double>(now - last_status).count() >= 3.0) {
+                    last_status = now;
+                    std::cout << "[hand_eye] " << status << "  yaw="
+                              << observation.yaw * 180.0 / CV_PI << "° pitch="
+                              << observation.pitch * 180.0 / CV_PI << "° rms=" << observation.rms
+                              << "px 抖动=" << jitter_mm << "mm 已采 " << samples.size() << " 组"
                               << std::endl;
                 }
             }
-        } else if (key == 'u' && !samples.empty()) {
-            samples.pop_back();
-            std::cout << "[hand_eye] 撤销一组，剩 " << samples.size() << " 组" << std::endl;
-        } else if (key == 's' || key == 'q' || key == 27) {
-            if (samples.size() >= static_cast<std::size_t>(min_samples)) {
-                cv::Matx33d R; cv::Vec3d t; double residual = 0.0;
-                if (solve(samples, R, t, residual)) {
-                    saveIfSane(output, samples, R, t, residual);
-                }
-            } else {
-                std::cerr << "[hand_eye] 只有 " << samples.size() << " 组（需 ≥" << min_samples
-                          << "），不存盘" << std::endl;
-            }
-            break;
         }
+        return 0;
     }
-    return 0;
-}
 
-// ---- 自动采样：云台在动、板子静止时自己记一组，采够覆盖就自己解算+写盘 ----
-
-// ---- 监视模式：只打印"回传角 vs 画面里看板的实际转角"，用来判断 yaw/pitch 通道可不可信 ----
-//
-// 判据：板子静止、相机绕自己转时，画面里板心的横移量 = 真实转角（Δx ≈ f·tan(Δθ)）。
-// 所以每 0.5 s 打一行 yaw/pitch/板心像素，手转云台时对一下：
-//   转 20° 回传 yaw 变 20°、板心横移 f·tan20° ≈ 863 px → yaw 通道可信；
-//   两者对不上（或板心不动而 yaw 变）→ 回传角不是相机的真实朝向，手眼标定没意义。
-int monitorLive(const std::string& config_dir, bool use_frame_time_attitude)
-{
-    const BoardConfig board = loadBoardConfig(config_dir);
-    const YAML::Node camera_file = YAML::LoadFile(config_dir + "/camera.yaml");
-    const YAML::Node serial_file = YAML::LoadFile(config_dir + "/serial.yaml");
-    const std::string camera_name = camera_file["camera"]["name"].as<std::string>("hikcamera");
-    const cv::Mat camera_matrix =
-        auto_aim::readMatFromYaml(camera_file[camera_name]["camera_matrix"]);
-    const cv::Mat dist_coeffs =
-        auto_aim::readMatFromYaml(camera_file[camera_name]["dist_coeffs"]);
-    CameraType camera;
-    if (!camera.init("", camera_file["camera"]["device_index"].as<int>(1))) return 1;
-    if (const YAML::Node hik = camera_file[camera_name]) {
-        camera.setAutoExposure(hik["auto_exposure"].as<bool>(false));
-        camera.setExposureTime(hik["exposure_ms"].as<double>(6.0) * 1000.0);
-        camera.setGain(hik["gain"].as<double>(12.0));
-    }
-    io::Gimbal gimbal(auto_aim::loadSerialConfig(serial_file));
-    if (!gimbal.connected()) {
-        std::cerr << "[monitor] 串口没通" << std::endl;
-        return 1;
-    }
-    std::cout << "#  时刻   yaw°    pitch°   板心x   板心y   距m   板倾斜°   (横移 px 对应的真实转角)"
-              << std::endl;
-    const auto start = std::chrono::steady_clock::now();
-    double first_x = 0.0;
-    double first_yaw = 0.0;
-    bool have_first = false;
-    while (true) {
-        cv::Mat frame;
-        FrameTime frame_time;
-        if (!getImageTimed(camera, frame, frame_time, 500) || frame.empty()) continue;
-        const auto state = gimbal.state();
-        io::ImuSample imu;
-        const bool have_imu = use_frame_time_attitude ? gimbal.imuAt(frame_time, imu)
-                                                      : gimbal.latestImu(imu);
-        const double yaw_now = have_imu ? imu.yaw : state.yaw;
-        const double pitch_now = have_imu ? imu.pitch : state.pitch;
-        std::vector<cv::Point2f> corners;
-        cv::Mat rvec;
-        cv::Mat tvec;
-        double rms = -1.0;
-        const bool found = detectBoard(frame, board, camera_matrix, dist_coeffs, corners, rvec,
-                                      tvec, &rms);
-        double cx = 0.0, cy = 0.0, tilt = 0.0, dist = 0.0;
-        if (found) {
-            cx = corners[0].x;   // 用第 0 个角点比用质心更稳（质心会被板被裁掉影响）
-            cy = corners[0].y;
-            cv::Mat R;
-            cv::Rodrigues(rvec, R);
-            const cv::Mat n = R * (cv::Mat_<double>(3, 1) << 0.0, 0.0, 1.0);
-            tilt = std::acos(std::min(1.0, std::abs(n.at<double>(2)))) * 180.0 / CV_PI;
-            dist = cv::norm(tvec);
-        }
-        const double t = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-        if (found && !have_first) {
-            first_x = cx;
-            first_yaw = yaw_now * 180.0 / CV_PI;
-            have_first = true;
-        }
-        std::printf("%6.1fs %+8.2f %+8.2f %7.0f %7.0f %6.2f %8.1f    ", t,
-                    yaw_now * 180.0 / CV_PI, pitch_now * 180.0 / CV_PI, cx, cy, dist, tilt);
-        if (found && have_first) {
-            const double dx = cx - first_x;
-            const double true_deg = std::atan2(dx, camera_matrix.at<double>(0, 0)) * 180.0 / CV_PI;
-            std::printf("横移 %+6.0f px = 真实转 %+6.2f°  回传变 %+6.2f°  比值 %.2f", dx, true_deg,
-                        yaw_now * 180.0 / CV_PI - first_yaw,
-                        (yaw_now * 180.0 / CV_PI - first_yaw) != 0.0
-                            ? true_deg / (yaw_now * 180.0 / CV_PI - first_yaw)
-                            : 0.0);
-        } else {
-            std::printf("(没找到板)");
-        }
-        std::printf("\n");
-        std::cout.flush();
-        std::this_thread::sleep_for(std::chrono::milliseconds(400));
-    }
-    return 0;
-}
-//
-// 为什么要这个模式：手动模式每组都要在窗口上按一次空格，SSH/无人值守时按不了键。
-// 采样时机由三个条件决定（缺一个就不采）：
-//   ① 本帧板子**完整**在画面里（四边留白 ≥20 px）且重投影 rms < 0.5 px；
-//   ② 最近 4 帧的板位姿几乎不动（平移抖动 <8 mm、转角抖动 <0.5°）——保证"现在静止"；
-//   ③ 这个姿态和已采的每组都差得够远（默认 ≥4°）——保证每组的相对旋转有信息量。
-int collectAuto(const std::string& config_dir, const std::string& output, int min_samples,
-                bool board_mode, double min_step_deg, double yaw_span_target,
-                double pitch_span_target, const std::string& frame_dir,
-                bool use_frame_time_attitude, double yaw_drift_deg_s, double drift_seconds)
-{
-    const BoardConfig board = loadBoardConfig(config_dir);
-    const YAML::Node camera_file = YAML::LoadFile(config_dir + "/camera.yaml");
-    const YAML::Node serial_file = YAML::LoadFile(config_dir + "/serial.yaml");
-
-    const std::string camera_name = camera_file["camera"]["name"].as<std::string>("hikcamera");
-    const YAML::Node intrinsics = camera_file[camera_name];
-    const cv::Mat camera_matrix = auto_aim::readMatFromYaml(intrinsics["camera_matrix"]);
-    const cv::Mat dist_coeffs = auto_aim::readMatFromYaml(intrinsics["dist_coeffs"]);
-
-    CameraType camera;
-    const int device_index = camera_file["camera"]["device_index"].as<int>(1);
-    if (!camera.init("", device_index)) {
-        std::cerr << "[hand_eye] 打不开相机" << std::endl;
-        return 1;
-    }
-    if (const YAML::Node hik = camera_file[camera_name]) {
-        camera.setAutoExposure(hik["auto_exposure"].as<bool>(false));
-        camera.setExposureTime(hik["exposure_ms"].as<double>(6.0) * 1000.0);
-        camera.setGain(hik["gain"].as<double>(12.0));
-    }
-    io::Gimbal gimbal(auto_aim::loadSerialConfig(serial_file));
-    if (!gimbal.connected()) {
-        std::cerr << "[hand_eye] 下位机链路没通（自动模式需要 C 板回传的 yaw/pitch）" << std::endl;
-        return 1;
-    }
-    if (!frame_dir.empty()) std::system(("mkdir -p " + frame_dir).c_str());
-
-    // ---- yaw 漂移补偿：C 板回传的 yaw 是陀螺积分量，静止时自己也以 ~0.2°/s 爬升 ----
-    const auto session_start = std::chrono::steady_clock::now();
-    double drift = yaw_drift_deg_s;
-    if (std::isnan(drift)) {
-        std::cout << "[hand_eye-auto] 先量 yaw 漂移率：请**别碰云台** " << drift_seconds << " 秒…"
-                  << std::endl;
-        bool pitch_still = false;
-        drift = measureYawDrift(gimbal, drift_seconds, &pitch_still);
-        std::cout << "[hand_eye-auto] yaw 漂移率 = " << drift << " °/s（pitch "
-                  << (pitch_still ? "没动，这段云台确实没被碰" : "动了，这段可能被碰过")
-                  << "）；每组的 yaw 会按采样时刻扣掉这一项" << std::endl;
-    } else {
-        std::cout << "[hand_eye-auto] 用命令行给的 yaw 漂移率 " << drift << " °/s" << std::endl;
-    }
-    const double drift_rad_s = drift * CV_PI / 180.0;
-
-    std::cout << "[hand_eye-auto] 标定板（" << board.pattern << " " << board.cols << "x"
-              << board.rows << "）摆在画面里**别动**，然后慢慢转云台：yaw 扫一大段、pitch 分几档。"
-              << "采够 " << min_samples << " 组（yaw 跨度 ≥" << yaw_span_target << "°、pitch ≥"
-              << pitch_span_target << "°）自动收工。" << std::endl;
-
-    struct Pose
+    /// @brief 手动采样：空格采一组、s 存盘、u 撤销、q 退出。
+    int collectLive(const std::string& config_dir, const std::string& output, const Options& options)
     {
-        cv::Mat rvec;
-        cv::Mat tvec;
-    };
-    std::vector<Sample> samples;
-    std::vector<Pose> recent;        // 最近几帧（判"此刻静止"）
-    std::vector<cv::Vec3d> centers;  // 各组板心在底盘系的位置（判"板有没有被动过"）
-    constexpr int kRecentWindow = 4;
-    constexpr double kFullMarginPx = 20.0;
-    constexpr double kRmsLimitPx = 0.5;
-    constexpr double kJitterMm = 8.0;
-    constexpr double kJitterDeg = 0.5;
-    constexpr double kBoardMovedMm = 60.0;
-
-    cv::Mat frame;
-    cv::Matx33d solution_R;
-    cv::Vec3d solution_t;
-    bool have_solution = false;
-    double solution_residual = 0.0;
-    double solution_drift = 0.0;   // 求解器估出的 yaw 漂移率（rad/s）
-    auto last_status = std::chrono::steady_clock::now();
-
-    while (true) {
-        FrameTime frame_time;
-        if (!getImageTimed(camera, frame, frame_time, 500) || frame.empty()) continue;
-        const auto state = gimbal.state();
-        if (!state.valid) continue;
-        // 姿态按**帧到手时刻**取（时间戳插值），而不是"处理完这帧之后"的最新值：
-        // 相机队列 + 检测耗时加起来 10~40 ms，手转 30~60°/s 时就是 1~3° 的姿态错配，
-        // 而这一项在 2.2 m 处会放大成 40~150 mm 的假位移——比我们要测的平移量还大。
-        io::ImuSample imu;
-        const bool have_imu = use_frame_time_attitude ? gimbal.imuAt(frame_time, imu)
-                                                      : gimbal.latestImu(imu);
-        const double yaw_now = have_imu ? imu.yaw : yaw_now;
-        const double pitch_now = have_imu ? imu.pitch : pitch_now;
-        const cv::Matx33d R_wb_now = have_imu
-            ? quaternionToRotation(imu.w, imu.x, imu.y, imu.z)
-            : gimbalToBase(yaw_now, pitch_now);
-        const double attitude_age_ms = have_imu
-            ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
-                                                        frame_time)
-                  .count()
-            : 0.0;
-
-        std::vector<cv::Point2f> corners;
-        cv::Mat rvec;
-        cv::Mat tvec;
-        double rms = -1.0;
-        const auto before_detect = std::chrono::steady_clock::now();
-        const bool found = detectBoard(frame, board, camera_matrix, dist_coeffs, corners, rvec,
-                                      tvec, &rms);
-        const double detect_ms = std::chrono::duration<double, std::milli>(
-            std::chrono::steady_clock::now() - before_detect).count();
-
-        // ① 完整在画面里？
-        bool full = found;
-        if (found) {
-            for (const auto& corner : corners) {
-                if (corner.x < kFullMarginPx || corner.y < kFullMarginPx ||
-                    corner.x > frame.cols - kFullMarginPx || corner.y > frame.rows - kFullMarginPx) {
-                    full = false;
-                    break;
+        Hardware hardware;
+        if (!openHardware(hardware, config_dir)) return 1;
+        const std::string frame_dir =
+            options.frame_dir.empty() ? "hand_eye_samples" : options.frame_dir;
+        std::system(("mkdir -p " + frame_dir).c_str());
+        std::vector<Sample> samples;
+        double yaw_reference = 0.0;
+        bool have_reference = false;
+        Fit fit;
+        double yaw_span = 0.0, pitch_span = 0.0;
+        std::cout << "[hand_eye] 手动采样：先点一下图像窗口（按键只发给被聚焦的窗口），"
+                     "然后 空格=采一组，s=存盘，u=撤销，q=退出" << std::endl;
+        while (true) {
+            cv::Mat frame;
+            FrameTime frame_time;
+            if (!getImageTimed(hardware.camera, frame, frame_time, 500) || frame.empty()) continue;
+            if (!have_reference) {
+                io::ImuSample pose;
+                if (hardware.gimbal->latestImu(pose)) {
+                    yaw_reference = pose.yaw;
+                    have_reference = true;
                 }
+                continue;
             }
-        }
-
-        // ② 现在静止？（最近 kRecentWindow 帧板位姿的抖动）
-        double jitter_mm = 1e9;
-        double jitter_deg = 1e9;
-        if (found && full) {
-            recent.push_back({rvec.clone(), tvec.clone()});
-            if (static_cast<int>(recent.size()) > kRecentWindow) recent.erase(recent.begin());
-            if (static_cast<int>(recent.size()) >= 2) {
-                jitter_mm = 0.0;
-                jitter_deg = 0.0;
-                const auto& reference = recent.back();
-                for (const auto& pose : recent) {
-                    jitter_mm = std::max(jitter_mm, cv::norm(pose.tvec - reference.tvec) * 1000.0);
-                    cv::Mat R1, R2, delta;
-                    cv::Rodrigues(pose.rvec, R1);
-                    cv::Rodrigues(reference.rvec, R2);
-                    cv::Rodrigues(R1 * R2.t(), delta);
-                    jitter_deg = std::max(jitter_deg, cv::norm(delta) * 180.0 / CV_PI);
+            const Observation observation = observeAt(hardware, frame, frame_time, yaw_reference);
+            spansOf(samples, yaw_span, pitch_span);
+            const char* status = !observation.found ? "NO BOARD"
+                                  : !observation.full ? "BOARD CUT"
+                                                      : "READY";
+            const int key = drawPreview(frame, observation, samples, fit, options, yaw_span,
+                                        pitch_span, status);
+            if (key == 'q' || key == 27) {
+                finishRun(output, samples, options, yaw_span, pitch_span);
+                break;
+            }
+            if (key == 'u' && !samples.empty()) {
+                samples.pop_back();
+                std::cout << "[hand_eye] 撤销一组，剩 " << samples.size() << " 组" << std::endl;
+                continue;
+            }
+            if (key == ' ' && observation.found && observation.full && observation.have_pose &&
+                observation.rms < options.max_rms) {
+                Sample sample;
+                sample.yaw = observation.yaw;
+                sample.pitch = observation.pitch;
+                sample.rvec = observation.rvec.clone();
+                sample.tvec = observation.tvec.clone();
+                samples.push_back(sample);
+                {
+                    const std::string stem = frame_dir + "/" + std::to_string(samples.size());
+                    cv::imwrite(stem + ".jpg", frame);
+                    std::ofstream pose_out(stem + ".yaml");
+                    pose_out << std::setprecision(10) << observation.yaw_raw << " "
+                             << observation.pitch << " " << sample.time_s << "\n";
                 }
-            }
-        } else {
-            recent.clear();
-        }
-        const bool still = static_cast<int>(recent.size()) >= kRecentWindow && jitter_mm < kJitterMm &&
-                           jitter_deg < kJitterDeg;
-        const bool slow = std::abs(state.yaw_vel) < 0.15 && std::abs(state.pitch_vel) < 0.15;
-
-        // ③ 姿态够不够新鲜？
-        double nearest_deg = 1e9;
-        for (const auto& sample : samples) {
-            const double dy = (sample.yaw - yaw_now) * 180.0 / CV_PI;
-            const double dp = (sample.pitch - pitch_now) * 180.0 / CV_PI;
-            nearest_deg = std::min(nearest_deg, std::hypot(dy, dp));
-        }
-        const bool novel = nearest_deg > min_step_deg;
-
-        // 板有没有被移动过：用当前解把板心投回底盘系，看它离中位值多远。
-        // 注意：只有在"当前解已经通过体检"时这个判据才有意义——解本身是垃圾的时候，
-        // 投回去的点当然乱飞。所以垃圾解阶段只警告、不拦采样，否则会死锁在一组上解不出来。
-        bool board_moved = false;
-        double moved_mm = 0.0;
-        const bool solution_sane = have_solution && sanityProblem(samples, solution_R, solution_t).empty();
-        if (have_solution && solution_sane && found && full) {
-            const cv::Vec3d center = R_wb_now *
-                                     (solution_R * cv::Vec3d(tvec) + solution_t);
-            cv::Vec3d median(0, 0, 0);
-            for (const auto& c : centers) median += c;
-            if (!centers.empty()) {
-                median *= 1.0 / static_cast<double>(centers.size());
-                moved_mm = cv::norm(center - median) * 1000.0;
-                board_moved = moved_mm > kBoardMovedMm;
-            }
-        }
-        // 板相对相机的倾斜角 + 距离：这两个直接决定标定精度（板越正对相机，PnP 的姿态越不灵）
-        double board_tilt_deg = 0.0;
-        double board_dist_m = 0.0;
-        if (found) {
-            cv::Mat R_cb;
-            cv::Rodrigues(rvec, R_cb);
-            const cv::Mat normal = R_cb * (cv::Mat_<double>(3, 1) << 0.0, 0.0, 1.0);
-            board_tilt_deg = std::acos(std::min(1.0, std::abs(normal.at<double>(2)))) * 180.0 / CV_PI;
-            board_dist_m = cv::norm(tvec);
-        }
-
-        // 预览：画点 + 状态
-        cv::Mat display = frame.clone();   // 画在副本上，原图要留给"存采样帧"
-        for (const auto& corner : corners) {
-            cv::circle(display, corner, 4, full ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 165, 255),
-                       -1);
-        }
-        double yaw_span = 0.0;
-        double pitch_span = 0.0;
-        if (!samples.empty()) {
-            double yw_min = 1e9, yw_max = -1e9, pt_min = 1e9, pt_max = -1e9;
-            for (const auto& sample : samples) {
-                yw_min = std::min(yw_min, sample.yaw);
-                yw_max = std::max(yw_max, sample.yaw);
-                pt_min = std::min(pt_min, sample.pitch);
-                pt_max = std::max(pt_max, sample.pitch);
-            }
-            yaw_span = (yw_max - yw_min) * 180.0 / CV_PI;
-            pitch_span = (pt_max - pt_min) * 180.0 / CV_PI;
-        }
-        cv::putText(display,
-                    cv::format("AUTO samples=%d  rms=%.2fpx  dist=%.2fm  detect=%.0fms",
-                               static_cast<int>(samples.size()), rms, found ? cv::norm(tvec) : 0.0,
-                               detect_ms),
-                    cv::Point(16, 40), cv::FONT_HERSHEY_SIMPLEX, 0.9,
-                    found ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 0, 255), 2);
-        cv::putText(display,
-                    cv::format("yaw=%+.1f pitch=%+.1f (span %.1f/%.1f)  tilt=%.0f° d=%.2fm  %s",
-                               yaw_now * 180.0 / CV_PI, pitch_now * 180.0 / CV_PI, yaw_span,
-                               pitch_span, board_tilt_deg, board_dist_m,
-                               !found ? "找板中" : (!full ? "板要完整入画" : (still && slow ? "静止，可采"
-                                                                                          : "转动中"))),
-                    cv::Point(16, 80), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 255), 2);
-        if (found) {
-            const char* hint = board_tilt_deg < 20.0 ? "板太正对相机：斜 30° 摆（姿态精度差 3~5 倍）"
-                                                     : (board_dist_m > 1.6 ? "板有点远：挪到 1.0~1.5 m"
-                                                                           : "摆位 OK");
-            cv::putText(display, hint, cv::Point(16, 160), cv::FONT_HERSHEY_SIMPLEX, 0.7,
-                        board_tilt_deg < 20.0 ? cv::Scalar(0, 0, 255) : cv::Scalar(0, 255, 0), 2);
-        }
-        if (have_solution) {
-            cv::putText(display,
-                        cv::format("residual=%.1fmm  t=(%.3f,%.3f,%.3f)m", solution_residual,
-                                   solution_t[0], solution_t[1], solution_t[2]),
-                        cv::Point(16, 120), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(255, 200, 0), 2);
-        }
-        cv::resize(display, display, cv::Size(), 0.5, 0.5);
-        cv::imshow("hand_eye_auto", display);
-        cv::waitKey(1);
-
-        const bool accept = found && full && rms < kRmsLimitPx && still && slow && novel &&
-                            !board_moved;
-        if (accept) {
-            Sample sample;
-            const double t_s =
-                std::chrono::duration<double>(frame_time - session_start).count();
-            sample.time_s = t_s;
-            sample.yaw = yaw_now;      // 原始回传角；yaw 漂移由求解器估的 β 统一扣（见 solve）
-            sample.pitch = pitch_now;
-            sample.rvec = rvec.clone();
-            sample.tvec = tvec.clone();
-            sample.R_wb = R_wb_now;
-            sample.has_R_wb = have_imu;
-            samples.push_back(sample);
-            std::cout << "[hand_eye-auto] 采第 " << samples.size() << " 组：yaw="
-                      << sample.yaw * 180.0 / CV_PI << "° pitch=" << sample.pitch * 180.0 / CV_PI
-                      << "° rms=" << rms << "px dist=" << cv::norm(sample.tvec)
-                      << "m 覆盖(yaw " << yaw_span << "° / pitch " << pitch_span << "°)" << std::endl;
-            if (!frame_dir.empty()) {
-                const int index = static_cast<int>(samples.size());
-                cv::imwrite(frame_dir + "/" + std::to_string(index) + ".jpg", frame);
-                std::ofstream pose_out(frame_dir + "/" + std::to_string(index) + ".yaml");
-                io::ImuSample imu;
-                // 一并存 C 板回传的四元数：电机角(yaw/pitch)有齿轮/皮带背隙，四元数是 IMU
-                // 直测姿态。两组姿态谁更贴合相机实际转动，事后一比就知道能不能拿来解外参。
-                pose_out << sample.yaw << " " << sample.pitch;
-                if (gimbal.latestImu(imu)) {
-                    pose_out << " " << imu.w << " " << imu.x << " " << imu.y << " " << imu.z;
-                }
-                pose_out << " " << sample.time_s << "\n";
-            }
-            have_solution = solve(samples, solution_R, solution_t, solution_residual, drift_rad_s,
-                                  &solution_drift);
-            if (have_solution) {
-                const cv::Vec3d center = attitudeOf(sample) *
-                                         (solution_R * cv::Vec3d(sample.tvec) + solution_t);
-                centers.push_back(center);
-                std::cout << "[hand_eye-auto] 即时解算（" << samples.size() << " 组）：残差 "
-                          << solution_residual << " mm，t=(" << solution_t[0] << ","
-                          << solution_t[1] << "," << solution_t[2] << ") m，yaw 漂移 "
-                          << solution_drift * 180.0 / CV_PI << " °/s" << std::endl;
-                saveIfSane(output, samples, solution_R, solution_t, solution_residual,
-                           solution_drift);
-                const std::string problem = sanityProblem(samples, solution_R, solution_t);
-                // 收工条件：样本够多（平移项要靠大量样本把 ~1° 的姿态噪声平均掉，8~10 组
-                // 连 6 参数都能过拟合出 0 残差，说明不了任何问题）+ 覆盖够宽 + 体检过。
-                if (problem.empty() && samples.size() >= static_cast<std::size_t>(min_samples) &&
-                    yaw_span >= yaw_span_target && pitch_span >= pitch_span_target &&
-                    solution_residual < 15.0) {
-                    std::cout << "[hand_eye-auto] 覆盖够了且体检通过，已写 " << output
-                              << "；标定结束。" << std::endl;
-                    break;
-                }
-                if (samples.size() >= static_cast<std::size_t>(min_samples)) {
-                    std::cout << "[hand_eye-auto] 样本够了但还没收敛（" << (problem.empty() ? "" : problem)
-                              << " 残差 " << solution_residual << " mm）——请继续多转几组、"
-                                 "板子斜一点、挪近一点" << std::endl;
-                }
-            }
-        } else {
-            const auto now = std::chrono::steady_clock::now();
-            if (std::chrono::duration<double>(now - last_status).count() >= 2.0) {
-                last_status = now;
-                std::cout << "[hand_eye-auto] 板=" << (found ? (full ? "完整" : "被裁") : "没找到")
-                          << " rms=" << rms << "px 静止=" << (still ? "是" : "否")
-                          << "(抖 " << jitter_mm << "mm/" << jitter_deg << "°) 转速="
-                          << std::abs(state.yaw_vel) * 180.0 / CV_PI << "°/s 新鲜="
-                          << (novel ? "是" : "否") << " 已采 " << samples.size() << " 组"
-                          << (board_moved ? "  ⚠板子动过了(" + std::to_string(moved_mm) + "mm)"
-                                          : "")
+                std::cout << "[hand_eye] " << "手动" << "采第 " << samples.size()
+                          << " 组：yaw="
+                          << sample.yaw * 180.0 / CV_PI << "° pitch="
+                          << sample.pitch * 180.0 / CV_PI << "° rms=" << observation.rms << "px"
                           << std::endl;
+                if (samples.size() >= 8 && solve(samples, options.fit, fit)) {
+                    double in_sample = 0.0;
+                    fit.cross_validate_mm = crossValidate(samples, options.fit, &in_sample);
+                    printFit(samples, fit, "[hand_eye] 即时解算：");
+                }
+                continue;
+            }
+            if (key == 's') {
+                if (samples.size() >= 8 && solve(samples, options.fit, fit)) {
+                    double in_sample = 0.0;
+                    fit.cross_validate_mm = crossValidate(samples, options.fit, &in_sample);
+                    printFit(samples, fit, "[hand_eye] 解算：");
+                    saveIfGood(output, samples, fit);
+                } else {
+                    std::cerr << "[hand_eye] 样本不足（需 ≥8 组）" << std::endl;
+                }
             }
         }
+        return 0;
     }
-    return 0;
-}
+
+    /// @brief 对表模式：把"画面里测到的真实转角"和"回传角的变化"逐行对比，比值≈1 才说明回传角可信。
+    int monitorLive(const std::string& config_dir)
+    {
+        Hardware hardware;
+        if (!openHardware(hardware, config_dir)) return 1;
+        std::cout << "#  时刻   回传yaw°  回传pitch°  四元数yaw°  板心x  板心y  距m   真实转角°  回传变化°  比值"
+                  << std::endl;
+        const auto start = std::chrono::steady_clock::now();
+        double first_x = 0.0, first_yaw = 0.0, reference = 0.0;
+        bool have_first = false;
+        while (true) {
+            cv::Mat frame;
+            FrameTime frame_time;
+            if (!getImageTimed(hardware.camera, frame, frame_time, 500) || frame.empty()) continue;
+            io::ImuSample pose;
+            if (!hardware.gimbal->imuAt(frame_time, pose)) continue;
+            if (!have_first) {
+                reference = pose.yaw;
+                have_first = true;
+            }
+            const Observation observation = observeAt(hardware, frame, frame_time, reference);
+            double quad_yaw = 0.0;
+            {
+                const double w = pose.w, qx = pose.x, qy = pose.y, qz = pose.z;
+                const double r10 = 2.0 * (qx * qy + qz * w);
+                const double r00 = 1.0 - 2.0 * (qy * qy + qz * qz);
+                quad_yaw = std::atan2(r10, r00) * 180.0 / CV_PI;
+            }
+            const double elapsed =
+                std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+            std::printf("%6.1fs %+9.2f %+11.2f %+11.2f", elapsed,
+                        observation.yaw * 180.0 / CV_PI, observation.pitch * 180.0 / CV_PI,
+                        quad_yaw);
+            if (observation.found) {
+                const double x = observation.corners.front().x;
+                if (first_x == 0.0 && first_yaw == 0.0) {
+                    first_x = x;
+                    first_yaw = observation.yaw * 180.0 / CV_PI;
+                }
+                const double delta_x = x - first_x;
+                const double true_deg =
+                    std::atan2(delta_x, hardware.camera_matrix.at<double>(0, 0)) * 180.0 / CV_PI;
+                const double reported = observation.yaw * 180.0 / CV_PI - first_yaw;
+                std::printf(" %6.0f %6.0f %5.2f %11.2f %10.2f %6.2f", x, observation.corners.front().y,
+                            observation.dist_m, true_deg, reported,
+                            std::abs(reported) > 0.5 ? true_deg / reported : 0.0);
+            } else {
+                std::printf("  (no board)");
+            }
+            std::printf("\n");
+            std::cout.flush();
+            std::this_thread::sleep_for(std::chrono::milliseconds(400));
+        }
+        return 0;
+    }
 #endif
+
+    /// @brief 合成数据自检：(a) 精确恢复；(b) yaw ±180 折返；(c) yaw 标度错误可被解出来。
+    int selftest()
+    {
+        // 真实设置
+        const cv::Matx33d R_true = [] {
+            cv::Matx33d R;
+            cv::Rodrigues(cv::Vec3d(0.03, -0.02, 0.15), R);
+            return R;
+        }();
+        const cv::Vec3d t_true(0.03, -0.01, 0.05);
+        const cv::Vec3d board(1.2, 0.35, -1.8);      // 靶标要离开 yaw 轴，否则绕 z 转不可观测
+
+        auto makeSamples = [&](double yaw_scale, double yaw_offset, bool wrap) {
+            std::vector<Sample> samples;
+            for (int i = 0; i < 16; ++i) {
+                const double yaw = (-14.0 + 28.0 * i / 15.0) * CV_PI / 180.0;
+                const double pitch = (-8.0 + 16.0 * (i % 4) / 3.0) * CV_PI / 180.0;
+                const cv::Matx33d attitude = gimbalToBase(yaw, pitch);
+                Sample sample;
+                sample.yaw = yaw_scale * yaw + yaw_offset;   // C 板回传的角（可能带标度/零偏）
+                sample.pitch = pitch;
+                if (wrap) sample.yaw = wrapPi(sample.yaw);   // 编码器在 ±180° 折返
+                sample.tvec = (cv::Mat_<double>(3, 1) <<
+                    (R_true.t() * (attitude.t() * board - t_true))[0],
+                    (R_true.t() * (attitude.t() * board - t_true))[1],
+                    (R_true.t() * (attitude.t() * board - t_true))[2]);
+                samples.push_back(sample);
+            }
+            unwrapSamples(samples);
+            return samples;
+        };
+
+        // (a) 基本恢复
+        {
+            auto samples = makeSamples(1.0, 0.0, false);
+            Fit fit;
+            if (!solve(samples, {}, fit)) return 1;
+            const double translation_error = cv::norm(fit.t - t_true) * 1000.0;
+            cv::Mat delta;
+            cv::Rodrigues(fit.R * R_true.t(), delta);
+            std::printf("自检(a) 基本恢复：残差 %.2f mm，平移误差 %.1f mm，转动误差 %.2f°，|t|=%.3f m\n",
+                        fit.residual_mm, translation_error,
+                        cv::norm(cv::Vec3d(delta)) * 180.0 / CV_PI, cv::norm(fit.t));
+            if (fit.residual_mm > 1.0 || translation_error > 10.0) {
+                std::printf("FAILED: 基本恢复没过\n");
+                return 1;
+            }
+        }
+        // (b) yaw ±180 折返
+        {
+            auto samples = makeSamples(1.0, 176.0 * CV_PI / 180.0, true);   // 让 yaw 跨越 ±180
+            Fit fit;
+            if (!solve(samples, {}, fit)) return 1;
+            std::printf("自检(b) yaw 折返(偏移 176°)：残差 %.2f mm，|t|=%.3f m\n", fit.residual_mm,
+                        cv::norm(fit.t));
+            if (fit.residual_mm > 1.0) {
+                std::printf("FAILED: 折返解缠没处理对\n");
+                return 1;
+            }
+        }
+        // (c) yaw 标度错误（0.8 倍）+ 把它解出来
+        {
+            auto samples = makeSamples(0.8, 0.0, false);
+            Fit fit;
+            FitOptions options;
+            options.fit_yaw_scale = true;
+            if (!solve(samples, options, fit)) return 1;
+            // 注意语义：解出来的是**修正系数** κ（gimbalToBase(κ·回传角)）。回传侧少乘了 0.8，
+            // 所以修正系数应当 ≈ 1/0.8 = 1.25；换成"回传侧实际标度"就是 1/κ ≈ 0.80。
+            std::printf("自检(c) 回传 yaw 标度 0.8：修正系数解出 %.3f（=回传标度 %.3f），残差 %.2f mm\n",
+                        fit.yaw_scale, 1.0 / fit.yaw_scale, fit.residual_mm);
+            if (std::abs(fit.yaw_scale - 1.25) > 0.05 || fit.residual_mm > 1.0) {
+                std::printf("FAILED: 标度没解出来\n");
+                return 1;
+            }
+            // 不放开标度时应当解不出来（残差大）→ 说明这条诊断是有意义的
+            Fit fixed;
+            if (!solve(samples, {}, fixed)) return 1;
+            std::printf("        不放开标度时残差 %.1f mm（应当明显变大）\n", fixed.residual_mm);
+            if (fixed.residual_mm < 5.0) {
+                std::printf("FAILED: 标度错误居然没被发现\n");
+                return 1;
+            }
+        }
+        std::printf("自检全部通过\n");
+        return 0;
+    }
+
+}  // namespace
 
 int main(int argc, char* argv[])
 {
-    cv::ocl::setUseOpenCL(false);   // 工具不需要 OpenCL；macOS 上它的缓存会在检测时报错刷屏
+    cv::ocl::setUseOpenCL(false);   // macOS 上 OpenCL 缓存会刷屏；标定用不到
+
     std::string folder;
     std::string config_dir = "configs";
     std::string output = "hand_eye.yaml";
-    int min_samples = 8;
+    Options options;
     bool live = false;
     bool auto_mode = false;
     bool monitor = false;
-    bool use_frame_time_attitude = true;   // 默认按帧时间戳取姿态（--attitude latest 可退回旧行为）
-    double yaw_drift_deg_s = std::nan("");  // --yaw-drift；默认自动量（NaN = 自动）
-    double drift_seconds = 6.0;             // 自动量漂移率的时长
-    double min_step_deg = 4.0;
-    double yaw_span_target = 15.0;
-    double pitch_span_target = 10.0;
-    std::string frame_dir;
-    std::string target = "board";   // board（默认，精度高）| armor（应急）
+
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--help" || arg == "-h") {
             std::cout << "用法:\n"
-                         "  hand_eye_calibrate --live                    现场实时标定（相机+串口+"
-                         "标定板，空格采样/s 存盘）\n"
-                         "  hand_eye_calibrate --auto                    自动采样：板子静止、云台转动时"
-                         "自动记，采够覆盖自动解算+写盘（SSH 无人值守用这个）\n"
-                         "  hand_eye_calibrate <文件夹> [--target board|armor]  离线复算"
-                         "（{i}.jpg + {i}.yaml）\n"
-                         "  hand_eye_calibrate --selftest                求解器自检（无需硬件）\n"
-                         "选项：--config-dir configs  --out hand_eye.yaml  --min-samples 8\n"
-                         "      --min-step 4       自动模式：两组姿态至少差多少度才记\n"
-                         "      --yaw-span 15 --pitch-span 10   自动模式：覆盖到什么程度就收工\n"
-                         "      --save-frames <目录>  自动模式：把采到的原图+yaw/pitch 存下来，"
-                         "方便事后离线复核\n"
-                         "      --attitude ts|latest  姿态取法：ts=按帧时间戳插值（默认，推荐）；"
-                         "latest=用最新值（对比用）\n"
-                         "      --yaw-drift auto|<°/s>  yaw 漂移率：C 板回传的 yaw 是陀螺积分量，"
-                         "静止时自己会以 ~0.2°/s 爬升；auto=开跑前量 6 秒（默认）\n"
-                         "      --drift-seconds 6      自动量漂移率的时长（这段时间别碰云台）\n";
+                         "  hand_eye_calibrate --auto                 自动采样（板子静止、云台转动，"
+                         "采够自动解算+写盘）\n"
+                         "  hand_eye_calibrate --live                 手动：空格采样 / s 存盘 /"
+                         " u 撤销 / q 退出\n"
+                         "  hand_eye_calibrate --monitor              对表：画面里的真实转角 vs 回传角\n"
+                         "  hand_eye_calibrate <样本目录>              离线复算 + 交叉验证\n"
+                         "  hand_eye_calibrate --selftest             合成数据自检\n"
+                         "选项：\n"
+                         "  --config-dir configs  --out hand_eye.yaml\n"
+                         "  --min-samples 20 --min-step 3 --yaw-span 25 --pitch-span 12\n"
+                         "  --save-frames <目录>      自动模式把样本帧存下来\n"
+                         "  --yaw-scale <k>           给回传 yaw 乘固定标度 k（含符号；标度扫描会给出建议）\n"
+                         "  --fit-yaw-scale           把 yaw 标度当未知量解（**噪声下会退化，"
+                         "只建议在无噪合成数据上用**；查标度请用扫描）\n"
+                         "  --fit-pitch-scale         同上（pitch）\n";
             return 0;
         }
         if (arg == "--selftest") return selftest();
-        else if (arg == "--live") live = true;
         else if (arg == "--auto") auto_mode = true;
+        else if (arg == "--live") live = true;
         else if (arg == "--monitor") monitor = true;
-        else if (arg == "--yaw-drift" && i + 1 < argc) {
-            const std::string value = argv[++i];
-            yaw_drift_deg_s = (value == "auto") ? std::nan("") : std::atof(value.c_str());
-        } else if (arg == "--drift-seconds" && i + 1 < argc) drift_seconds = std::atof(argv[++i]);
-        else if (arg == "--attitude" && i + 1 < argc) {
-            const std::string mode = argv[++i];
-            use_frame_time_attitude = (mode != "latest");
-        }
-        else if (arg == "--min-step" && i + 1 < argc) min_step_deg = std::atof(argv[++i]);
-        else if (arg == "--yaw-span" && i + 1 < argc) yaw_span_target = std::atof(argv[++i]);
-        else if (arg == "--pitch-span" && i + 1 < argc) pitch_span_target = std::atof(argv[++i]);
-        else if (arg == "--save-frames" && i + 1 < argc) frame_dir = argv[++i];
-        else if (arg == "--target" && i + 1 < argc) target = argv[++i];
-        else if (arg == "--min-samples" && i + 1 < argc) min_samples = std::atoi(argv[++i]);
+        else if (arg == "--yaw-scale" && i + 1 < argc) options.yaw_scale_fixed = std::atof(argv[++i]);
+        else if (arg == "--max-rms" && i + 1 < argc) options.max_rms = std::atof(argv[++i]);
+        else if (arg == "--fit-yaw-scale") options.fit.fit_yaw_scale = true;
+        else if (arg == "--fit-pitch-scale") options.fit.fit_pitch_scale = true;
+        else if (arg == "--min-samples" && i + 1 < argc) options.min_samples = std::atoi(argv[++i]);
+        else if (arg == "--min-step" && i + 1 < argc) options.min_step_deg = std::atof(argv[++i]);
+        else if (arg == "--yaw-span" && i + 1 < argc) options.yaw_span_target = std::atof(argv[++i]);
+        else if (arg == "--pitch-span" && i + 1 < argc)
+            options.pitch_span_target = std::atof(argv[++i]);
+        else if (arg == "--save-frames" && i + 1 < argc) options.frame_dir = argv[++i];
         else if (arg == "--config-dir" && i + 1 < argc) config_dir = argv[++i];
         else if (arg == "--out" && i + 1 < argc) output = argv[++i];
         else if (folder.empty()) folder = arg;
     }
-    if (live) {
-#if defined(ULTRA_VISION_USE_HIK_CAMERA) || defined(ULTRA_VISION_USE_GALAXY_CAMERA)
-        return collectLive(config_dir, output, min_samples, target != "armor",
-                           use_frame_time_attitude, yaw_drift_deg_s, drift_seconds);
-#else
-        std::cerr << "--live 需要带相机 SDK 构建（本构建没有相机驱动）" << std::endl;
-        return 2;
-#endif
-    }
-    if (auto_mode) {
-#if defined(ULTRA_VISION_USE_HIK_CAMERA) || defined(ULTRA_VISION_USE_GALAXY_CAMERA)
-        return collectAuto(config_dir, output, std::max(min_samples, 12), target != "armor",
-                           min_step_deg, yaw_span_target, pitch_span_target, frame_dir,
-                           use_frame_time_attitude, yaw_drift_deg_s, drift_seconds);
-#else
-        std::cerr << "--auto 需要带相机 SDK 构建（本构建没有相机驱动）" << std::endl;
-        return 2;
-#endif
-    }
+
     if (monitor) {
 #if defined(ULTRA_VISION_USE_HIK_CAMERA) || defined(ULTRA_VISION_USE_GALAXY_CAMERA)
-        return monitorLive(config_dir, use_frame_time_attitude);
+        return monitorLive(config_dir);
 #else
-        std::cerr << "--monitor 需要带相机 SDK 构建" << std::endl;
+        std::cerr << "--monitor 需要带相机 SDK 的构建" << std::endl;
+        return 2;
+#endif
+    }
+    if (auto_mode || live) {
+#if defined(ULTRA_VISION_USE_HIK_CAMERA) || defined(ULTRA_VISION_USE_GALAXY_CAMERA)
+        return auto_mode ? collectAuto(config_dir, output, options)
+                         : collectLive(config_dir, output, options);
+#else
+        std::cerr << "--auto/--live 需要带相机 SDK 的构建" << std::endl;
         return 2;
 #endif
     }
     if (folder.empty()) {
-        std::cerr << "用法: hand_eye_calibrate --live | <数据文件夹> | --selftest "
-                     "[--config-dir configs] [--out hand_eye.yaml] [--min-samples 8] "
-                     "[--target board|armor]\n";
+        std::cerr << "给个样本目录，或 --auto / --live / --monitor / --selftest（--help 看用法）"
+                  << std::endl;
         return 2;
     }
 
-    // 用我们自己的检测前端（和真机同一条链）在每张图上找静止装甲板 → PnP 位姿
-    const YAML::Node detector_file = YAML::LoadFile(config_dir + "/detector.yaml");
-    const YAML::Node tracker_file = YAML::LoadFile(config_dir + "/tracker.yaml");
-    const YAML::Node camera_file = YAML::LoadFile(config_dir + "/camera.yaml");
-    auto_aim::ArmorSourceConfig source_cfg;
-    source_cfg.classical = auto_aim::loadDetectorConfig(detector_file);
-    source_cfg.pnp = auto_aim::loadPnpGeometry(tracker_file);
-#ifdef ULTRA_VISION_USE_OPENVINO
-    source_cfg.use_neural = auto_aim::neuralDetectorEnabled(detector_file);
-    source_cfg.neural = auto_aim::loadNeuralDetectorConfig(detector_file, config_dir);
-#endif
-    const std::string camera_name =
-        camera_file["camera"]["name"].as<std::string>("hikcamera");
-    const YAML::Node intrinsics = camera_file[camera_name];
-    const cv::Mat camera_matrix = auto_aim::readMatFromYaml(intrinsics["camera_matrix"]);
-    const cv::Mat dist_coeffs = auto_aim::readMatFromYaml(intrinsics["dist_coeffs"]);
-    auto_aim::ArmorSource source(source_cfg, camera_matrix, dist_coeffs);
-
+    // ---- 离线复算 ----
     const BoardConfig board = loadBoardConfig(config_dir);
-    const bool board_mode = target != "armor";
-    if (board_mode) {
-        std::cout << "[hand_eye] 标定物：标定板（" << board.pattern << " " << board.cols << "x"
-                  << board.rows << "，方格 " << board.square_mm << "mm）" << std::endl;
-    } else {
-        std::cout << "[hand_eye] 标定物：装甲板（应急模式）" << std::endl;
-    }
+    const YAML::Node camera_file = YAML::LoadFile(config_dir + "/camera.yaml");
+    const std::string camera_name = camera_file["camera"]["name"].as<std::string>("hikcamera");
+    const cv::Mat camera_matrix = auto_aim::readMatFromYaml(camera_file[camera_name]["camera_matrix"]);
+    const cv::Mat dist_coeffs = auto_aim::readMatFromYaml(camera_file[camera_name]["dist_coeffs"]);
 
     std::vector<Sample> samples;
     for (int index = 1;; ++index) {
         const std::string image_path = folder + "/" + std::to_string(index) + ".jpg";
         const std::string pose_path = folder + "/" + std::to_string(index) + ".yaml";
-        if (!std::ifstream(image_path).good()) break;   // 先判存在，避免 imread 刷警告
+        if (!std::ifstream(image_path).good()) break;
         const cv::Mat image = cv::imread(image_path);
         if (image.empty()) break;
         std::ifstream pose_in(pose_path);
         if (!pose_in) {
-            std::cerr << "[hand_eye] 缺 " << pose_path << "（应由 tools/calibrate_capture 生成）"
-                      << std::endl;
+            std::cerr << "[hand_eye] 缺 " << pose_path << "（自动模式会一起存）" << std::endl;
             break;
         }
-        double yaw = 0.0;
-        double pitch = 0.0;
-        pose_in >> yaw >> pitch;
-
         Sample sample;
-        sample.yaw = yaw;
-        sample.pitch = pitch;
-        if (board_mode) {
-            std::vector<cv::Point2f> corners;
-            double rms = -1.0;
-            if (!detectBoard(image, board, camera_matrix, dist_coeffs, corners, sample.rvec,
-                             sample.tvec, &rms)) {
-                std::cout << "[hand_eye] 第 " << index << " 张没找到标定板，跳过" << std::endl;
-                continue;
-            }
-            std::cout << "[hand_eye] 第 " << index << " 张：板 " << corners.size()
-                      << " 点，重投影 rms=" << rms << " px，距离 " << cv::norm(sample.tvec)
-                      << " m" << std::endl;
-        } else {
-            const auto result = source.update(image, static_cast<uint64_t>(index), 0, {},
-                                              auto_aim::TrackerState::LOST, false);
-            const auto_aim::Armor* best = nullptr;
-            double best_area = 0.0;
-            for (const auto& armor : result.armors) {
-                if (!armor.solve_result) continue;
-                const double area = cv::norm(armor.right.top - armor.left.top) *
-                    cv::norm(armor.left.top - armor.left.bottom);
-                if (area > best_area) {
-                    best_area = area;
-                    best = &armor;
-                }
-            }
-            if (best == nullptr || !best->solve_result) {
-                std::cout << "[hand_eye] 第 " << index << " 张没检测到装甲板，跳过" << std::endl;
-                continue;
-            }
-            sample.rvec = best->rvec.clone();
-            sample.tvec = best->tvec.clone();
-            std::cout << "[hand_eye] 第 " << index << " 张：装甲板距离 " << cv::norm(sample.tvec)
-                      << " m" << std::endl;
+        pose_in >> sample.yaw >> sample.pitch;
+        if (!(pose_in >> sample.time_s)) sample.time_s = 0.0;
+        std::vector<cv::Point2f> corners;
+        double rms = -1.0;
+        if (!detectBoard(image, board, camera_matrix, dist_coeffs, corners, sample.rvec, sample.tvec,
+                         &rms)) {
+            std::cout << "[hand_eye] 第 " << index << " 张没找到标定板，跳过" << std::endl;
+            continue;
         }
+        std::cout << "[hand_eye] 第 " << index << " 张：板 " << corners.size()
+                  << " 点，重投影 rms=" << rms << " px，距离 " << cv::norm(sample.tvec) << " m"
+                  << std::endl;
         samples.push_back(sample);
     }
     if (samples.size() < 8) {
-        std::cerr << "[hand_eye] 有效样本 " << samples.size()
-                  << " 组（<8 组解不稳）：请让云台在 yaw/pitch 上多转几个角度，"
-                     "每组保持静止再采集" << std::endl;
+        std::cerr << "[hand_eye] 有效样本 " << samples.size() << " 组（<8 组解不稳）" << std::endl;
         return 1;
     }
+    unwrapSamples(samples);
+    const double yaw_sign = loadYawSign(config_dir);
+    if (yaw_sign < 0.0) {
+        for (auto& sample : samples) sample.yaw = -sample.yaw;
+        std::cout << "[hand_eye] 已按 configs/serial.yaml 的 yaw_sign = -1 取反 yaw" << std::endl;
+    }
+    if (options.yaw_scale_fixed != 1.0) {
+        for (auto& sample : samples) sample.yaw *= options.yaw_scale_fixed;
+        std::cout << "[hand_eye] 已按 --yaw-scale " << options.yaw_scale_fixed
+                  << " 缩放 yaw（符号/标度修正）" << std::endl;
+    }
 
-    cv::Matx33d R;
-    cv::Vec3d t;
-    double residual = 0.0;
-    if (!solve(samples, R, t, residual)) return 1;
-    cv::Mat rotation_vector;
-    cv::Rodrigues(cv::Mat(R), rotation_vector);
-    const double rotation_error_deg = cv::norm(cv::Vec3d(rotation_vector)) * 180.0 / CV_PI;
-    std::cout << "[hand_eye] 样本 " << samples.size() << " 组，残差 " << residual
-              << " mm（<10 mm 可用），外参转动量 " << rotation_error_deg << "°" << std::endl;
+    const double best_scale = scanYawScale(samples, options.fit, true);
+    if (std::abs(best_scale - 1.0) > 0.05) {
+        std::cout << "[hand_eye] 注意：yaw 标度最优值 " << best_scale
+                  << "（不是 1.0）→ C 板回传的 yaw 有 ≈" << 1.0 / best_scale
+                  << " 倍的标度问题；下面先用 κ=1 解，要按最优值解就再跑一次并乘上它" << std::endl;
+    }
+
+    Fit fit;
+    if (!solve(samples, options.fit, fit)) return 1;
+    double in_sample = 0.0;
+    fit.cross_validate_mm = crossValidate(samples, options.fit, &in_sample);
+    printFit(samples, fit, "[hand_eye] 解算：");
     std::cout << "[hand_eye] R_camera2gimbal = [";
     for (int row = 0; row < 3; ++row) {
-        for (int col = 0; col < 3; ++col) {
-            std::cout << (row || col ? "," : "") << R(row, col);
+        for (int column = 0; column < 3; ++column) {
+            std::cout << (row || column ? "," : "") << fit.R(row, column);
         }
     }
-    std::cout << "]\n[hand_eye] t_camera2gimbal = [" << t[0] << "," << t[1] << "," << t[2] << "] m"
-              << std::endl;
-
-    saveIfSane(output, samples, R, t, residual);
+    std::cout << "]" << std::endl;
+    std::cout << "[hand_eye] t_camera2gimbal = [" << fit.t[0] << "," << fit.t[1] << "," << fit.t[2]
+              << "] m" << std::endl;
+    saveIfGood(output, samples, fit);
     return 0;
 }

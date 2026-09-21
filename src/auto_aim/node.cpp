@@ -12,6 +12,7 @@
 #include "common/types.hpp"
 #include "common/standard_clock.hpp"
 #include "config_loader.hpp"
+#include "dataset.hpp"
 #include "visualization/projection.hpp"
 #include "perception/detector.hpp"
 #include "perception/pnp_solver.hpp"
@@ -111,6 +112,38 @@ int main(int argc, char* argv[])
     const bool use_imu_world_frame =
         (serial_file["serial"] ? serial_file["serial"]["use_imu_world_frame"].as<bool>(false)
                                : false);
+    // C 板回传 yaw 的符号（configs/serial.yaml 的 yaw_sign）。2026-09-28 实测这台车的
+    // 编码器 yaw 正方向与本项目约定（正 yaw = 右转）相反，配置里填了 -1；手眼标定工具
+    // 读的是同一个键，两边必须一致，否则瞄准会在 yaw 上镜像。
+    const double yaw_sign =
+        (serial_file["serial"] ? serial_file["serial"]["yaw_sign"].as<double>(1.0) : 1.0) < 0.0
+            ? -1.0
+            : 1.0;
+    // ---- 实车数据集录制（可选）：ULTRA_VISION_RECORD=<目录> ----
+    // 录图像 + 每帧的输入（姿态/弹速/模式）+ 我们的输出，之后可以离线用
+    // tools/replay_dataset 重新跑同一套流水线，改代码/改配置后对比效果。
+    //   ULTRA_VISION_RECORD_EVERY_N   每 N 帧录一帧（默认 3；相机 ~95fps → ~30fps）
+    //   ULTRA_VISION_RECORD_MAX_FRAMES 最多录多少帧（默认 0 = 不限，按需设防止写满盘）
+    //   ULTRA_VISION_RECORD_QUALITY   JPEG 质量（默认 85）
+    auto_aim::DatasetWriter dataset;
+    const char* record_dir = std::getenv("ULTRA_VISION_RECORD");
+    const bool recording = record_dir != nullptr && record_dir[0] != '\0';
+    if (recording) {
+        const int every_n = std::getenv("ULTRA_VISION_RECORD_EVERY_N")
+            ? std::atoi(std::getenv("ULTRA_VISION_RECORD_EVERY_N")) : 3;
+        const int max_frames = std::getenv("ULTRA_VISION_RECORD_MAX_FRAMES")
+            ? std::atoi(std::getenv("ULTRA_VISION_RECORD_MAX_FRAMES")) : 0;
+        const int quality = std::getenv("ULTRA_VISION_RECORD_QUALITY")
+            ? std::atoi(std::getenv("ULTRA_VISION_RECORD_QUALITY")) : 85;
+        if (!dataset.open(record_dir, every_n, max_frames, quality)) {
+            std::cerr << "[dataset] 打不开录制目录 " << record_dir << "，本次不录" << std::endl;
+        } else {
+            std::cout << "[dataset] 开始录制 → " << record_dir << "/meta.csv + {i}.jpg（每 "
+                      << every_n << " 帧一录，JPEG " << quality << "）" << std::endl;
+        }
+    }
+    const auto record_start = std::chrono::steady_clock::now();
+
     // ---- 共用的检测前端 + 瞄准流水线（和仿真入口同一份实现）----
     auto_aim::ArmorSourceConfig source_cfg;
     source_cfg.classical = det_cfg;
@@ -286,7 +319,7 @@ int main(int argc, char* argv[])
         camera_pose.valid = gimbal_state.valid;
         camera_pose.timestamp_valid = gimbal_state.valid;
         camera_pose.timestamp = timestamp;
-        camera_pose.yaw = gimbal_state.yaw;
+        camera_pose.yaw = yaw_sign * gimbal_state.yaw;
         camera_pose.pitch = gimbal_state.pitch;
         camera_pose.camera_to_gimbal = extrinsics.rotation;
         camera_pose.camera_to_gimbal_translation = extrinsics.translation;
@@ -420,6 +453,32 @@ int main(int argc, char* argv[])
                 gimbal_stats.sent_frames - sent_frames_previous_;
             sent_frames_previous_ = gimbal_stats.sent_frames;
             const auto now_state = gimbal.state();
+            if (recording) {
+                auto_aim::DatasetRow row;
+                row.frame = frame_sequence;
+                row.t = std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                                     record_start)
+                            .count();
+                row.yaw = gimbal_state.yaw;      // **原始**回传角（不带 yaw_sign）
+                row.pitch = gimbal_state.pitch;
+                row.yaw_vel = gimbal_state.yaw_vel;
+                row.pitch_vel = gimbal_state.pitch_vel;
+                row.bullet_speed = gimbal_state.bullet_speed;
+                row.mode = static_cast<int>(gimbal.mode());
+                row.armors = static_cast<int>(armors.size());
+                row.pnp = 0;
+                for (const auto& armor : armors) {
+                    if (armor.solve_result) ++row.pnp;
+                }
+                row.tracker_state = static_cast<int>(tracker.getState());
+                row.plate_id = outcome.decision.armor_id;
+                row.aim_yaw = outcome.decision.target_yaw;
+                row.aim_pitch = outcome.decision.target_pitch;
+                row.aim_yaw_error = outcome.aim_yaw_error;
+                row.aim_pitch_error = outcome.aim_pitch_error;
+                row.fire = outcome.fire ? 1 : 0;
+                dataset.write(row, frame);
+            }
             std::cout << "Processed FPS: " << processed_frames / elapsed
                       << ", armors: " << armors.size()
                       << ", PnP: " << pnp_count
@@ -448,5 +507,12 @@ int main(int argc, char* argv[])
         }
     }
 
+    if (recording) {
+        dataset.close();
+        std::cout << "[dataset] 录制结束：" << dataset.written() << " 帧已写入 "
+                  << dataset.directory() << "（共处理 " << dataset.seen() << " 帧）" << std::endl;
+        std::cout << "[dataset] 离线回放：./build/replay_dataset " << dataset.directory()
+                  << " --config-dir configs" << std::endl;
+    }
     return 0;
 }

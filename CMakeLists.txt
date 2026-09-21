@@ -19,7 +19,7 @@ endif()
 
 # Use TCP simulator input by default on macOS, where the bundled Galaxy SDK is unavailable.
 # On Linux the hardware camera path remains the default.
-set(_auto_aim_sim_default ON)
+set(_auto_aim_sim_default OFF)
 if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
   set(_auto_aim_sim_default ON)
 endif()

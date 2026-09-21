@@ -80,7 +80,7 @@ namespace
     }
     /// @brief 读一个文件夹的棋盘格照片 → 内参 → 打印并写 yaml（--live 采集完也走这里）。
     int calibrateFolder(const std::string& folder, const cv::Size& pattern, double square_mm,
-                        const std::string& output)
+                        const std::string& output, const std::string& kind = "chessboard")
     {
     const std::vector<cv::Point3f> object = boardPoints(pattern, square_mm);
     std::vector<std::vector<cv::Point3f>> object_points;
@@ -94,20 +94,30 @@ namespace
         const cv::Mat image = cv::imread(path);
         if (image.empty()) continue;
         std::vector<cv::Point2f> corners;
-        // 先 SB（对光照/模糊更稳），不再用经典检测的 FAST_CHECK 提前放弃——实测同一批 30 张里
-        // 经典+FAST_CHECK 只认出 24 张，SB 全中。经典检测留作兜底。
-        bool found = cv::findChessboardCornersSB(image, pattern, corners,
+        bool found = false;
+        if (kind == "circles") {
+            // 圆点阵：findCirclesGrid 给的就是亚像素质心，**不能**再跑 cornerSubPix
+            // （它会找"角点"，把圆心拖到圆盘边缘/白底上，实测能拖走 3.9 px、最大 11.7 px）。
+            found = cv::findCirclesGrid(image, pattern, corners, cv::CALIB_CB_SYMMETRIC_GRID);
+        } else {
+            // 先 SB（对光照/模糊更稳），不再用经典检测的 FAST_CHECK 提前放弃——实测同一批
+            // 30 张里经典+FAST_CHECK 只认出 24 张，SB 全中。经典检测留作兜底。
+            found = cv::findChessboardCornersSB(image, pattern, corners,
                                                 cv::CALIB_CB_NORMALIZE_IMAGE);
-        if (!found) {
-            found = cv::findChessboardCorners(
-                image, pattern, corners,
-                cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_NORMALIZE_IMAGE);
+            if (!found) {
+                found = cv::findChessboardCorners(
+                    image, pattern, corners,
+                    cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_NORMALIZE_IMAGE);
+            }
         }
         if (!found) continue;
-        cv::Mat gray;
-        cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
-        cv::cornerSubPix(gray, corners, cv::Size(11, 11), cv::Size(-1, -1),
-                         cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::COUNT, 30, 0.01));
+        if (kind != "circles") {
+            cv::Mat gray;
+            cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
+            cv::cornerSubPix(gray, corners, cv::Size(11, 11), cv::Size(-1, -1),
+                             cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::COUNT, 30,
+                                              0.01));
+        }
         object_points.push_back(object);
         image_points.push_back(corners);
         image_size = image.size();
@@ -198,7 +208,7 @@ namespace
 /// @brief 现场采集：开相机，空格存图（只在找到棋盘格时才存，避免混入废图），q 退出。
 /// @param auto_quit_seconds >0 时到点自动结束采集（等价于按 q），方便无人值守/无键盘时跑通整条链。
 int captureLive(const std::string& folder, const cv::Size& pattern, double square_mm,
-                double auto_quit_seconds = 0.0)
+                double auto_quit_seconds = 0.0, const std::string& kind = "chessboard")
 {
     const std::string config_dir = std::getenv("ULTRA_VISION_CONFIG_DIR")
         ? std::getenv("ULTRA_VISION_CONFIG_DIR") : "configs";
@@ -276,8 +286,10 @@ int captureLive(const std::string& folder, const cv::Size& pattern, double squar
         if (run_detect) {
             board_corners.clear();
             // 预览阶段只用 SB（快，~20 ms @640）；不在预览上跑经典检测
-            board_found = cv::findChessboardCornersSB(preview, pattern, board_corners,
-                                                      cv::CALIB_CB_NORMALIZE_IMAGE);
+            board_found = (kind == "circles")
+                ? cv::findCirclesGrid(preview, pattern, board_corners, cv::CALIB_CB_SYMMETRIC_GRID)
+                : cv::findChessboardCornersSB(preview, pattern, board_corners,
+                                              cv::CALIB_CB_NORMALIZE_IMAGE);
             detect_ms = std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - before_detect).count();
         }
@@ -312,9 +324,11 @@ int captureLive(const std::string& folder, const cv::Size& pattern, double squar
         }
         // 存图前在**全分辨率**上复检（含经典检测兜底），避免存进糊图/半张板
         std::vector<cv::Point2f> full_corners;
-        bool full_found = cv::findChessboardCornersSB(frame, pattern, full_corners,
-                                                     cv::CALIB_CB_NORMALIZE_IMAGE);
-        if (!full_found) {
+        bool full_found = (kind == "circles")
+            ? cv::findCirclesGrid(frame, pattern, full_corners, cv::CALIB_CB_SYMMETRIC_GRID)
+            : cv::findChessboardCornersSB(frame, pattern, full_corners,
+                                          cv::CALIB_CB_NORMALIZE_IMAGE);
+        if (!full_found && kind != "circles") {
             full_found = cv::findChessboardCorners(
                 frame, pattern, full_corners,
                 cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_NORMALIZE_IMAGE);
@@ -347,10 +361,12 @@ int main(int argc, char* argv[])
     double square_mm = 15.0;
     std::string output = "camera_intrinsics.yaml";
     bool live = false;
+    std::string kind = "chessboard";   // chessboard | circles
     double live_seconds = 0.0;   // --live 到点自动结束（0 = 按 q 才结束）
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--live") live = true;
+        else if (arg == "--pattern" && i + 1 < argc) kind = argv[++i];
         else if (arg == "--selftest") return selftest();
         else if (arg == "--live-seconds" && i + 1 < argc) live_seconds = std::atof(argv[++i]);
         else if (arg == "--cols" && i + 1 < argc) cols = std::atoi(argv[++i]);
@@ -361,25 +377,26 @@ int main(int argc, char* argv[])
     }
     if (folder.empty()) {
         std::cerr << "用法: calibrate_camera <图片文件夹> [--cols 11] [--rows 8] [--size 15] "
-                     "[--out camera_intrinsics.yaml] [--live] [--live-seconds 0] [--selftest]\n";
+                     "[--out camera_intrinsics.yaml] [--live] [--live-seconds 0] [--pattern chessboard|circles]"
+                     " [--selftest]\n";
         return 2;
     }
     const cv::Size pattern_live(cols, rows);
     if (live) {
 #if defined(ULTRA_VISION_USE_HIK_CAMERA) || defined(ULTRA_VISION_USE_GALAXY_CAMERA)
-        const int saved = captureLive(folder, pattern_live, square_mm, live_seconds);
+        const int saved = captureLive(folder, pattern_live, square_mm, live_seconds, kind);
         if (saved < 8) {
             std::cerr << "[calib] 只采集到 " << saved << " 张（至少 8 张，建议 15~30 张），"
                          "这次不标定" << std::endl;
             return 1;
         }
         std::cout << "[calib] 采集结束（" << saved << " 张），继续自动标定…" << std::endl;
-        return calibrateFolder(folder, pattern_live, square_mm, output);
+        return calibrateFolder(folder, pattern_live, square_mm, output, kind);
 #else
         std::cerr << "--live 需要带相机 SDK 构建" << std::endl;
         return 2;
 #endif
     }
 
-    return calibrateFolder(folder, pattern_live, square_mm, output);
+    return calibrateFolder(folder, pattern_live, square_mm, output, kind);
 }
