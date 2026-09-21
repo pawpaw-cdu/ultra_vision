@@ -138,14 +138,15 @@ namespace auto_aim
 
     AsyncArmorDetector::~AsyncArmorDetector() = default;
 
-    void AsyncArmorDetector::submit(const cv::Mat& image, uint64_t sequence,
+    void AsyncArmorDetector::submit(cv::Mat image, uint64_t sequence,
                                     uint64_t timestamp_us, const cv::Rect& roi)
     {
         if (image.empty()) return;
         {
             std::lock_guard<std::mutex> lock(impl_->mutex);
             if (impl_->has_frame) ++impl_->dropped_count;
-            impl_->mailbox_frame = image.clone();
+            // 直接接管像素（cv::Mat 移动 = 换指针 + 引用计数），不拷贝。
+            impl_->mailbox_frame = std::move(image);
             impl_->mailbox_roi = roi;
             impl_->mailbox_sequence = sequence;
             impl_->mailbox_timestamp = timestamp_us;

@@ -403,6 +403,23 @@ namespace auto_aim
             roi = cv::Rect(0, 0, image.cols, image.rows);
         }
 
+        // 数字变焦（与能量机关的 input_pad_scale 同一个杠杆）：把 ROI 按比例收缩再
+        // letterbox 回输入尺寸，远处的目标就被放大回训练尺度。远距（7.5 m）靶面在
+        // 640 输入里只有 ~10 px，网络关键点会塌缩 → PnP 给 0.3 m 的荒唐解。
+        // A/B 用 ULTRA_VISION_NN_CANVAS_SCALE（0.35~1.0，1.0 = 关）。
+        static const double canvas_scale = [] {
+            const char* value = std::getenv("ULTRA_VISION_NN_CANVAS_SCALE");
+            const double parsed = value != nullptr ? std::atof(value) : 1.0;
+            return (parsed > 0.05 && parsed < 1.0) ? parsed : 1.0;
+        }();
+        if (canvas_scale < 0.999) {
+            const int width = std::max(16, static_cast<int>(std::lround(roi.width * canvas_scale)));
+            const int height = std::max(16, static_cast<int>(std::lround(roi.height * canvas_scale)));
+            roi = cv::Rect(roi.x + (roi.width - width) / 2, roi.y + (roi.height - height) / 2,
+                           width, height);
+            roi &= cv::Rect(0, 0, image.cols, image.rows);
+        }
+
         const cv::Mat cropped = image(roi);
         const int size = config.input_size;
         const double scale = std::min(

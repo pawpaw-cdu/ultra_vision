@@ -1,0 +1,20 @@
+# 视觉端 ↔ 下位机（STM32）串口链路。
+#
+# 协议 = 下位机 visual_task.h 的 TJ_T_t / TJ_R_t（= sp_vision io/gimbal 的
+# GimbalToVision / VisionToGimbal）：'S','P' 头 + mode + 数据 + CRC16(MCRF4XX)。
+#   · 下位机 → 视觉 (43B)：云台绝对 yaw/pitch、角速度、四元数、弹速、累计弹数、mode
+#   · 视觉 → 下位机 (29B)：mode(0 不控制 / 1 控制不开火 / 2 控制且开火) + yaw/yaw_vel/
+#                          yaw_acc + pitch/pitch_vel/pitch_acc
+# 开火决策在视觉端：只有 mode=2 下位机才真开火（它自己的 fire_ctrl 只看 mode）。
+serial:
+  # USB CDC 虚拟串口。填 "auto" 会按 /dev/ttyACM* → /dev/ttyUSB* 顺序找第一个可用；
+  # 留空 = 不启用串口，只跑识别（离线看画面/调模型时用）。
+  device: "auto"
+  baud: 115200            # USB CDC 下波特率无意义，占位（真串口才需要）
+  read_timeout_ms: 20     # 单次读超时；读线程非阻塞，绝不卡主循环
+  reconnect_after_errors: 3000   # 累计读错误到该值尝试重连（CDC 掉线会重新枚举）
+  require_connection: false      # true = 打不开串口就退出（比赛/上场配置）
+  # IMU/世界系：true 表示把下位机回传的四元数当作 world←gimbal 填进 tracker 的
+  # base_to_world（底盘小陀螺时估计不会跟着底盘转）。**上真机要先验证轴向约定**
+  # （旋转底盘看估计是否跟着转），不确定就先 false（用底盘系，静止底盘等价）。
+  use_imu_world_frame: false

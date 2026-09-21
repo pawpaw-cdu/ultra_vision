@@ -1,41 +1,14 @@
+# detector.yaml —— 只放"换模型 / 换机器要改"的东西。
+# 传统灯条检测器的那套阈值（light/armor/color/binary_threshold）已搬进
+# perception/detector.hpp 的结构体默认值：neural.enabled 为 true 时它整套都不参与，
+# 需要调传统路径时改那头的默认值，或者在这里重新写回同名段（加载器仍然会读）。
 detector:
+  # 1 = 红方，0 = 蓝方。神经网络路径用它做颜色筛选（filter_by_color 打开时）。
   enemy_color: 0
-  binary_threshold: 121
-  light:
-    min_ratio: 0.01
-    max_ratio: 0.15
-    max_angle: 30.0
-    min_contour_points: 5
-  armor:
-    height_ratio_min: 0.70
-    height_ratio_max: 1.25
-    angle_diff_max: 30.0
-    width_to_height_min: 0.8
-    width_to_height_max: 3.0
-    large_armor_ratio_thresh: 3.0
-  color:
-    use_color_detect: true   # 是否启用颜色筛选
-    # 选择颜色空间: "hsv" 或 "bgr"
-    method: "bgr"
-    # HSV 阈值（当 method = "hsv" 时使用）
-    hsv:
-      red_low1: 0            # 红色 HSV 第一段 Hue 下限
-      red_high1: 35          # 红色 HSV 第一段 Hue 上限
-      red_low2: 135          # 红色 HSV 第二段 Hue 下限
-      red_high2: 180         # 红色 HSV 第二段 Hue 上限
-      blue_low: 90           # 蓝色 HSV Hue 下限
-      blue_high: 135         # 蓝色 HSV Hue 上限
-      sat_min: 80            # 最小饱和度，过滤低饱和区域
-      val_min: 80            # 最小明度，过滤过暗区域
-      area_ratio: 0.3        # 目标颜色像素占比阈值，超过该值认为颜色有效
-  # BGR 阈值（当 method = "bgr" 时使用）
-    bgr:
-      red_threshold: 1.0
-      blue_threshold: 1.0
 
-  # 神经网络装甲板检测器（YOLO11 四点模型，OpenVINO 部署）。
-  # enabled: true 时用它替代上面的传统灯条/装甲板流程；两者输出同一种
-  # Armor 类型，后续 PnP、整车估计和控制链完全不变。
+  # 神经网络装甲板检测器（YOLO 四点模型 / RP24 头，OpenVINO 部署）。
+  # enabled: true 时用它替代传统灯条流程；两者输出同一种 Armor 类型，
+  # 后续 PnP、整车估计和控制链完全不变。
   neural:
     enabled: true
     model_path: "models/openvino/yolov5.xml"   # 相对路径按 configs 的上级目录解析
@@ -53,8 +26,9 @@ detector:
     # 按颜色筛会直接丢掉这些有效目标（sp_vision 的神经网络路径也不筛颜色，
     # 只校验编号与大小）。需要只打某一方时，交给目标选择层去做。
     filter_by_color: false
+    # 部署机相关的调度参数（实测 4 线程最优：默认 8 会与仿真器抢核）。
     performance_mode: "latency"               # latency / throughput
-    num_threads: 4                            # 实测 4 线程最优（默认 8 会与仿真器抢核）
+    num_threads: 4
     num_streams: 1                            # 0 = OpenVINO 默认
     # 角点精修：以网络输出的四角为先验，在局部 ROI 内重新提取灯条并用灯条端点
     # 重建角点；几何一致性不通过时自动退回网络原值（详见 keypoint_refiner.cpp）。

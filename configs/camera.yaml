@@ -1,22 +1,25 @@
 # 相机配置
 
 camera:
-  name: "galaxy"            # 使用的相机类型：galaxy 或 hikcamera
+  name: "hikcamera"         # 真机模式：海康 MVS（galaxy = 大恒，仿真用）
   device_index: 1          # 设备索引（从1开始）
   serial_number: ""        # 可选，如果指定则优先使用序列号
   timeout_ms: 1000         # 取图超时（毫秒）
 
 # 相机内参矩阵（3x3）和畸变系数
 simulator:
-  # Matches simulator/config/camera.yaml. The capture size can be changed
-  # with DAEDALUS_CAPTURE_WIDTH/HEIGHT; focal lengths are derived from FOV.
-  fov_degrees: 45.0
-  max_processing_width: 960
+  # 2026-09-26 与实车统一尺度：海康相机在 MVS 里是 **1440x1080 / Bayer RG 8**，
+  # 所以仿真也跑同一分辨率与同一垂直 FOV（f = 0.5*rows/tan(fov/2)，由实车标定反推）。
+  # 采集尺寸由 DAEDALUS_CAPTURE_WIDTH/HEIGHT 传入（脚本 --capture 1440x1080）。
+  # 这样"靶面在图像里的像素数"在实车/仿真/MVS 三处一致：1440x1080 + f≈1447 时，
+  # 0.135 m 的靶面在 7.5 m 处 ≈ 26 px（原来的 640x480 + f=579 只有 ~10 px）。
+  fov_degrees: 41.0
+  max_processing_width: 1440
   camera_matrix:
     rows: 3
     cols: 3
-    data: [579.411, 0.0, 320.0,
-           0.0, 579.411, 240.0,
+    data: [1447.0, 0.0, 720.0,
+           0.0, 1447.0, 540.0,
            0.0, 0.0, 1.0]
 
   dist_coeffs:
@@ -38,14 +41,35 @@ galaxy:
     data: [0.0, 0.0, 0.0, 0.0, 0.0]
 
 hikcamera:
+  # ---- 相机→云台外参（手眼标定结果，见 tools/hand_eye_calibrate）----
+  # 相机光心相对云台旋转中心的偏转/平移。不填就是单位阵 + 零平移（等于"相机在光心"，
+  # 与仿真口径一致）。标定完把 hand_eye.yaml 里的两行粘到这里。
+  R_camera2gimbal: [1.0, 0.0, 0.0,
+                    0.0, 1.0, 0.0,
+                    0.0, 0.0, 1.0]
+  t_camera2gimbal: [0.0, 0.0, 0.0]   # 单位：米
+  # 曝光/增益：**比赛用固定值**（自动曝光会被靶面灯光带跑，且在暗光里收敛慢）。
+  # 2026-09-27 在 NUC 上实测：默认自动曝光只跑 0.3 s 时画面全黑（AE 未收敛），
+  # 固定 6 ms / 增益 12 dB 室内灯下画面正常。现场按实际光照重调这两个数即可。
+  exposure_ms: 6.0
+  gain: 12.0
+  auto_exposure: false
+  auto_gain: false
+  # 分辨率 1440x1080（MVS 实测）。下面这组是 2026-09-27 用棋盘格实测标定出来的
+  # （11x8 内角点 / 15 mm，30 张，剔除 1 张离群后 29 张，重投影 rms 0.097 px；
+  #  标定命令：./build/calibrate_camera ~/calib_board --cols 11 --rows 8 --size 15）。
+  # 注意：f≈2399 对应**垂直 FOV 25.4°**，不是 simulator 段里写的 41°——说明仿真
+  # 现在用的 f=1447 比实车"更广"，同一块靶在仿真里只有实车 ~60% 的像素数。两边要同尺
+  # 的话，simulator 段应改成 f≈2399（fov_degrees ≈ 25.4）——等确认后再动，会改仿真基线。
   camera_matrix:
-    rows: 3                  # 海康相机内参矩阵行数
-    cols: 3                  # 海康相机内参矩阵列数
-    data: [1286.0, 0.0, 645.0,
-          0.0, 1288.0, 483.0,
+    rows: 3
+    cols: 3
+    data: [2398.73, 0.0, 726.559,
+          0.0, 2396.69, 565.457,
           0.0, 0.0, 1.0]
 
   dist_coeffs:
     rows: 5                  # 海康相机畸变系数矩阵行数
     cols: 1                  # 海康相机畸变系数矩阵列数
-    data: [0.0, 0.0, 0.0, 0.0, 0.0]
+    # 畸变系数用 NUC 上标出来的那组（本机 OpenCV 版本和 Mac 略有差异，以跑算法的机器为准）。
+    data: [-0.0388517, 0.335975, 0.000192684, 0.000159496, -1.23858]

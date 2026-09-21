@@ -37,53 +37,16 @@ uint64_t readU64(const uint8_t* p) {
     return value;
 }
 
-} // namespace
-
-TcpInput::TcpInput(std::string host, uint16_t port)
-    : host_(std::move(host)), port_(port) {}
-
-TcpInput::~TcpInput() {
-    close();
-}
-
-TcpInput::TcpInput(TcpInput&& other) noexcept
-    : host_(std::move(other.host_)), port_(other.port_), sock_(other.sock_),
-      header_(other.header_), payload_(std::move(other.payload_)) {
-    other.sock_ = -1;
-}
-
-TcpInput& TcpInput::operator=(TcpInput&& other) noexcept {
-    if (this != &other) {
-        close();
-        host_ = std::move(other.host_);
-        port_ = other.port_;
-        sock_ = other.sock_;
-        header_ = other.header_;
-        payload_ = std::move(other.payload_);
-        other.sock_ = -1;
-    }
-    return *this;
-}
-
-bool TcpInput::connect() {
-    close();
-    return connectOnce();
-}
-
-bool TcpInput::connected() const {
-    return sock_ >= 0;
-}
-
-bool TcpInput::sendLine(uint16_t command_port, const std::string& line) {
+int connectSocketAddress(const std::string& host, uint16_t port) {
     struct addrinfo hints;
     std::memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
 
     struct addrinfo* result = nullptr;
-    std::string port = std::to_string(command_port);
-    if (getaddrinfo(host_.c_str(), port.c_str(), &hints, &result) != 0) {
-        return false;
+    std::string service = std::to_string(port);
+    if (getaddrinfo(host.c_str(), service.c_str(), &hints, &result) != 0) {
+        return -1;
     }
 
     int fd = -1;
@@ -101,64 +64,128 @@ bool TcpInput::sendLine(uint16_t command_port, const std::string& line) {
     freeaddrinfo(result);
 
     if (fd < 0) {
-        return false;
+        return -1;
     }
 
+    int enabled = 1;
+    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &enabled, sizeof(enabled));
+#ifdef SO_NOSIGPIPE
+    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &enabled, sizeof(enabled));
+#endif
+    int receive_buffer = 4 * 1024 * 1024;
+    setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &receive_buffer, sizeof(receive_buffer));
+
+    timeval timeout{};
+    timeout.tv_usec = 500000;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    return fd;
+}
+
+} // namespace
+
+TcpInput::TcpInput(std::string host, uint16_t port)
+    : host_(std::move(host)), port_(port) {}
+
+TcpInput::~TcpInput() {
+    close();
+}
+
+TcpInput::TcpInput(TcpInput&& other) noexcept
+    : host_(std::move(other.host_)), port_(other.port_), sock_(other.sock_),
+      command_sock_(other.command_sock_), command_port_(other.command_port_),
+      header_(other.header_), payload_(std::move(other.payload_)) {
+    other.sock_ = -1;
+    other.command_sock_ = -1;
+}
+
+TcpInput& TcpInput::operator=(TcpInput&& other) noexcept {
+    if (this != &other) {
+        close();
+        host_ = std::move(other.host_);
+        port_ = other.port_;
+        sock_ = other.sock_;
+        command_sock_ = other.command_sock_;
+        command_port_ = other.command_port_;
+        header_ = other.header_;
+        payload_ = std::move(other.payload_);
+        other.sock_ = -1;
+        other.command_sock_ = -1;
+    }
+    return *this;
+}
+
+bool TcpInput::connect() {
+    close();
+    return connectOnce();
+}
+
+bool TcpInput::connected() const {
+    return sock_ >= 0;
+}
+
+bool TcpInput::sendLine(uint16_t command_port, const std::string& line) {
+    if (command_sock_ < 0 || command_port_ != command_port) {
+        closeCommand();
+        command_port_ = command_port;
+        if (!connectCommandOnce()) {
+            return false;
+        }
+    }
+
+    if (writeAll(command_sock_, line)) {
+        return true;
+    }
+
+    closeCommand();
+    if (!connectCommandOnce()) {
+        return false;
+    }
+    return writeAll(command_sock_, line);
+}
+
+bool TcpInput::connectOnce() {
+    closeImage();
+    sock_ = connectSocketAddress(host_, port_);
+    return sock_ >= 0;
+}
+
+bool TcpInput::connectCommandOnce() {
+    command_sock_ = connectSocketAddress(host_, command_port_);
+    return command_sock_ >= 0;
+}
+
+bool TcpInput::writeAll(int fd, const std::string& data) {
     size_t sent = 0;
-    while (sent < line.size()) {
-        ssize_t n = ::send(fd, line.data() + sent, line.size() - sent, 0);
+    while (sent < data.size()) {
+#ifdef MSG_NOSIGNAL
+        constexpr int kSendFlags = MSG_NOSIGNAL;
+#else
+        constexpr int kSendFlags = 0;
+#endif
+        ssize_t n = ::send(fd, data.data() + sent, data.size() - sent, kSendFlags);
+        if (n < 0 && errno == EINTR) {
+            continue;
+        }
         if (n <= 0) {
-            ::close(fd);
             return false;
         }
         sent += static_cast<size_t>(n);
     }
-
-    ::close(fd);
     return true;
 }
 
-bool TcpInput::connectOnce() {
-    close();
-
-    struct addrinfo hints;
-    std::memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-
-    struct addrinfo* result = nullptr;
-    std::string port = std::to_string(port_);
-    if (getaddrinfo(host_.c_str(), port.c_str(), &hints, &result) != 0) {
-        return false;
+void TcpInput::closeCommand() {
+    if (command_sock_ >= 0) {
+        ::close(command_sock_);
+        command_sock_ = -1;
     }
+}
 
-    for (struct addrinfo* addr = result; addr != nullptr; addr = addr->ai_next) {
-        sock_ = ::socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);
-        if (sock_ < 0) {
-            continue;
-        }
-        if (::connect(sock_, addr->ai_addr, addr->ai_addrlen) == 0) {
-            break;
-        }
+void TcpInput::closeImage() {
+    if (sock_ >= 0) {
         ::close(sock_);
         sock_ = -1;
     }
-    freeaddrinfo(result);
-
-    if (sock_ < 0) {
-        return false;
-    }
-
-    int nodelay = 1;
-    setsockopt(sock_, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
-
-    int receive_buffer = 4 * 1024 * 1024;
-    setsockopt(sock_, SOL_SOCKET, SO_RCVBUF, &receive_buffer, sizeof(receive_buffer));
-
-    timeval timeout{};
-    timeout.tv_usec = 500000;
-    setsockopt(sock_, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-    return true;
 }
 
 bool TcpInput::readExact(void* buffer, size_t size) {
@@ -190,7 +217,7 @@ bool TcpInput::readFrame(SimFrame& frame) {
     }
 
     if (!readExact(header_.data(), header_.size())) {
-        close();
+        closeImage();
         return false;
     }
 
@@ -204,13 +231,13 @@ bool TcpInput::readFrame(SimFrame& frame) {
 
     if (magic != kMagic || version != kVersion || payload_len == 0 ||
         payload_len > 20 * 1024 * 1024 || width == 0 || height == 0) {
-        close();
+        closeImage();
         return false;
     }
 
     payload_.resize(payload_len);
     if (!readExact(payload_.data(), payload_.size())) {
-        close();
+        closeImage();
         return false;
     }
 
@@ -227,10 +254,8 @@ bool TcpInput::readFrame(SimFrame& frame) {
 }
 
 void TcpInput::close() {
-    if (sock_ >= 0) {
-        ::close(sock_);
-        sock_ = -1;
-    }
+    closeImage();
+    closeCommand();
 }
 
 } // namespace sim_receiver

@@ -1,0 +1,24 @@
+# 标定板参数（相机内参 + 手眼标定共用）。对齐 sp_vision 的 configs/calibration.yaml。
+#
+# 标定顺序很重要：
+#   ① 先标**内参**：拍 15~30 张不同角度的标定板
+#        ./calibrate_camera <图片文件夹>            → 把输出粘到 configs/camera.yaml
+#   ② 再标**手眼**（相机→云台外参）：标定板静止摆好，云台绕两个轴转 8~15 个角度
+#        ./hand_eye_calibrate --live                → 把输出粘到 configs/camera.yaml
+# 内参不准，手眼解出来的外参会把这个误差一起吸收进去（残差看着还行，但实际偏）。
+board:
+  # "chessboard" = 棋盘格（黑白方格，角点是格点）
+  # "circles"    = 圆点阵列（sp_vision 用的那种，findCirclesGrid，亚像素更稳）
+  #
+  # 2026-09-27：手眼标定改用你手上那块**圆点阵板**（和 sp_vision_25/configs/calibration.yaml
+  # 一致：10x7 圆心、间距 29 mm），因为 capture 采的 img_with_q 就是这块板。
+  # 若改回黑白棋盘格（11x8 内角点 / 15 mm，内参标定用的那块），把下面四行换成：
+  #   pattern: "chessboard" / cols: 11 / rows: 8 / square_mm: 15.0
+  pattern: "circles"
+  cols: 10          # 内角点数（棋盘格）或圆点列数
+  rows: 7           # 内角点数（棋盘格）或圆点行数
+  # 方格边长（棋盘格）或相邻圆心距（圆点阵），单位毫米；实测即可（只在手眼里用于定标，
+  # 单位一致就行，写实际尺寸可以顺带检查标定板到相机的距离是否合理）。
+  square_mm: 29.0
+  # 圆点阵专用：非对称圆点阵时填 "asymmetric"
+  grid: "symmetric"

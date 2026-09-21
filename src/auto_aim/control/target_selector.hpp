@@ -84,6 +84,14 @@ namespace auto_aim
                               double current_yaw,
                               double current_pitch);
 
+        /// @brief 实车用：弹速由下位机每帧回传（TJ_T 的 bullet_speed），不能写死。
+        ///        只接受合理值，异常值忽略（保留上一个有效弹速）。
+        void setProjectileSpeed(double speed)
+        {
+            if (speed >= 10.0 && speed <= 45.0) config_.projectile_speed = speed;
+        }
+        double projectileSpeed() const { return config_.projectile_speed; }
+
     private:
         double armorDelta(const TargetEstimate& estimate,
                           int armor_id,

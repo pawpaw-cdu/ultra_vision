@@ -9,32 +9,37 @@
 namespace auto_aim
 {
     struct DetectorConfig {
-        int enemy_color;
-        int binary_threshold;
-        double light_min_ratio;
-        double light_max_ratio;
-        double light_max_angle;
-        int light_min_contour_points;
-        double armor_height_ratio_min;
-        double armor_height_ratio_max;
-        double armor_angle_diff_max;       // 角度和阈值（左右灯条角度和应接近0）
-        double armor_width_to_height_min;
-        double armor_width_to_height_max;
-        double armor_large_ratio_thresh;
-        bool color_use_detect;
-        double color_red_threshold;
-        double color_blue_threshold;
+        // 传统灯条检测器的参数。默认值 = 本工程一直在用的那一组
+        // （原 configs/detector.yaml 的 light/armor/color 段，已经搬到这里）。
+        // 神经网络开着的时候（detector.neural.enabled: true）这一整套都不参与，
+        // 所以不再往 YAML 里放；要调传统路径就改这里，或在 detector.yaml 里
+        // 重新写回同名的 light/armor/color 段（加载器仍会读）。
+        int enemy_color = 0;
+        int binary_threshold = 121;
+        double light_min_ratio = 0.01;
+        double light_max_ratio = 0.15;
+        double light_max_angle = 30.0;
+        int light_min_contour_points = 5;
+        double armor_height_ratio_min = 0.70;
+        double armor_height_ratio_max = 1.25;
+        double armor_angle_diff_max = 30.0; // 角度和阈值（左右灯条角度和应接近0）
+        double armor_width_to_height_min = 0.8;
+        double armor_width_to_height_max = 3.0;
+        double armor_large_ratio_thresh = 3.0;
+        bool color_use_detect = true;
+        double color_red_threshold = 1.0;
+        double color_blue_threshold = 1.0;
 
-        bool use_hsv;               // true: 使用 HSV, false: 使用 BGR
-        int hue_red_low1;           // 红色下限1 (0~10)
-        int hue_red_high1;
-        int hue_red_low2;           // 红色下限2 (160~180)
-        int hue_red_high2;
-        int hue_blue_low;           // 蓝色下限 (100~130)
-        int hue_blue_high;
-        int sat_min;                // 最小饱和度（过滤低饱和区域）
-        int val_min;                // 最小明度（过滤过暗区域）
-        double color_area_ratio; 
+        bool use_hsv = false;       // true: 使用 HSV, false: 使用 BGR
+        int hue_red_low1 = 0;       // 红色下限1 (0~10)
+        int hue_red_high1 = 35;
+        int hue_red_low2 = 135;     // 红色下限2 (160~180)
+        int hue_red_high2 = 180;
+        int hue_blue_low = 90;      // 蓝色下限 (100~130)
+        int hue_blue_high = 135;
+        int sat_min = 80;           // 最小饱和度（过滤低饱和区域）
+        int val_min = 80;           // 最小明度（过滤过暗区域）
+        double color_area_ratio = 0.3;
     };
 
     class Detector

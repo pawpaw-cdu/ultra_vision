@@ -55,7 +55,13 @@ namespace auto_aim
         // `roi` restricts inference to that region (empty = full frame / the
         // configured ROI). The caller derives it from the current estimate, so
         // the network only looks where the target can be.
-        void submit(const cv::Mat& image, uint64_t sequence, uint64_t timestamp_us,
+        //
+        // **按值传入、内部转移所有权**：worker 在另一个线程读这帧，而接收层每帧
+        // 都是新分配的（cv::imdecode），所以这里不需要再 clone 一份
+        // （1440x1080 Bayer 帧 4.7 MB，实测白拷 0.5~0.7 ms/帧）。
+        // 代价是调用方把帧交出去之后**不能再往这块像素上画**（要画就自己先 clone，
+        // node_sim 开窗口时就是这么做的）。
+        void submit(cv::Mat image, uint64_t sequence, uint64_t timestamp_us,
                     const cv::Rect& roi = {});
 
         // Non-blocking. Returns true once per newly finished result.

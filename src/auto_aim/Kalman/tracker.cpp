@@ -1,5 +1,7 @@
 #include "tracker.hpp"
 
+#include "perception/pnp_solver.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -9,6 +11,65 @@ namespace auto_aim
 {
     namespace
     {
+        /// @brief 装甲板四角像素 → UV 观测（顺序与 getArmor3DPoints 一致：
+        ///        left_bottom, left_top, right_top, right_bottom）。
+        ///        PnP 的 Points_2D 就是这个顺序，所以这里原样搬过来即可；
+        ///        半尺寸必须与 PnP 用的同一套（configs/tracker.yaml 的 pnp 段）。
+        std::optional<UvObservation> armorUvObservation(const Armor& armor, int plate_id,
+                                                        const TrackerConfig& config)
+        {
+            if (armor.Points_2D.size() < 4) return std::nullopt;
+            UvObservation observation;
+            observation.plate_id = plate_id;
+            const double width = armor.armor_type == auto_aim::small
+                                     ? config.uv_armor_small_width
+                                     : config.uv_armor_large_width;
+            observation.half_width = 0.5 * width;
+            observation.half_height = 0.5 * config.uv_armor_height;
+            observation.sigma_px = config.uv_sigma_px;
+            for (int i = 0; i < 4; ++i) {
+                const cv::Point2f& corner = armor.Points_2D[static_cast<std::size_t>(i)];
+                if (!std::isfinite(corner.x) || !std::isfinite(corner.y)) return std::nullopt;
+                observation.corners[static_cast<std::size_t>(i)](0, 0) = corner.x;
+                observation.corners[static_cast<std::size_t>(i)](1, 0) = corner.y;
+            }
+            return observation;
+        }
+
+        /// @brief 装甲板的**一条灯条**端点像素 → 紧凑 UV 观测。
+        ///        端点顺序按图像上下取（v 小的当 top），与 awakening-main 一致。
+        std::optional<UvCompactObservation> armorUvCompactObservation(
+            const Armor& armor, int plate_id, const TrackerConfig& config)
+        {
+            const cv::Point2f top = armor.left.top;
+            const cv::Point2f bottom = armor.left.bottom;
+            const cv::Point2f right_top = armor.right.top;
+            const cv::Point2f right_bottom = armor.right.bottom;
+            for (const cv::Point2f& point : {top, bottom, right_top, right_bottom}) {
+                if (!std::isfinite(point.x) || !std::isfinite(point.y)) return std::nullopt;
+            }
+            UvCompactObservation observation;
+            observation.plate_id = plate_id;
+            const double width = armor.armor_type == auto_aim::small
+                                     ? config.uv_armor_small_width
+                                     : config.uv_armor_large_width;
+            observation.half_width = 0.5 * width;
+            observation.half_height = 0.5 * config.uv_armor_height;
+            observation.sigma_px = config.uv_compact_sigma_px;
+            observation.sigma_angle = config.uv_compact_sigma_angle;
+            // 探测器给的"左灯条"：图像左侧那条（上下端点可能颠倒，这里统一。
+            cv::Point2f first = top;
+            cv::Point2f second = bottom;
+            if (first.y > second.y) std::swap(first, second);
+            const double dx = first.x - second.x;
+            const double dy = first.y - second.y;
+            observation.angle = std::atan2(dx, dy);
+            observation.center_x = 0.5 * (first.x + second.x);
+            observation.center_y = 0.5 * (first.y + second.y);
+            observation.length = std::sqrt(dx * dx + dy * dy);
+            return observation;
+        }
+
         Vec<3> toVec(const cv::Mat& tvec)
         {
             Vec<3> result;
@@ -57,6 +118,29 @@ namespace auto_aim
             return result;
         }
 
+        // camera←gimbal 的旋转（手眼外参），默认单位阵
+        Matrix<3, 3> cameraToGimbal(const CameraPose& pose)
+        {
+            Matrix<3, 3> rotation;
+            for (int row = 0; row < 3; ++row) {
+                for (int column = 0; column < 3; ++column) {
+                    rotation(row, column) = pose.camera_to_gimbal[row][column];
+                }
+            }
+            return rotation;
+        }
+
+        Vec<3> cameraToGimbalTranslation(const CameraPose& pose)
+        {
+            Vec<3> translation;
+            for (int row = 0; row < 3; ++row) {
+                translation(row, 0) = pose.camera_to_gimbal_translation[row];
+            }
+            return translation;
+        }
+
+        // 相机系点 → 世界系：先按手眼外参到云台系（含平移），再由 yaw/pitch 与
+        // base_to_world 转到世界系。外参为单位阵/零时与旧行为完全一致。
         Matrix<3, 3> cameraToWorldRotation(const CameraPose& pose)
         {
             Matrix<3, 3> base_to_world;
@@ -65,7 +149,42 @@ namespace auto_aim
                     base_to_world(row, column) = pose.base_to_world[row][column];
                 }
             }
-            return base_to_world * cameraToBaseRotation(pose.yaw, pose.pitch);
+            return base_to_world * cameraToBaseRotation(pose.yaw, pose.pitch) *
+                cameraToGimbal(pose);
+        }
+
+        Vec<3> pointToWorld(const CameraPose& pose, const Vec<3>& camera_point)
+        {
+            const Vec<3> gimbal_point =
+                cameraToGimbal(pose) * camera_point + cameraToGimbalTranslation(pose);
+            const Matrix<3, 3> base_to_world = [&pose] {
+                Matrix<3, 3> matrix;
+                for (int row = 0; row < 3; ++row) {
+                    for (int column = 0; column < 3; ++column) {
+                        matrix(row, column) = pose.base_to_world[row][column];
+                    }
+                }
+                return matrix;
+            }();
+            return base_to_world * (cameraToBaseRotation(pose.yaw, pose.pitch) * gimbal_point);
+        }
+
+        Vec<3> pointToCamera(const CameraPose& pose, const Vec<3>& world_point)
+        {
+            const Matrix<3, 3> base_to_world = [&pose] {
+                Matrix<3, 3> matrix;
+                for (int row = 0; row < 3; ++row) {
+                    for (int column = 0; column < 3; ++column) {
+                        matrix(row, column) = pose.base_to_world[row][column];
+                    }
+                }
+                return matrix;
+            }();
+            const Vec<3> gimbal_point =
+                cameraToBaseRotation(pose.yaw, pose.pitch).transpose() *
+                (base_to_world.transpose() * world_point);
+            return cameraToGimbal(pose).transpose() *
+                (gimbal_point - cameraToGimbalTranslation(pose));
         }
 
         Vec<3> transformVector(const Matrix<3, 3>& rotation, const Vec<3>& value)
@@ -194,6 +313,8 @@ namespace auto_aim
         ArmorEKF::Config ekf_cfg;
         ekf_cfg.R = cfg_.armor_radius;
         ekf_cfg.process_acc = cfg_.process_noise_pos;
+        ekf_cfg.process_acc_speed_ref = cfg_.process_noise_pos_speed_ref;
+        ekf_cfg.process_acc_max = cfg_.process_noise_pos_max;
         ekf_cfg.process_omega = cfg_.process_noise_vel;
         ekf_cfg.meas_noise = cfg_.measure_noise;
         ekf_cfg.y_noise_mult = cfg_.y_noise_mult;
@@ -204,7 +325,9 @@ namespace auto_aim
 
     void Tracker::init(const Armor& armor, double timestamp)
     {
-        const Armor home_armor = toWorld(armor);
+        Armor refined_armor = armor;
+        refineArmorPose(refined_armor);
+        const Armor home_armor = toWorld(refined_armor);
         latest_armor_ = armor;
         last_timestamp_ = timestamp;
 
@@ -285,11 +408,19 @@ namespace auto_aim
             }
             mean_y /= count;
 
+            // 径向角**与 yaw 无关**，先算一次存下来。它内部要做一次旋转
+            // （armorRadialAngle → 位姿矩阵），原来放在 1440 步的扫描里反复调，
+            // 一次 init 要白算上万次（实测每次重捕 20~40 ms 的大头就是它）。
+            std::array<std::optional<double>, 4> radial_angles;
+            for (std::size_t i = 0; i < count; ++i) {
+                radial_angles[i] = armorRadialAngle(observations[i].home);
+            }
+
             double center_x = 0.0;
             double center_z = 0.0;
             std::size_t center_count = 0;
             for (std::size_t i = 0; i < count; ++i) {
-                const auto radial_angle = armorRadialAngle(observations[i].home);
+                const auto& radial_angle = radial_angles[i];
                 if (radial_angle) {
                     const Vec<3> center = centerFromRadialAngle(
                         toVec(observations[i].home.tvec), *radial_angle,
@@ -305,8 +436,18 @@ namespace auto_aim
                 center_z /= center_count;
             }
 
-            for (int step = 0; step < 1440; ++step) {
-                const double yaw = -CV_PI + step * CV_PI / 720.0;
+            // 粗→细两段扫描 yaw。原来是 1440 步（0.25°）定步长暴力扫，
+            // 而 evaluate 对**每一种板号排列**都要跑一遍（4 块板最多 24 种），
+            // 于是每次 tracker 重捕要 20~40 ms（实测 pnp+ekf 段 31 ms，且
+            // CPU 时间≈墙钟，是真在算）—— 偏偏重捕是最该快的时候。
+            // 代价函数对 yaw 是"每 90° 重复 + 单瓣内平滑"的，所以先 4° 粗扫，
+            // 再在粗最优点附近 0.5°、0.0625° 各细扫一圈：122 次评估取到
+            // 同一条极小值（约 12× 少算），精度反而更高（0.0625° vs 0.25°）。
+            // 本次排列自己的最优（细扫要围着它转，而不是围着全局最优转）
+            double local_error = std::numeric_limits<double>::max();
+            double local_yaw = 0.0;
+            const auto scan = [&](double begin, double end, double step) {
+                for (double yaw = begin; yaw < end; yaw += step) {
                 if (center_count == 0) {
                     double fallback_x = 0.0;
                     double fallback_z = 0.0;
@@ -332,7 +473,7 @@ namespace auto_aim
                         (center_z + cfg_.armor_radius * std::sin(angle));
                     error += dx * dx + dy * dy + dz * dz;
 
-                    const auto radial_angle = armorRadialAngle(observations[i].home);
+                    const auto& radial_angle = radial_angles[i];
                     if (radial_angle) {
                         const double angle_error = ArmorEKF::normalizeAngle(
                             *radial_angle - angle);
@@ -341,6 +482,10 @@ namespace auto_aim
                     }
                 }
 
+                if (error < local_error) {
+                    local_error = error;
+                    local_yaw = yaw;
+                }
                 if (error < best.error) {
                     best.center(0, 0) = center_x;
                     best.center(1, 0) = mean_y;
@@ -350,7 +495,14 @@ namespace auto_aim
                     best.plate_ids = assignment;
                     best.valid = true;
                 }
-            }
+                }
+            };
+            const double coarse_step = 4.0 * CV_PI / 180.0;
+            scan(-CV_PI, CV_PI, coarse_step);
+            const double coarse_yaw = local_yaw;
+            scan(coarse_yaw - coarse_step, coarse_yaw + coarse_step, 0.5 * CV_PI / 180.0);
+            const double medium_step = 0.5 * CV_PI / 180.0;
+            scan(local_yaw - medium_step, local_yaw + medium_step, 0.0625 * CV_PI / 180.0);
         };
 
         const auto search = [&](auto&& self, std::size_t index) -> void {
@@ -475,9 +627,31 @@ namespace auto_aim
 
         const auto radial_angle = armorRadialAngle(home_armor);
         double measurement_weight = 1.0;
+        // UV 观测（像素重投影）优先：直接把四角像素喂进 EKF，跳过 PnP 那一层
+        // 噪声放大。cfg.uv_observation 关掉时行为与以前完全一致（YPD 路径）。
+        const auto uv_observation =
+            (cfg_.uv_observation && camera_intrinsics_valid_)
+                ? armorUvObservation(armor, plate_id_, cfg_)
+                : std::nullopt;
+        const auto uv_compact_observation =
+            (cfg_.uv_observation && cfg_.uv_compact && camera_intrinsics_valid_)
+                ? armorUvCompactObservation(armor, plate_id_, cfg_)
+                : std::nullopt;
         const auto ypd_observation = armorYpdObservation(
             home_armor, plate_id_, cfg_);
-        if (ypd_observation) {
+        if (ypd_observation && !scaleConsistent(armor, ypd_observation->distance)) {
+            // 尺度不自洽（塌缩/错解）：不要这条观测，让滤波器滑行。
+            predictStateTo(timestamp);
+            lostUpdate();
+            return false;
+        }
+        if (uv_compact_observation) {
+            measurement_weight = ekf_.updateUvCompact(
+                *uv_compact_observation, uvCamera(), cfg_.uv_nis_threshold);
+        } else if (uv_observation) {
+            measurement_weight = ekf_.updateUv(
+                *uv_observation, uvCamera(), cfg_.uv_nis_threshold);
+        } else if (ypd_observation) {
             measurement_weight = ekf_.updateYpd(
                 *ypd_observation, cfg_.ypd_nis_threshold);
         } else {
@@ -537,11 +711,19 @@ namespace auto_aim
             Armor camera;
         };
 
+        // 本帧的关联统计（供 node_sim 打印 / 诊断用）
+        dropped_ambiguous_ = 0;
+        dropped_nomatch_ = 0;
+        dropped_scale_ = 0;
+        accepted_observations_ = 0;
+
         std::vector<ArmorPair> valid_pairs;
         valid_pairs.reserve(armors.size());
         for (const auto& armor : armors) {
             if (armor.solve_result && !armor.tvec.empty()) {
-                valid_pairs.push_back({toWorld(armor), armor});
+                Armor refined_armor = armor;
+                refineArmorPose(refined_armor);
+                valid_pairs.push_back({toWorld(refined_armor), refined_armor});
             }
         }
         if (valid_pairs.size() > 4) {
@@ -607,12 +789,35 @@ namespace auto_aim
         std::vector<Candidate> candidates;
         candidates.reserve(valid_armors.size() * 4);
         for (std::size_t i = 0; i < valid_armors.size(); ++i) {
+            // 四块预测板各算一次代价：留最优，并且要求最优**明显优于**次优，
+            // 否则这块观测在两块板之间模棱两可 → 直接不要（见 TrackerConfig 注释）。
+            double best_cost = std::numeric_limits<double>::max();
+            double second_cost = std::numeric_limits<double>::max();
+            int best_plate = -1;
             for (int plate = 0; plate < 4; ++plate) {
                 const double cost = matchCost(*valid_armors[i], plate);
-                if (std::isfinite(cost)) {
-                    candidates.push_back({cost, i, plate});
+                if (!std::isfinite(cost)) continue;
+                if (cost < best_cost) {
+                    second_cost = best_cost;
+                    best_cost = cost;
+                    best_plate = plate;
+                } else if (cost < second_cost) {
+                    second_cost = cost;
                 }
             }
+            if (best_plate < 0) {
+                // 四个预测板全都"够不着"（超出 max_match_distance / max_angle_error）
+                // —— 这类框不是"模棱两可"，是跟当前预测完全对不上（假框，
+                // 或者预测已经飘了）。和 ambiguous / scale 分开计数才好定位。
+                ++dropped_nomatch_;
+                continue;
+            }
+            if (cfg_.association_margin > 1.0 &&
+                best_cost * cfg_.association_margin > second_cost) {
+                ++dropped_ambiguous_;
+                continue;   // 模棱两可：不拿它更新，交给滑行
+            }
+            candidates.push_back({best_cost, i, best_plate});
         }
         std::sort(candidates.begin(), candidates.end(),
             [](const Candidate& lhs, const Candidate& rhs) {
@@ -623,22 +828,80 @@ namespace auto_aim
         std::array<bool, 4> plate_used{{false, false, false, false}};
         std::vector<YpdObservation> ypd_observations;
         ypd_observations.reserve(candidates.size());
+        std::vector<UvObservation> uv_observations;
+        std::vector<UvCompactObservation> uv_compact_observations;
+        const bool use_uv = cfg_.uv_observation && camera_intrinsics_valid_;
+        if (use_uv) {
+            uv_observations.reserve(candidates.size());
+            uv_compact_observations.reserve(candidates.size());
+        }
         for (const auto& candidate : candidates) {
             if (armor_used[candidate.armor_index] || plate_used[candidate.plate_id]) continue;
             const Armor& armor = *valid_armors[candidate.armor_index];
+            if (use_uv) {
+                // 多块板同帧：同一个刚体，每多一块就多 8 个像素约束。
+                if (cfg_.uv_compact) {
+                    const auto compact = armorUvCompactObservation(armor, candidate.plate_id, cfg_);
+                    if (!compact) continue;
+                    armor_used[candidate.armor_index] = true;
+                    plate_used[candidate.plate_id] = true;
+                    uv_compact_observations.push_back(*compact);
+                    if (best_armor_index < 0) {
+                        best_armor_index = static_cast<int>(candidate.armor_index);
+                        best_plate_id = candidate.plate_id;
+                    }
+                    continue;
+                }
+                const auto uv = armorUvObservation(armor, candidate.plate_id, cfg_);
+                if (!uv) continue;
+                armor_used[candidate.armor_index] = true;
+                plate_used[candidate.plate_id] = true;
+                uv_observations.push_back(*uv);
+                if (best_armor_index < 0) {
+                    best_armor_index = static_cast<int>(candidate.armor_index);
+                    best_plate_id = candidate.plate_id;
+                }
+                continue;
+            }
             const auto observation = armorYpdObservation(armor, candidate.plate_id, cfg_);
             if (!observation) continue;
+            if (!scaleConsistent(armor, observation->distance)) {
+                ++dropped_scale_;
+                continue;
+            }
 
             armor_used[candidate.armor_index] = true;
             plate_used[candidate.plate_id] = true;
             ypd_observations.push_back(*observation);
+            ++accepted_observations_;
             if (best_armor_index < 0) {
                 best_armor_index = static_cast<int>(candidate.armor_index);
                 best_plate_id = candidate.plate_id;
             }
         }
 
-        if (!ypd_observations.empty()) {
+        if (!uv_compact_observations.empty()) {
+            const UvCamera camera = uvCamera();
+            last_measurement_weight_ = 0.0;
+            for (const auto& observation : uv_compact_observations) {
+                last_measurement_weight_ = std::max(
+                    last_measurement_weight_,
+                    ekf_.updateUvCompact(observation, camera, cfg_.uv_nis_threshold));
+            }
+            if (last_measurement_weight_ <= 0.0) best_armor_index = -1;
+        } else if (!uv_observations.empty()) {
+            // 逐条更新（rmcs_auto_aim_v2 的做法）：每喂一条就用**更新后的状态**重新
+            // 线性化下一条的预测，比"一次批处理、只在先验处线性化一次"更准，
+            // 也省掉 8N×8N 的矩阵求逆（每条只需求 8×8 或 4×4）。
+            const UvCamera camera = uvCamera();
+            last_measurement_weight_ = 0.0;
+            for (const auto& observation : uv_observations) {
+                last_measurement_weight_ = std::max(
+                    last_measurement_weight_,
+                    ekf_.updateUv(observation, camera, cfg_.uv_nis_threshold));
+            }
+            if (last_measurement_weight_ <= 0.0) best_armor_index = -1;
+        } else if (!ypd_observations.empty()) {
             last_measurement_weight_ = ekf_.updateYpdBatch(
                 ypd_observations, cfg_.ypd_nis_threshold);
             if (last_measurement_weight_ <= 0.0) best_armor_index = -1;
@@ -760,7 +1023,7 @@ namespace auto_aim
         home(0, 0) = point[0];
         home(1, 0) = point[1];
         home(2, 0) = point[2];
-        const Vec<3> camera = worldToCameraVector(home);
+        const Vec<3> camera = pointToCamera(camera_pose_, home);
         return {camera(0, 0), camera(1, 0), camera(2, 0)};
     }
 
@@ -894,6 +1157,16 @@ namespace auto_aim
         }
     }
 
+    void Tracker::setCameraIntrinsics(double fx, double fy, double cx, double cy)
+    {
+        if (!(fx > 1.0) || !(fy > 1.0)) return;
+        camera_fx_ = fx;
+        camera_fy_ = fy;
+        camera_cx_ = cx;
+        camera_cy_ = cy;
+        camera_intrinsics_valid_ = true;
+    }
+
     Armor Tracker::toWorld(const Armor& armor) const
     {
         if (!armor.solve_result || armor.tvec.empty()) return armor;
@@ -901,7 +1174,7 @@ namespace auto_aim
         if (!camera_pose_.valid) return armor;
         const Matrix<3, 3> camera_to_world = cameraToWorldRotation(camera_pose_);
         Armor result = armor;
-        const Vec<3> position = transformCvVector(camera_to_world, armor.tvec);
+        const Vec<3> position = pointToWorld(camera_pose_, toVec(armor.tvec));
         result.tvec = toMat(position);
         const auto world_rotation = transformRotation(camera_to_world, armor.rvec);
         if (world_rotation) result.rvec = *world_rotation;
@@ -913,6 +1186,86 @@ namespace auto_aim
         const Matrix<3, 3> world_to_camera = cameraToWorldRotation(
             camera_pose_).transpose();
         return transformVector(world_to_camera, value);
+    }
+
+
+
+    bool Tracker::scaleConsistent(const Armor& camera_armor, double distance) const
+    {
+        if (cfg_.scale_gate_ratio <= 0.0 || !camera_intrinsics_valid_) return true;
+        if (camera_armor.Points_2D.size() < 4 || !(distance > 0.1)) return true;
+        const double width_m = camera_armor.armor_type == auto_aim::small
+                                   ? cfg_.uv_armor_small_width
+                                   : cfg_.uv_armor_large_width;
+        const double height_m = cfg_.uv_armor_height;
+        const auto& p = camera_armor.Points_2D;   // lb, lt, rt, rb
+        const double px_width = 0.5 * (cv::norm(p[1] - p[2]) + cv::norm(p[0] - p[3]));
+        const double px_height = 0.5 * (cv::norm(p[1] - p[0]) + cv::norm(p[2] - p[3]));
+        if (px_width < 1.0 || px_height < 1.0) return false;   // 关键点塌缩
+        const double implied_width = camera_fx_ * width_m / px_width;
+        const double implied_height = camera_fy_ * height_m / px_height;
+        const auto ratio_of = [](double lhs, double rhs) {
+            return std::max(lhs, rhs) / std::max(1e-3, std::min(lhs, rhs));
+        };
+        const double tolerance = 1.0 + cfg_.scale_gate_ratio;
+        // 宽、高各自跟 PnP 距离比一次：**任一维度自洽就放行**。
+        // 为什么不能像原来那样"两个隐含距离取平均再比"：
+        //   · 宽度那条用标定过的等效宽度（0.1315 m），远近都准；
+        //   · 高度那条硬套板高 0.06 m，而近距离大靶面下网络关键点的竖直跨度
+        //     并不服从这个模型 —— 实测 1 m 工况：宽度隐含 ≈1.02 m（真值 1.00 m ✓）、
+        //     高度隐含 ≈0.46 m ✗，两者一平均就把**好观测**判成不一致。
+        // 这正是 NUC 上 1 m 工况 scale 拒收 ~70%、跟踪一直 TEMP_LOST 的原因。
+        // 远距那种荒唐解（7.5 m 处 PnP 给 0.34 m）两个维度会同时不符，
+        // 照样拦得住，所以闸门原本的目的没有丢。
+        return ratio_of(distance, implied_width) <= tolerance ||
+               ratio_of(distance, implied_height) <= tolerance;
+    }
+
+    void Tracker::refineArmorPose(Armor& armor) const
+    {
+        // **默认关**：实测它没有收益 —— 4 个角点 + 6 自由度时 IPPE 已经是精确最小二乘
+        // （重投影残差中位 0.09 px），LM 精修"无残差可降"；A/B 里 observation error
+        // 0.087 → 0.095 m（差异在噪声内）。UV 的价值不在"精修同一块板的位姿"，
+        // 而在更多约束/更好的噪声模型，见 docs/uv_observation.md。
+        static const bool enabled = [] {
+            const char* value = std::getenv("ULTRA_VISION_UV_POSE_REFINE");
+            return value != nullptr && std::string(value) != "0";
+        }();
+        if (!enabled || !camera_intrinsics_valid_) return;
+        if (!armor.solve_result || armor.tvec.empty() || armor.Points_2D.size() < 4) return;
+        const auto object_points = getArmor3DPoints(
+            armor.armor_type == auto_aim::small ? 0 : 1,
+            static_cast<float>(cfg_.uv_armor_small_width),
+            static_cast<float>(cfg_.uv_armor_large_width),
+            static_cast<float>(cfg_.uv_armor_height));
+        if (object_points.size() != 4) return;
+        const std::vector<cv::Point2f> image_points = {
+            armor.left.bottom, armor.left.top, armor.right.top, armor.right.bottom};
+        cv::Mat camera_matrix = (cv::Mat_<double>(3, 3) << camera_fx_, 0.0, camera_cx_,
+                                 0.0, camera_fy_, camera_cy_, 0.0, 0.0, 1.0);
+        cv::Mat rvec = armor.rvec.clone();
+        cv::Mat tvec = armor.tvec.clone();
+        try {
+            // LM 迭代重投影：初值来自 PnP，只优化这一块板的位姿（无关联/分支问题）。
+            cv::solvePnPRefineLM(object_points, image_points, camera_matrix, cv::Mat(), rvec, tvec);
+        } catch (const cv::Exception&) {
+            return;   // 精修失败就保留 PnP 结果
+        }
+        if (cv::checkRange(tvec) && cv::checkRange(rvec)) {
+            armor.rvec = rvec;
+            armor.tvec = tvec;
+        }
+    }
+
+    UvCamera Tracker::uvCamera() const
+    {
+        UvCamera camera;
+        camera.fx = camera_fx_;
+        camera.fy = camera_fy_;
+        camera.cx = camera_cx_;
+        camera.cy = camera_cy_;
+        camera.world_to_camera = cameraToWorldRotation(camera_pose_).transpose();
+        return camera;
     }
 
     cv::Mat Tracker::worldToCamera(const Vec<3>& value) const

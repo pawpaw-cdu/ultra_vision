@@ -9,18 +9,22 @@ namespace auto_aim
         // Physical limits are expressed in SI units. They are intentionally
         // frame-rate independent, unlike the previous "degrees per frame"
         // limits which changed behavior when the processing rate changed.
+        // 这几条是**机器人物理限制**，配置里按度写、这里按弧度存；
+        // 默认值 = 实车/仿真当前在用的那组（360/180 deg/s、1800/1200 deg/s²、
+        // 20000/12000 deg/s³），改硬件时改 configs/tracker.yaml 的 gimbal 段。
         double pitch_min = -70.0 * 3.14159265358979323846 / 180.0;
         double pitch_max = 70.0 * 3.14159265358979323846 / 180.0;
-        double max_yaw_velocity = 2.2;       // rad/s
-        double max_pitch_velocity = 1.5;     // rad/s
-        double max_yaw_acceleration = 8.0;   // rad/s^2
-        double max_pitch_acceleration = 6.0; // rad/s^2
-        double max_yaw_jerk = 80.0;          // rad/s^3
-        double max_pitch_jerk = 60.0;        // rad/s^3
+        double max_yaw_velocity = 360.0 * 3.14159265358979323846 / 180.0;   // rad/s
+        double max_pitch_velocity = 180.0 * 3.14159265358979323846 / 180.0; // rad/s
+        double max_yaw_acceleration = 1800.0 * 3.14159265358979323846 / 180.0;
+        double max_pitch_acceleration = 1200.0 * 3.14159265358979323846 / 180.0;
+        double max_yaw_jerk = 20000.0 * 3.14159265358979323846 / 180.0;
+        double max_pitch_jerk = 12000.0 * 3.14159265358979323846 / 180.0;
+        // 跟踪增益：误差异常大时靠它们收敛。默认值就是仿真/实车在跑的这一组。
         double yaw_response_gain = 10.0;     // 1/s
         double pitch_response_gain = 10.0;   // 1/s
-        double feedforward_gain = 0.85;
-        double feedforward_time_constant = 0.06; // s
+        double feedforward_gain = 1.0;
+        double feedforward_time_constant = 0.03; // s
         double yaw_deadband = 0.0005;        // rad
         double pitch_deadband = 0.0005;      // rad
         double settle_angle = 0.6 * 3.14159265358979323846 / 180.0;

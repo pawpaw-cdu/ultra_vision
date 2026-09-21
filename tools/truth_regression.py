@@ -72,6 +72,32 @@ def load_points(path):
     return points
 
 
+def estimate_offset_us(truth, observation, search_us=60000, step_us=1000):
+    """估计"我方时间戳 - 仿真真值时间戳"的偏置。
+
+    为什么要它：真值写的是**仿真时钟**，我们记录的是**帧到达主机的时刻**（网络+抖动
+    几毫秒），而云台在跟着靶转 —— 在相机系里比位置时，这点时间差会被算成"观测误差"
+    （实测 5 ms × 6 m × 2 rad/s ≈ 6 cm，正好是之前量到的量级）。
+    做法：扫一遍可能的偏置，取中位观测误差最小的那个；返回 (偏置, 误差中位)。
+    这样"观测质量"和"时间对齐"两件事就能分开看。
+    """
+    times = sorted(truth)
+    best = (0, float("inf"))
+    for offset in range(-search_us, search_us + 1, step_us):
+        errors = []
+        for t, point in observation:
+            frame = nearest_frame(times, t + offset, 25_000)
+            if frame is None:
+                continue
+            errors.append(min(math.dist(point, plate) for plate in truth[frame]))
+        if len(errors) < 20:
+            continue
+        median = st.median(errors)
+        if median < best[1]:
+            best = (offset, median)
+    return best
+
+
 def observation_error(truth, observation, tolerance_us):
     """Distance from each observed plate to the closest true plate."""
     times = sorted(truth)
@@ -200,7 +226,9 @@ def main(argv=None):
     parser.add_argument("--observation")
     parser.add_argument("--estimate")
     parser.add_argument("--selector")
-    parser.add_argument("--tolerance-us", type=int, default=25_000,
+    parser.add_argument("--estimate-offset", action="store_true",
+                        help="先扫时间偏置再报观测误差（分开'时间对齐'与'观测质量'）")
+    parser.add_argument("--tolerance-us", type=int, default=5_000,
                         help="max timestamp gap when matching frames")
     parser.add_argument("--max-observation-error", type=float, default=0.05)
     parser.add_argument("--max-center-error", type=float, default=0.06)
@@ -221,9 +249,13 @@ def main(argv=None):
 
     failed = False
 
+    observation_points = load_points(args.observation)
+    if args.estimate_offset:
+        offset, median_error = estimate_offset_us(truth, observation_points)
+        print(f"time offset estimate : {offset / 1000:+.1f} ms "
+              f"(median observation error {median_error:.4f} m at that offset)")
     obs_stats = report("observation error",
-                       observation_error(truth, load_points(args.observation),
-                                         args.tolerance_us))
+                       observation_error(truth, observation_points, args.tolerance_us))
     if obs_stats and obs_stats["median"] > args.max_observation_error:
         print(f"FAILED: observation error median {obs_stats['median']:.3f} m "
               f"> {args.max_observation_error} m (detector/PnP stage)")

@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
+#include <iostream>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -141,6 +143,61 @@ struct YpdObservation {
     double armor_yaw_noise = 4.0e-2;
 };
 
+// UV（像素）观测的相机模型：内参 + 世界→相机旋转。
+// 相机在 world 原点（与 Tracker::worldToCameraVector 同源：world_to_camera 就是
+// 该旋转），所以重投影只需要一次旋转 + 针孔投影。
+struct UvCamera {
+    double fx = 1.0;
+    double fy = 1.0;
+    double cx = 0.0;
+    double cy = 0.0;
+    Matrix<3, 3> world_to_camera;
+};
+
+// UV 观测：直接把装甲板**四个角点像素**放进滤波器，观测函数写重投影。
+//
+// 与 YPD 观测的区别（这是加它的原因）：
+//   * YPD 是"PnP 先解一次最小二乘 → 把 yaw/pitch/distance/armor_yaw 当量测"。
+//     PnP 会把像素噪声**放大且相关**（尤其是距离：小靶面正对相机时距离是病态方向），
+//     而我们只能给一个近似的对角线噪声去描述它；
+//   * UV 只做一次最小二乘（EKF 自己），量测噪声就是像素噪声（~1 px，好标定、无相关），
+//     四个角点的几何约束按重投影原样进入滤波器。
+// 代价：雅可比不再是解析式（这里用中心差分，9 维状态 × 每点 2 次投影，成本可忽略），
+// 而且要求 world→camera 的位姿与观测是同一时刻的（Tracker 已经保证）。
+struct UvObservation {
+    int plate_id = -1;
+    // 顺序与 perception/pnp_solver.cpp 的 getArmor3DPoints 一致：
+    // left_bottom, left_top, right_top, right_bottom。
+    std::array<Vec<2>, 4> corners{};
+    double half_width = 0.067;    // 小装甲板 0.134/2（大板用 0.225/2）
+    double half_height = 0.0285;  // 0.057/2
+    double sigma_px = 1.5;        // 角点像素噪声（含检测偏差，按实测标定）
+};
+
+// 紧凑 UV 观测（一个灯条的像素 → 4 维），思路借 awakening-main 的
+// `points_to_observation()`：
+//     delta  = top - bottom
+//     angle  = atan2(delta.x, delta.y)      （灯条在图像里的方向）
+//     center = (top + bottom) / 2
+//     length = |delta|
+// 比"四角点 8 维"更省也更稳：
+//   * **没有"哪个角对应哪个物点"的镜像二义**（四角点版本要靠重投影残差搜 4 种配对）；
+//   * 三个量各自对应一个物理方向：角度=朝向、长度=尺度/距离、中心=位置，
+//     噪声可以按量分别标定（角度 rad、其余 px），不用假设 8 个像素同分布。
+// 端点按图像上下取（top 是 v 更小的那个），所以角度天然落在 ±90° 附近，
+// 不需要处理灯条"上下颠倒"。
+struct UvCompactObservation {
+    int plate_id = -1;
+    double angle = 0.0;       // atan2(dx, dy)，与参考实现一致
+    double center_x = 0.0;
+    double center_y = 0.0;
+    double length = 0.0;
+    double half_width = 0.067;    // 与 PnP 段一致，用于预测
+    double half_height = 0.0285;
+    double sigma_px = 3.0;    // 中心/长度的像素噪声
+    double sigma_angle = 0.02;
+};
+
 // State: [x_c, vx, y_c, vy, sin(theta), cos(theta), omega, z_c, vz].
 // The four armor plates are distributed on a circle in the x-z plane.
 class ArmorEKF {
@@ -148,6 +205,15 @@ public:
     struct Config {
         double R = 0.21;
         double process_acc = 1.0;
+        // 平移自适应的过程噪声（2026-09-26 加的）。过程噪声 `process_acc` 物理上
+        // 是"底盘加速度的不确定度"：靶车静止时它是 0，横移/急停时才有值。
+        // 常数取大了 → 静止/近距时把观测噪声当运动吸进来（实测 1 m 近距工况
+        // FIRING 从 81/115/82 掉到 16/15/17）；取小了 → 平移时速度估计跟不上
+        // 阶跃（横向误差 p10/p90 从 ±10 cm 涨到 -19/+24 cm）。
+        // 所以按下式随**估计速度**自适应放大，静止时回到 process_acc：
+        //   qa = clamp(process_acc · (1 + (|v|/speed_ref)²), process_acc, process_acc_max)
+        double process_acc_speed_ref = 0.28;   // 米/秒，速度尺度
+        double process_acc_max = 40.0;         // 上限，防止速度估计野值时爆掉
         double process_omega = 2.0;
         double meas_noise = 0.01;
         double y_noise_mult = 30.0;
@@ -167,10 +233,10 @@ public:
     }
 
     void setDt(double dt) {
-        if (std::abs(dt - cfg_dt_) > 1e-9) {
-            cfg_dt_ = dt;
-            buildQ();
-        }
+        // 每个周期都重建：Q 里现在含"当前速度"（平移自适应过程噪声），
+        // 只在 dt 变化时重建会让它停留在旧速度上。9x9 赋值，代价可忽略。
+        cfg_dt_ = dt;
+        buildQ();
     }
 
     void reset() {
@@ -494,6 +560,22 @@ public:
             x_(4, 0) /= norm;
             x_(5, 0) /= norm;
         }
+        if (std::getenv("ULTRA_VISION_UV_DEBUG") != nullptr) {
+            // 重投影残差的 RMS：这是 UV 观测"到底喂进去多少像素误差"的唯一直接
+            // 指标。正常应当是 1~3 px（角点噪声 + 模型偏差）；到十几 px 说明
+            // 板面几何/配对错了，滤波器只会学到一个错的状态。
+            double sum = 0.0;
+            int count = 0;
+            for (const auto& residual : residuals) {
+                for (int row = 0; row < 8; ++row) {
+                    sum += residual(row, 0) * residual(row, 0);
+                    ++count;
+                }
+            }
+            std::cerr << "[uv] plates=" << accepted.size()
+                      << " residual_rms=" << std::sqrt(sum / std::max(1, count))
+                      << " px weight=" << min_weight << std::endl;
+        }
         return min_weight;
     }
 
@@ -741,6 +823,542 @@ public:
         return position;
     }
 
+    /// @brief 给定状态，算某块装甲板四个角点**在 world 系里的位置**。
+    ///        板面几何与 YPD 模型同一套：圆心在底盘中心 + R·[cos φ, 0, sin φ]（φ = θ + α），
+    ///        法向是径向，竖直方向 = world 的 +y，切向 = up × radial。
+    ///        物点定义与 getArmor3DPoints 一致（y = 板面横向、z = 竖直），
+    ///        所以角点顺序同样是 left_bottom, left_top, right_top, right_bottom。
+    static std::array<Vec<3>, 4> armorCornersOf(
+        const Vec<9>& state, int plate_id, double radius, double half_width, double half_height,
+        double y_offset, double side_sign = 1.0, double vertical_sign = 1.0) {
+        const double yaw = std::atan2(state(4, 0), state(5, 0));
+        const double phi = yaw + angleForPlate(plate_id);
+        const double c = std::cos(phi);
+        const double s = std::sin(phi);
+
+        Vec<3> center;
+        center(0, 0) = state(0, 0) + radius * c;
+        center(1, 0) = state(2, 0) + y_offset;
+        center(2, 0) = state(7, 0) + radius * s;
+
+        // 切向（板面横向，指向"图像左侧"）与竖直方向。
+        // 注意 world 系的 y 是**向下**的：这个 EKF 的 world 就是"云台归零时的相机系"
+        // （见 tracker.cpp 的 cameraToBaseRotation：yaw=pitch=0 时 camera_to_base = I），
+        // 所以"图像上方"对应 world 的 -y。物点顺序与 getArmor3DPoints 一致
+        // （y = 板面横向、z = 竖直），于是 ŷ = radial × up（radial = 外法向）。
+        Vec<3> tangent;
+        tangent(0, 0) = s;
+        tangent(1, 0) = 0.0;
+        tangent(2, 0) = -c;
+        Vec<3> up;
+        up(0, 0) = 0.0;
+        up(1, 0) = -1.0;
+        up(2, 0) = 0.0;
+
+        // 物点 (0, ±half_w, ±half_h) 的符号：分别为左/右 与 下/上。
+        constexpr double side[4] = {1.0, 1.0, -1.0, -1.0};
+        constexpr double vertical[4] = {-1.0, 1.0, 1.0, -1.0};
+        std::array<Vec<3>, 4> corners;
+        for (int i = 0; i < 4; ++i) {
+            corners[static_cast<std::size_t>(i)] =
+                center + tangent * (half_width * side_sign * side[i]) +
+                up * (half_height * vertical_sign * vertical[i]);
+        }
+        return corners;
+    }
+
+    std::array<Vec<3>, 4> armorCorners(int plate_id, double half_width,
+                                       double half_height) const {
+        return armorCornersOf(x_, plate_id, cfg_.R, half_width, half_height,
+                              cfg_.armor_y_offsets[plate_id]);
+    }
+
+    /// @brief world 点 → 像素（针孔，无畸变；相机在 world 原点）。
+    ///        @return false = 该点在相机后方（这一帧不可用）。
+    static bool projectUv(const Vec<3>& world, const UvCamera& camera, Vec<2>& pixel) {
+        Vec<3> point;
+        for (int row = 0; row < 3; ++row) {
+            for (int column = 0; column < 3; ++column) {
+                point(row, 0) += camera.world_to_camera(row, column) * world(column, 0);
+            }
+        }
+        if (point(2, 0) <= 1e-3) return false;
+        pixel(0, 0) = camera.fx * point(0, 0) / point(2, 0) + camera.cx;
+        pixel(1, 0) = camera.fy * point(1, 0) / point(2, 0) + camera.cy;
+        return true;
+    }
+
+    /// @brief 预测某块板四个角点的像素（观测函数）。
+    static bool predictUvCorners(const Vec<9>& state, int plate_id, double radius,
+                                 double half_width, double half_height, double y_offset,
+                                 const UvCamera& camera, std::array<Vec<2>, 4>& corners,
+                                 double side_sign = 1.0, double vertical_sign = 1.0) {
+        const auto world = armorCornersOf(state, plate_id, radius, half_width, half_height,
+                                          y_offset, side_sign, vertical_sign);
+        for (int i = 0; i < 4; ++i) {
+            if (!projectUv(world[static_cast<std::size_t>(i)], camera,
+                           corners[static_cast<std::size_t>(i)])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /// @brief 重投影观测的雅可比（8×9：四角点 × u,v）。
+    ///        用中心差分而不是解析式：状态只有 9 维、每点两次投影，
+    ///        成本可忽略，而手写 8×9 解析式（含 sin/cos 表示、板面切向）很容易写错。
+    static Matrix<8, 9> uvJacobian(const Vec<9>& state, int plate_id, double radius,
+                                    double half_width, double half_height, double y_offset,
+                                    const UvCamera& camera, double side_sign = 1.0,
+                                    double vertical_sign = 1.0) {
+        const double step[9] = {1e-4, 1e-4, 1e-4, 1e-4, 1e-5, 1e-5, 1e-5, 1e-4, 1e-4};
+        Matrix<8, 9> jacobian;
+        for (int column = 0; column < 9; ++column) {
+            Vec<9> plus = state;
+            Vec<9> minus = state;
+            plus(column, 0) += step[column];
+            minus(column, 0) -= step[column];
+            std::array<Vec<2>, 4> corners_plus{};
+            std::array<Vec<2>, 4> corners_minus{};
+            if (!predictUvCorners(plus, plate_id, radius, half_width, half_height, y_offset,
+                                  camera, corners_plus, side_sign, vertical_sign) ||
+                !predictUvCorners(minus, plate_id, radius, half_width, half_height, y_offset,
+                                  camera, corners_minus, side_sign, vertical_sign)) {
+                continue;
+            }
+            for (int corner = 0; corner < 4; ++corner) {
+                for (int axis = 0; axis < 2; ++axis) {
+                    jacobian(2 * corner + axis, column) =
+                        (corners_plus[static_cast<std::size_t>(corner)](axis, 0) -
+                         corners_minus[static_cast<std::size_t>(corner)](axis, 0)) /
+                        (2.0 * step[column]);
+                }
+            }
+        }
+        return jacobian;
+    }
+
+    /// @brief UV 观测更新（可一批多块板：同一刚体，每多一块就多 8 个约束）。
+    ///        @return 权重（0 = 全被门限拒掉）
+    double updateUvBatch(const std::vector<UvObservation>& observations, const UvCamera& camera,
+                         double nis_threshold = std::numeric_limits<double>::infinity()) {
+        if (observations.empty() || !initialized_) return 0.0;
+        const bool debug = std::getenv("ULTRA_VISION_UV_DEBUG") != nullptr;
+        double debug_sq = 0.0;
+        int debug_count = 0;
+
+        std::vector<Vec<8>> residuals;
+        std::vector<Matrix<8, 9>> jacobians;
+        std::vector<UvObservation> accepted;
+        accepted.reserve(observations.size());
+        residuals.reserve(observations.size());
+        jacobians.reserve(observations.size());
+        double min_weight = 1.0;
+
+        for (const auto& observation : observations) {
+            if (observation.plate_id < 0 || observation.plate_id >= 4) continue;
+            // 矩形装甲板的四个角点存在**镜像二义**（PnP 的 IPPE 同样有两个解）：
+            // 左右镜像 / 上下镜像 / 两者 都属于"同一个矩形刚体"的合法位姿。
+            // 这里按**重投影残差最小**挑配对（4 种符号组合），与 IPPE 选解的口径
+            // 一致；成本是 4 倍的投影（几十次浮点运算，可忽略）。
+            // 好处：world 系的"上下/左右"符号不必靠猜，换坐标系定义也不会错。
+            std::array<Vec<2>, 4> corners{};
+            double best_sq = std::numeric_limits<double>::max();
+            double best_side = 1.0;
+            double best_vertical = 1.0;
+            for (const double side_sign : {1.0, -1.0}) {
+                for (const double vertical_sign : {1.0, -1.0}) {
+                    std::array<Vec<2>, 4> candidate{};
+                    if (!predictUvCorners(x_, observation.plate_id, cfg_.R,
+                                          observation.half_width, observation.half_height,
+                                          cfg_.armor_y_offsets[observation.plate_id], camera,
+                                          candidate, side_sign, vertical_sign)) {
+                        continue;
+                    }
+                    double sum = 0.0;
+                    for (int i = 0; i < 4; ++i) {
+                        const double du =
+                            observation.corners[static_cast<std::size_t>(i)](0, 0) -
+                            candidate[static_cast<std::size_t>(i)](0, 0);
+                        const double dv =
+                            observation.corners[static_cast<std::size_t>(i)](1, 0) -
+                            candidate[static_cast<std::size_t>(i)](1, 0);
+                        sum += du * du + dv * dv;
+                    }
+                    if (sum < best_sq) {
+                        best_sq = sum;
+                        best_side = side_sign;
+                        best_vertical = vertical_sign;
+                        corners = candidate;
+                    }
+                }
+            }
+            if (!(best_sq < std::numeric_limits<double>::max())) continue;
+            const Matrix<8, 9> jacobian = uvJacobian(
+                x_, observation.plate_id, cfg_.R, observation.half_width,
+                observation.half_height, cfg_.armor_y_offsets[observation.plate_id], camera,
+                best_side, best_vertical);
+
+            Vec<8> residual;
+            for (int corner = 0; corner < 4; ++corner) {
+                for (int axis = 0; axis < 2; ++axis) {
+                    residual(2 * corner + axis, 0) =
+                        observation.corners[static_cast<std::size_t>(corner)](axis, 0) -
+                        corners[static_cast<std::size_t>(corner)](axis, 0);
+                    if (debug) {
+                        debug_sq += residual(2 * corner + axis, 0) *
+                            residual(2 * corner + axis, 0);
+                        ++debug_count;
+                    }
+                }
+            }
+
+            Matrix<8, 8> noise;
+            const double sigma_sq = std::max(observation.sigma_px * observation.sigma_px, 1e-6);
+            for (int row = 0; row < 8; ++row) noise(row, row) = sigma_sq;
+
+            const Matrix<8, 8> innovation = jacobian * P_ * jacobian.transpose() + noise;
+            Matrix<8, 8> innovation_inverse;
+            if (!Matrix<8, 8>::invert(innovation, innovation_inverse)) continue;
+
+            double nis = 0.0;
+            for (int row = 0; row < 8; ++row) {
+                for (int column = 0; column < 8; ++column) {
+                    nis += residual(row, 0) * innovation_inverse(row, column) *
+                        residual(column, 0);
+                }
+            }
+            if (nis > nis_threshold) continue;
+
+            min_weight = std::min(min_weight, std::exp(-0.5 * nis));
+            accepted.push_back(observation);
+            residuals.push_back(residual);
+            jacobians.push_back(jacobian);
+        }
+        if (debug) {
+            // 门限之前就打：这样"全被 NIS 拒掉"也能看到到底差了多少像素。
+            std::cerr << "[uv] raw=" << observations.size()
+                      << " residual_rms=" << std::sqrt(debug_sq / std::max(1, debug_count))
+                      << " px accepted=" << accepted.size();
+            if (!observations.empty()) {
+                std::cerr << " plate=" << observations.front().plate_id;
+            }
+            std::cerr << std::endl;
+        }
+        if (accepted.empty()) return 0.0;
+
+        const int measurement_dim = 8 * static_cast<int>(accepted.size());
+        std::vector<std::vector<double>> H(measurement_dim, std::vector<double>(9, 0.0));
+        std::vector<double> residual(measurement_dim, 0.0);
+        std::vector<double> noise_diagonal(measurement_dim, 0.0);
+        for (std::size_t index = 0; index < accepted.size(); ++index) {
+            const int offset = 8 * static_cast<int>(index);
+            for (int row = 0; row < 8; ++row) {
+                for (int column = 0; column < 9; ++column) {
+                    H[offset + row][column] = jacobians[index](row, column);
+                }
+                residual[offset + row] = residuals[index](row, 0);
+                noise_diagonal[offset + row] =
+                    std::max(accepted[index].sigma_px * accepted[index].sigma_px, 1e-6);
+            }
+        }
+
+        std::vector<std::vector<double>> innovation(measurement_dim,
+                                                    std::vector<double>(measurement_dim, 0.0));
+        for (int row = 0; row < measurement_dim; ++row) {
+            for (int column = 0; column < measurement_dim; ++column) {
+                double value = 0.0;
+                for (int state_row = 0; state_row < 9; ++state_row) {
+                    for (int state_column = 0; state_column < 9; ++state_column) {
+                        value += H[row][state_row] * P_(state_row, state_column) *
+                            H[column][state_column];
+                    }
+                }
+                innovation[row][column] = value;
+            }
+            innovation[row][row] += noise_diagonal[row];
+        }
+        std::vector<std::vector<double>> innovation_inverse;
+        if (!invertDynamic(innovation, innovation_inverse)) return 0.0;
+
+        std::vector<std::vector<double>> state_measurement(9,
+                                                           std::vector<double>(measurement_dim, 0.0));
+        for (int state_row = 0; state_row < 9; ++state_row) {
+            for (int measurement = 0; measurement < measurement_dim; ++measurement) {
+                double value = 0.0;
+                for (int state_column = 0; state_column < 9; ++state_column) {
+                    value += P_(state_row, state_column) * H[measurement][state_column];
+                }
+                state_measurement[state_row][measurement] = value;
+            }
+        }
+        std::vector<std::vector<double>> gain(9, std::vector<double>(measurement_dim, 0.0));
+        for (int state_row = 0; state_row < 9; ++state_row) {
+            for (int output = 0; output < measurement_dim; ++output) {
+                for (int input = 0; input < measurement_dim; ++input) {
+                    gain[state_row][output] +=
+                        state_measurement[state_row][input] * innovation_inverse[input][output];
+                }
+            }
+        }
+        for (int state_row = 0; state_row < 9; ++state_row) {
+            for (int measurement = 0; measurement < measurement_dim; ++measurement) {
+                x_(state_row, 0) += gain[state_row][measurement] * residual[measurement];
+            }
+        }
+
+        std::vector<std::vector<double>> transform(9, std::vector<double>(9, 0.0));
+        for (int row = 0; row < 9; ++row) {
+            transform[row][row] = 1.0;
+            for (int column = 0; column < 9; ++column) {
+                for (int measurement = 0; measurement < measurement_dim; ++measurement) {
+                    transform[row][column] -= gain[row][measurement] * H[measurement][column];
+                }
+            }
+        }
+        std::vector<std::vector<double>> covariance(9, std::vector<double>(9, 0.0));
+        for (int row = 0; row < 9; ++row) {
+            for (int column = 0; column < 9; ++column) {
+                double value = 0.0;
+                for (int i = 0; i < 9; ++i) {
+                    for (int j = 0; j < 9; ++j) {
+                        value += transform[row][i] * P_(i, j) * transform[column][j];
+                    }
+                }
+                covariance[row][column] = value;
+            }
+        }
+        for (int row = 0; row < 9; ++row) {
+            for (int column = 0; column < 9; ++column) {
+                double value = 0.0;
+                for (int measurement = 0; measurement < measurement_dim; ++measurement) {
+                    value += gain[row][measurement] * noise_diagonal[measurement] *
+                        gain[column][measurement];
+                }
+                covariance[row][column] += value;
+            }
+            if (covariance[row][row] < cfg_.P_min) covariance[row][row] = cfg_.P_min;
+        }
+        for (int row = 0; row < 9; ++row) {
+            for (int column = 0; column < 9; ++column) {
+                P_(row, column) = covariance[row][column];
+            }
+        }
+
+        const double norm = std::sqrt(x_(4, 0) * x_(4, 0) + x_(5, 0) * x_(5, 0));
+        if (norm > 1e-6) {
+            x_(4, 0) /= norm;
+            x_(5, 0) /= norm;
+        }
+        return min_weight;
+    }
+
+    double updateUv(const UvObservation& observation, const UvCamera& camera,
+                    double nis_threshold = std::numeric_limits<double>::infinity()) {
+        std::vector<UvObservation> observations{observation};
+        return updateUvBatch(observations, camera, nis_threshold);
+    }
+
+    /// @brief 从状态预测某块板的**两条灯条**（左/右）的紧凑观测量。
+    ///        lightbar 0 = 左（lt, lb），1 = 右（rt, rb），与探测器给的点序一致。
+    static bool predictUvCompact(const Vec<9>& state, int plate_id, double radius,
+                                 double half_width, double half_height, double y_offset,
+                                 const UvCamera& camera, int lightbar,
+                                 UvCompactObservation& observation) {
+        const auto corners = armorCornersOf(state, plate_id, radius, half_width, half_height,
+                                            y_offset);
+        // 角点顺序 lb, lt, rt, rb：左灯条 = (lt, lb)，右灯条 = (rt, rb)。
+        const std::size_t top_index = lightbar == 0 ? 1u : 2u;
+        const std::size_t bottom_index = lightbar == 0 ? 0u : 3u;
+        Vec<2> top{};
+        Vec<2> bottom{};
+        if (!projectUv(corners[top_index], camera, top) ||
+            !projectUv(corners[bottom_index], camera, bottom)) {
+            return false;
+        }
+        // 按图像上下取端点（v 小的当 top），与参考实现一致。
+        if (top(1, 0) > bottom(1, 0)) std::swap(top, bottom);
+        const double dx = top(0, 0) - bottom(0, 0);
+        const double dy = top(1, 0) - bottom(1, 0);
+        observation.plate_id = plate_id;
+        observation.angle = std::atan2(dx, dy);
+        observation.center_x = 0.5 * (top(0, 0) + bottom(0, 0));
+        observation.center_y = 0.5 * (top(1, 0) + bottom(1, 0));
+        observation.length = std::sqrt(dx * dx + dy * dy);
+        return true;
+    }
+
+    /// @brief 通用 EKF 更新（Joseph 形式 + 对称化），DIM = 该量测的维数。
+    ///        参考实现（rmcs_auto_aim_v2）逐条更新并用 Joseph 形式，这里同一口径。
+    /// @brief 只算 NIS（不更新状态）：用于"多个关联假设里挑一个"。
+    template <int DIM>
+    double computeNis(const Matrix<DIM, 9>& jacobian, const Vec<DIM>& residual,
+                      const Vec<DIM>& noise_variance) const {
+        Matrix<DIM, DIM> noise;
+        for (int i = 0; i < DIM; ++i) noise(i, i) = std::max(noise_variance(i, 0), 1e-12);
+        const Matrix<DIM, DIM> innovation = jacobian * P_ * jacobian.transpose() + noise;
+        Matrix<DIM, DIM> innovation_inverse;
+        if (!Matrix<DIM, DIM>::invert(innovation, innovation_inverse)) {
+            return std::numeric_limits<double>::infinity();
+        }
+        double nis = 0.0;
+        for (int row = 0; row < DIM; ++row) {
+            for (int column = 0; column < DIM; ++column) {
+                nis += residual(row, 0) * innovation_inverse(row, column) * residual(column, 0);
+            }
+        }
+        return nis;
+    }
+
+    template <int DIM>
+    double applyUpdate(const Matrix<DIM, 9>& jacobian, const Vec<DIM>& residual,
+                       const Vec<DIM>& noise_variance,
+                       double nis_threshold = std::numeric_limits<double>::infinity()) {
+        Matrix<DIM, DIM> noise;
+        for (int i = 0; i < DIM; ++i) noise(i, i) = std::max(noise_variance(i, 0), 1e-12);
+        const Matrix<DIM, DIM> innovation = jacobian * P_ * jacobian.transpose() + noise;
+        Matrix<DIM, DIM> innovation_inverse;
+        if (!Matrix<DIM, DIM>::invert(innovation, innovation_inverse)) return 0.0;
+
+        double nis = 0.0;
+        for (int row = 0; row < DIM; ++row) {
+            for (int column = 0; column < DIM; ++column) {
+                nis += residual(row, 0) * innovation_inverse(row, column) * residual(column, 0);
+            }
+        }
+        if (nis > nis_threshold) return 0.0;
+
+        const Matrix<9, DIM> gain = P_ * jacobian.transpose() * innovation_inverse;
+        x_ = x_ + gain * residual;
+
+        Matrix<9, 9> identity;
+        for (int i = 0; i < 9; ++i) identity(i, i) = 1.0;
+        const Matrix<9, 9> complement = identity - gain * jacobian;
+        P_ = complement * P_ * complement.transpose() + gain * noise * gain.transpose();
+        // 对称化 + 对角线下限（数值上避免非对称与负定）。
+        P_ = (P_ + P_.transpose()) * 0.5;
+        for (int i = 0; i < 9; ++i) {
+            if (P_(i, i) < cfg_.P_min) P_(i, i) = cfg_.P_min;
+        }
+        const double norm = std::sqrt(x_(4, 0) * x_(4, 0) + x_(5, 0) * x_(5, 0));
+        if (norm > 1e-6) {
+            x_(4, 0) /= norm;
+            x_(5, 0) /= norm;
+        }
+        return std::exp(-0.5 * nis);
+    }
+
+    /// @brief 紧凑 UV 观测更新。会同时在左/右灯条两种假设里取残差更小的那个
+    ///        （探测器的"左右"标签在极端姿态下可能翻转，取小残差即自动对齐）。
+    double updateUvCompact(const UvCompactObservation& observation, const UvCamera& camera,
+                           double nis_threshold = std::numeric_limits<double>::infinity()) {
+        if (!initialized_ || observation.plate_id < 0 || observation.plate_id >= 4) return 0.0;
+        const double radius = cfg_.R;
+        const double y_offset = cfg_.armor_y_offsets[observation.plate_id];
+
+        // 观测向量 z = [angle, cx, cy, length]；残差的角分量按 2π 归一化。
+        Vec<4> z;
+        z(0, 0) = observation.angle;
+        z(1, 0) = observation.center_x;
+        z(2, 0) = observation.center_y;
+        z(3, 0) = observation.length;
+        Vec<4> variance;
+        variance(0, 0) = std::max(observation.sigma_angle * observation.sigma_angle, 1e-8);
+        const double sigma_sq = std::max(observation.sigma_px * observation.sigma_px, 1e-6);
+        variance(1, 0) = sigma_sq;
+        variance(2, 0) = sigma_sq;
+        variance(3, 0) = sigma_sq;
+
+        // 关联：在"观测是左灯条 / 右灯条"两个假设里**只选残差更小的那个**应用。
+        // （早期实现两个假设都 apply 了一遍，正确假设刚把状态拉过去，错误假设又把它
+        //   拽回来 —— 单测 testUpdateDirection 一步就能看出来：观测偏 +12 px，
+        //   预测却朝 −44 px 走。）
+        double best_nis = std::numeric_limits<double>::infinity();
+        Matrix<4, 9> best_jacobian;
+        Vec<4> best_residual;
+        bool have_best = false;
+        for (int lightbar = 0; lightbar < 2; ++lightbar) {
+            UvCompactObservation predicted;
+            predicted.plate_id = observation.plate_id;
+            if (!predictUvCompact(x_, observation.plate_id, radius, observation.half_width,
+                                  observation.half_height, y_offset, camera, lightbar,
+                                  predicted)) {
+                continue;
+            }
+            Vec<4> residual;
+            residual(0, 0) = normalizeAngle(z(0, 0) - predicted.angle);
+            residual(1, 0) = z(1, 0) - predicted.center_x;
+            residual(2, 0) = z(2, 0) - predicted.center_y;
+            residual(3, 0) = z(3, 0) - predicted.length;
+
+            // 雅可比：中心差分（4×9，与角点版本同量级成本）。
+            Matrix<4, 9> jacobian;
+            const double step[9] = {1e-4, 1e-4, 1e-4, 1e-4, 1e-5, 1e-5, 1e-5, 1e-4, 1e-4};
+            bool valid = true;
+            for (int column = 0; column < 9 && valid; ++column) {
+                Vec<9> plus = x_;
+                Vec<9> minus = x_;
+                plus(column, 0) += step[column];
+                minus(column, 0) -= step[column];
+                UvCompactObservation predicted_plus;
+                UvCompactObservation predicted_minus;
+                if (!predictUvCompact(plus, observation.plate_id, radius,
+                                      observation.half_width, observation.half_height, y_offset,
+                                      camera, lightbar, predicted_plus) ||
+                    !predictUvCompact(minus, observation.plate_id, radius,
+                                      observation.half_width, observation.half_height, y_offset,
+                                      camera, lightbar, predicted_minus)) {
+                    valid = false;
+                    break;
+                }
+                Vec<4> plus_values;
+                plus_values(0, 0) = predicted_plus.angle;
+                plus_values(1, 0) = predicted_plus.center_x;
+                plus_values(2, 0) = predicted_plus.center_y;
+                plus_values(3, 0) = predicted_plus.length;
+                Vec<4> minus_values;
+                minus_values(0, 0) = predicted_minus.angle;
+                minus_values(1, 0) = predicted_minus.center_x;
+                minus_values(2, 0) = predicted_minus.center_y;
+                minus_values(3, 0) = predicted_minus.length;
+                // 角分量在 ±π 附近折返：差分也按归一化差值算，避免 2π 跳变。
+                plus_values(0, 0) = predicted.angle + normalizeAngle(plus_values(0, 0) - predicted.angle);
+                minus_values(0, 0) =
+                    predicted.angle + normalizeAngle(minus_values(0, 0) - predicted.angle);
+                for (int row = 0; row < 4; ++row) {
+                    jacobian(row, column) =
+                        (plus_values(row, 0) - minus_values(row, 0)) / (2.0 * step[column]);
+                }
+            }
+            if (!valid) continue;
+            const double nis = computeNis<4>(jacobian, residual, variance);
+            if (std::getenv("ULTRA_VISION_UV_DEBUG") != nullptr) {
+                std::cerr << "[uvc] bar=" << lightbar << " pred(angle=" << predicted.angle
+                          << " cx=" << predicted.center_x << " cy=" << predicted.center_y
+                          << " len=" << predicted.length << ") z(angle=" << z(0, 0)
+                          << " cx=" << z(1, 0) << " cy=" << z(2, 0) << " len=" << z(3, 0)
+                          << ") res(angle=" << residual(0, 0) << " cx=" << residual(1, 0)
+                          << " cy=" << residual(2, 0) << " len=" << residual(3, 0)
+                          << ") nis=" << nis << std::endl;
+                for (int row = 0; row < 4; ++row) {
+                    std::cerr << "      H[" << row << "]=";
+                    for (int column = 0; column < 9; ++column) {
+                        std::cerr << ' ' << jacobian(row, column);
+                    }
+                    std::cerr << std::endl;
+                }
+            }
+            if (nis < best_nis) {
+                best_nis = nis;
+                best_jacobian = jacobian;
+                best_residual = residual;
+                have_best = true;
+            }
+        }
+        if (!have_best || best_nis > nis_threshold) return 0.0;
+        return applyUpdate<4>(best_jacobian, best_residual, variance, nis_threshold);
+    }
+
     Vec<3> centerFromPlate(const Vec<3>& observation, int plate_id) const {
         const double angle = getYaw() + angleForPlate(plate_id);
         Vec<3> center;
@@ -880,7 +1498,14 @@ private:
 
     void buildQ() {
         const double dt = cfg_dt_;
-        const double qa = cfg_.process_acc;
+        // 平移自适应：见 Config::process_acc_speed_ref 的注释。
+        double qa = cfg_.process_acc;
+        if (initialized_ && cfg_.process_acc_speed_ref > 1e-6) {
+            const double speed = std::hypot(std::hypot(x_(1, 0), x_(3, 0)), x_(8, 0));
+            const double ratio = speed / cfg_.process_acc_speed_ref;
+            qa = cfg_.process_acc * (1.0 + ratio * ratio);
+            if (qa > cfg_.process_acc_max) qa = cfg_.process_acc_max;
+        }
         const double qw = cfg_.process_omega;
         const double dt2 = dt * dt;
         const double dt3 = dt2 * dt;

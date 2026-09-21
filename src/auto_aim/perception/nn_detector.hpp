@@ -116,6 +116,7 @@ namespace auto_aim
         const NnDetectorTiming& timing() const;
         std::string runtimeInfo() const;
 
+
         // Asynchronous path: preprocess + start the request, return a ticket.
         // finish() waits for that ticket and post-processes it. Splitting the
         // two lets several requests overlap, which is what actually raises

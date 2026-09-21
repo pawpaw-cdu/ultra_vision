@@ -35,12 +35,18 @@ public:
     void close();
 
 private:
+    static bool writeAll(int fd, const std::string& data);
     bool connectOnce();
+    bool connectCommandOnce();
+    void closeImage();
+    void closeCommand();
     bool readExact(void* buffer, size_t size);
 
     std::string host_;
     uint16_t port_;
     int sock_ = -1;
+    int command_sock_ = -1;
+    uint16_t command_port_ = 7667;
     std::array<uint8_t, 32> header_{};
     std::vector<uint8_t> payload_;
 };
