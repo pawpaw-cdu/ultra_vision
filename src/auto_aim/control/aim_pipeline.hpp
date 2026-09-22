@@ -90,6 +90,8 @@ namespace auto_aim
         const Tracker& tracker() const { return tracker_; }
         /// 当前用的弹速（实车由下位机回传；只接受合理值）
         double projectileSpeed() const { return selector_.projectileSpeed(); }
+        /// @brief 目标当前是否被判定为"静止"（静止时提前量与前馈都按 0 处理）。
+        bool targetStill() const { return selector_.targetStill(); }
 
     private:
         AimPipelineConfig config_;
@@ -109,6 +111,10 @@ namespace auto_aim
         double last_detection_time_ = 0.0;
         double aim_jump_limit_ = 1e9;
         bool last_fire_ = false;
+        // 最近一次算出的有效瞄点：检测断续（无新观测）的帧直接复用它，避免用滑行状态
+        // 重新选板 → 跳到相邻板 → 云台瞎转（2026-09-29 实测）。
+        GimbalTargetAngles last_desired_;
+        bool have_last_desired_ = false;
         std::chrono::steady_clock::time_point last_heartbeat_;
     };
 } // namespace auto_aim

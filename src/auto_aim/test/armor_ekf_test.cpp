@@ -1,8 +1,10 @@
 #include "Kalman/armor_ekf.hpp"
+#include "Kalman/plate_ekf.hpp"
 #include "Kalman/tracker.hpp"
 
 #include <cmath>
 #include <iostream>
+#include <random>
 
 namespace
 {
@@ -59,6 +61,45 @@ namespace
         const cv::Vec3d radial(std::cos(phase), 0.0, std::sin(phase));
         const cv::Vec3d position(
             radius * radial[0], 0.0, center_z + radius * radial[2]);
+        const cv::Vec3d vertical(0.0, 1.0, 0.0);
+        const cv::Vec3d third = radial.cross(vertical);
+
+        cv::Mat rotation = (cv::Mat_<double>(3, 3) <<
+            radial[0], vertical[0], third[0],
+            radial[1], vertical[1], third[1],
+            radial[2], vertical[2], third[2]);
+
+        auto_aim::Armor armor;
+        armor.solve_result = true;
+        armor.armor_type = auto_aim::small;
+        armor.tvec = (cv::Mat_<double>(3, 1) <<
+            position[0], position[1], position[2]);
+        cv::Rodrigues(rotation, armor.rvec);
+        return armor;
+    }
+
+    /// @brief 与 makeTrackerArmor 同源，但给板心位置和径向角都加高斯噪声 ——
+    ///        用来复现"5 rad/s 小陀螺 + PnP/角点噪声"的观测流（确定性种子）。
+    auto_aim::Armor makeNoisyTrackerArmor(
+        double center_z,
+        double yaw,
+        double omega,
+        double time,
+        int plate_id,
+        double radius,
+        std::mt19937& rng,
+        double sigma_pos,
+        double sigma_angle)
+    {
+        std::normal_distribution<double> position_noise(0.0, sigma_pos);
+        std::normal_distribution<double> angle_noise(0.0, sigma_angle);
+        const double phase = yaw + omega * time +
+            auto_aim::ArmorEKF::angleForPlate(plate_id) + angle_noise(rng);
+        const cv::Vec3d radial(std::cos(phase), 0.0, std::sin(phase));
+        const cv::Vec3d position(
+            radius * radial[0] + position_noise(rng),
+            position_noise(rng),
+            center_z + radius * radial[2] + position_noise(rng));
         const cv::Vec3d vertical(0.0, 1.0, 0.0);
         const cv::Vec3d third = radial.cross(vertical);
 
@@ -290,6 +331,250 @@ int main()
             passed &= expect(std::abs(world_tracker.getOmega()) < 0.25,
                              "stationary chassis must keep near-zero omega");
         }
+    }
+
+    // ---- 装甲板模型（双模型低速档，上科大 2026 §9.4.4）----------------------
+    {
+        auto_aim::PlateEKF::Config plate_config;
+        plate_config.process_acc = 50.0;
+        plate_config.process_yaw_acc = 100.0;
+        auto_aim::PlateEKF plate(plate_config);
+        auto_aim::Vec<3> center;
+        center(0, 0) = 0.0;
+        center(1, 0) = 0.0;
+        center(2, 0) = 5.0;
+        plate.init(center, 0.0);
+        constexpr double plate_dt = 1.0 / 30.0;
+        constexpr double true_vx = 0.4;
+        constexpr double true_plate_omega = 0.5;
+        std::mt19937 plate_rng(7);
+        std::normal_distribution<double> plate_noise(0.0, 0.001);
+        for (int frame = 1; frame <= 90; ++frame) {
+            plate.setDt(plate_dt);
+            plate.predict();
+            auto_aim::Vec<3> observation;
+            observation(0, 0) = true_vx * frame * plate_dt + plate_noise(plate_rng);
+            observation(1, 0) = plate_noise(plate_rng);
+            observation(2, 0) = 5.0 + plate_noise(plate_rng);
+            plate.update(observation, true_plate_omega * frame * plate_dt +
+                             plate_noise(plate_rng),
+                         9.488, 1e-4, 4e-4);
+        }
+        std::cout << "plate ekf: vx=" << plate.getVelocity()(0, 0)
+                  << " omega=" << plate.getOmega() << std::endl;
+        passed &= expect(std::abs(plate.getVelocity()(0, 0) - true_vx) < 0.1,
+                         "PlateEKF must estimate a translating plate's velocity");
+        passed &= expect(std::abs(plate.getOmega() - true_plate_omega) < 0.15,
+                         "PlateEKF must estimate a plate's yaw rate");
+    }
+
+    // ---- 双模型（§9.4.4）：Tracker 并行跑装甲板模型 -------------------------
+    {
+        auto_aim::TrackerConfig dual_config = tracker_config;
+        dual_config.plate_model_enabled = true;
+        auto_aim::Tracker dual_tracker(dual_config);
+        std::mt19937 dual_rng(11u);
+        constexpr double dual_omega = 1.0;
+        for (int frame = 0; frame <= 150; ++frame) {
+            const double time = frame * tracker_dt;
+            dual_tracker.update(std::vector<auto_aim::Armor>{
+                makeNoisyTrackerArmor(tracker_center_z, 0.0, dual_omega, time,
+                                      tracker_plate_id, radius, dual_rng, 0.01, 0.01)},
+                time);
+        }
+        std::cout << "dual model: ekf_omega=" << dual_tracker.getOmega()
+                  << " plate_omega=" << dual_tracker.getPlateModelOmega()
+                  << " has_plate=" << dual_tracker.hasPlateModel() << std::endl;
+        passed &= expect(dual_tracker.hasPlateModel(),
+                         "dual model must initialize the armor-plate model");
+        passed &= expect(std::abs(dual_tracker.getPlateModelOmega() - dual_omega) < 0.5,
+                         "armor-plate model must track a slow plate's yaw rate");
+    }
+
+    // ---- IESEKF：先验偏离真值较远时，迭代重新线性化不应比单次 EKF 更差 --------
+    {
+        auto_aim::ArmorEKF::Config single_config = config;
+        single_config.iekf_iterations = 1;   // 标准 EKF
+        auto_aim::ArmorEKF::Config iterative_config = config;
+        iterative_config.iekf_iterations = 4;
+        auto_aim::ArmorEKF single_ekf;
+        auto_aim::ArmorEKF iterative_ekf;
+        single_ekf.setConfig(single_config);
+        iterative_ekf.setConfig(iterative_config);
+
+        auto_aim::Vec<3> center;
+        center(0, 0) = center_x;
+        center(2, 0) = center_z;
+        constexpr double yaw_offset = 0.79;   // 先验偏 45°
+        single_ekf.initAt(center, yaw_offset);
+        iterative_ekf.initAt(center, yaw_offset);
+
+        const auto observation = makeObservation(
+            center_x, center_z, 0.0, 0.0, 0.0, 0, radius);
+        single_ekf.updateYpd(observation);
+        iterative_ekf.updateYpd(observation);
+
+        const double single_error = std::abs(auto_aim::ArmorEKF::normalizeAngle(
+            single_ekf.getPlateAngle(0) - observation.armor_yaw));
+        const double iterative_error = std::abs(auto_aim::ArmorEKF::normalizeAngle(
+            iterative_ekf.getPlateAngle(0) - observation.armor_yaw));
+        std::cout << "iesekf yaw error (deg): single=" << single_error * 180.0 / kPi
+                  << " iterative=" << iterative_error * 180.0 / kPi << std::endl;
+        passed &= expect(iterative_error <= single_error * 1.05 + 1e-9,
+                         "IESEKF must not be worse than a single EKF update");
+    }
+
+    // ---- 5 rad/s（小陀螺）通用性：关联门限必须随 yaw 不确定度自适应 ----------
+    // 旧行为用固定的 20° 角门限：5 rad/s 下 ω 估计还没建立，预测每帧落后
+    // ω·dt≈10°，两三帧就顶穿门限 → 关联返回 inf → 观测被拒 → ω 永远学不到。
+    // 这里喂确定性观测流（单板可见、可见板号随旋转切换、带 PnP 噪声）做 A/B：
+    // adaptive_association_gate + soft_nis_gate 打开能收敛，关闭（旧行为）不能。
+    {
+        const auto spin_omega = [&](bool adaptive, bool soft, bool mahalanobis) {
+            auto_aim::TrackerConfig spin_config = tracker_config;
+            spin_config.adaptive_association_gate = adaptive;
+            spin_config.soft_nis_gate = soft;
+            spin_config.mahalanobis_matching = mahalanobis;
+            auto_aim::Tracker spin_tracker(spin_config);
+            std::mt19937 rng(20261005u);
+            constexpr double spin_rate = 5.0;
+            constexpr double spin_center_z = 5.0;
+            constexpr double spin_yaw0 = 0.3;
+            constexpr double spin_sigma_pos = 0.012;
+            constexpr double spin_sigma_angle = 0.012;
+            constexpr double spin_dt = 1.0 / 12.0;   // 低帧率：每帧转 24° > 旧 20° 门限
+            for (int frame = 0; frame <= 60; ++frame) {
+                const double time = frame * spin_dt;
+                if (frame > 0 && frame % 6 == 0) {
+                    spin_tracker.update(std::vector<auto_aim::Armor>{}, time);
+                    continue;   // 模拟一次检测丢失
+                }
+                // 只有最正对相机的板可见：center·radial = center_z·sinφ 最负者。
+                int visible = 0;
+                double most_front = 1e9;
+                for (int plate = 0; plate < 4; ++plate) {
+                    const double phase = spin_yaw0 + spin_rate * time +
+                        auto_aim::ArmorEKF::angleForPlate(plate);
+                    const double facing = std::sin(phase);
+                    if (facing < most_front) {
+                        most_front = facing;
+                        visible = plate;
+                    }
+                }
+                spin_tracker.update(std::vector<auto_aim::Armor>{
+                    makeNoisyTrackerArmor(
+                        spin_center_z, spin_yaw0, spin_rate, time, visible, radius,
+                        rng, spin_sigma_pos, spin_sigma_angle)}, time);
+            }
+            return spin_tracker.getOmega();
+        };
+        const double spin_maha = spin_omega(true, true, true);
+        const double spin_new = spin_omega(true, true, false);
+        const double spin_old = spin_omega(false, false, false);
+        std::cout << "5rad/s deterministic: mahalanobis=" << spin_maha
+                  << " adaptive_gate=" << spin_new
+                  << " legacy=" << spin_old << std::endl;
+        passed &= expect(std::abs(spin_maha - 5.0) < 1.0,
+                         "5 rad/s must converge with Mahalanobis association");
+        passed &= expect(std::abs(spin_new - 5.0) < 1.0,
+                         "5 rad/s must converge with the adaptive association gate");
+        passed &= expect(std::abs(spin_old - 5.0) > 1.0,
+                         "legacy fixed gate must reproduce the documented 5 rad/s failure");
+    }
+
+    // ---- 收敛看门狗 ----------------------------------------------------------
+    // 判据一（量测长期被拒）、判据二（状态发散）、判据三（帧间隔过长）各测一次，
+    // 外加"正常数据不许误触发"和"命中后必须能重新初始化并再次收敛"。
+    auto_aim::Tracker clean_tracker(tracker_config);
+    for (int frame = 0; frame <= 120; ++frame) {
+        const double time = frame * tracker_dt;
+        clean_tracker.update(std::vector<auto_aim::Armor>{
+            makeTrackerArmor(tracker_center_z, 0.0, true_omega, time,
+                             tracker_plate_id, radius)}, time);
+    }
+    {
+        const auto wd = clean_tracker.watchdogStats();
+        passed &= expect(wd.resets == 0,
+                         "watchdog must not trip on consistent observations");
+        passed &= expect(wd.converged,
+                         "watchdog must report converged on consistent observations");
+        passed &= expect(wd.reject_ratio < 0.05,
+                         "watchdog reject ratio must stay near zero on good data");
+    }
+
+    // 判据一：把 NIS 门限压到 0（任何量测都被拒）→ 必须在 min_samples 帧后触发。
+    {
+        auto_aim::TrackerConfig reject_config = tracker_config;
+        // 这条专门测"硬 NIS 门限 + reject 比例"的旧路径，所以显式关掉软门限。
+        reject_config.soft_nis_gate = false;
+        reject_config.ypd_nis_threshold = 0.0;
+        reject_config.watchdog_min_samples = 8;
+        reject_config.watchdog_window = 20;
+        reject_config.watchdog_reject_ratio = 0.4;
+        auto_aim::Tracker reject_tracker(reject_config);
+        bool saw_lost = false;
+        for (int frame = 0; frame <= 40; ++frame) {
+            const double time = frame * tracker_dt;
+            reject_tracker.update(std::vector<auto_aim::Armor>{
+                makeTrackerArmor(tracker_center_z, 0.0, true_omega, time,
+                                 tracker_plate_id, radius)}, time);
+            if (reject_tracker.getState() == auto_aim::TrackerState::LOST) saw_lost = true;
+        }
+        const auto wd = reject_tracker.watchdogStats();
+        passed &= expect(wd.resets >= 1 && saw_lost,
+                         "watchdog must trip when measurements are persistently rejected");
+        passed &= expect(!wd.converged,
+                         "watchdog must not report converged while rejecting measurements");
+    }
+
+    // 判据二：把允许的 |center| 压到 1 mm（任何真实状态都越界）→ 必须触发。
+    {
+        auto_aim::TrackerConfig diverge_config = tracker_config;
+        diverge_config.watchdog_max_range = 0.001;
+        auto_aim::Tracker diverge_tracker(diverge_config);
+        for (int frame = 0; frame <= 20; ++frame) {
+            const double time = frame * tracker_dt;
+            diverge_tracker.update(std::vector<auto_aim::Armor>{
+                makeTrackerArmor(tracker_center_z, 0.0, true_omega, time,
+                                 tracker_plate_id, radius)}, time);
+        }
+        passed &= expect(diverge_tracker.watchdogStats().resets >= 1,
+                         "watchdog must trip when the state leaves its physical bounds");
+    }
+
+    // 判据三 + 恢复：间隔 0.3 s > max_frame_gap=0.05 → 触发；下一帧必须能用观测
+    // 重新初始化（跳过 tryReacquire），并在 3 帧后重新报"已收敛"，且不再重复触发。
+    {
+        auto_aim::TrackerConfig gap_config = tracker_config;
+        gap_config.watchdog_max_frame_gap = 0.05;
+        gap_config.watchdog_min_converge_updates = 3;
+        auto_aim::Tracker gap_tracker(gap_config);
+        for (int frame = 0; frame <= 30; ++frame) {
+            const double time = frame * tracker_dt;
+            gap_tracker.update(std::vector<auto_aim::Armor>{
+                makeTrackerArmor(tracker_center_z, 0.0, 0.0, time,
+                                 tracker_plate_id, radius)}, time);
+        }
+        passed &= expect(gap_tracker.watchdogStats().resets == 0,
+                         "watchdog must not trip while frames arrive on time");
+        const double gap_time = 30.0 * tracker_dt + 0.30;
+        gap_tracker.update(std::vector<auto_aim::Armor>{
+            makeTrackerArmor(tracker_center_z, 0.0, 0.0, gap_time,
+                             tracker_plate_id, radius)}, gap_time);
+        const int resets_after_gap = gap_tracker.watchdogStats().resets;
+        passed &= expect(resets_after_gap == 1,
+                         "watchdog must trip exactly once on a long frame gap");
+        for (int frame = 1; frame <= 3; ++frame) {
+            const double time = gap_time + frame * tracker_dt;
+            gap_tracker.update(std::vector<auto_aim::Armor>{
+                makeTrackerArmor(tracker_center_z, 0.0, 0.0, time,
+                                 tracker_plate_id, radius)}, time);
+        }
+        const auto wd = gap_tracker.watchdogStats();
+        passed &= expect(wd.resets == resets_after_gap,
+                         "watchdog must not re-trip after re-initialization");
+        passed &= expect(wd.converged,
+                         "watchdog must report converged again after re-initialization");
     }
 
     if (!passed) return 1;

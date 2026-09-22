@@ -1,10 +1,22 @@
 build/
-build-*/
+build_*/
+*/build/
 cmake-build-*/
+CMakeFiles/
 compile_commands.json
 .DS_Store
 *.o
 *.a
 *.so
 *.dylib
-logs/
+
+# 运行产物 / 临时文件（别让它们混进仓库根目录）
+/dataset.csv
+/*.jpg
+/*.png
+/*.mov
+/*.mp4
+hand_eye.yaml
+camera_intrinsics.yaml
+/tmp_*
+CMakeCache.txt

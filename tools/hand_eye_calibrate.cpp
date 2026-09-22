@@ -702,6 +702,11 @@ namespace
         double pitch_span_target = 12.0;
         std::string frame_dir;
         double yaw_scale_fixed = 1.0;   // --yaw-scale：给回传 yaw 乘一个固定标度（含符号）
+        /// @brief --pitch-scale：给回传 pitch 乘一个固定标度（含符号）。
+        ///        用来**验证 pitch 符号**：+1 与 −1 都跑一遍比残差，残差小的那个才是
+        ///        与观测一致的约定（pitch 跨度不够大时两者可能都拟合得不错，那种情况
+        ///        残差不会相差数量级，就别用它下结论）。
+        double pitch_scale_fixed = 1.0;
         double max_rms = 0.8;           // --max-rms：单帧板重投影 rms 上限（px）
         FitOptions fit;
     };
@@ -1333,6 +1338,8 @@ int main(int argc, char* argv[])
         else if (arg == "--live") live = true;
         else if (arg == "--monitor") monitor = true;
         else if (arg == "--yaw-scale" && i + 1 < argc) options.yaw_scale_fixed = std::atof(argv[++i]);
+        else if (arg == "--pitch-scale" && i + 1 < argc)
+            options.pitch_scale_fixed = std::atof(argv[++i]);
         else if (arg == "--max-rms" && i + 1 < argc) options.max_rms = std::atof(argv[++i]);
         else if (arg == "--fit-yaw-scale") options.fit.fit_yaw_scale = true;
         else if (arg == "--fit-pitch-scale") options.fit.fit_pitch_scale = true;
@@ -1418,6 +1425,30 @@ int main(int argc, char* argv[])
         for (auto& sample : samples) sample.yaw *= options.yaw_scale_fixed;
         std::cout << "[hand_eye] 已按 --yaw-scale " << options.yaw_scale_fixed
                   << " 缩放 yaw（符号/标度修正）" << std::endl;
+    }
+    {
+        // 样本的姿态跨度：pitch 跨度太小的话，"pitch 符号"这件事在标定里是**测不出来**的，
+        // 必须明说，免得拿一版拟合很好的外参去现场发现竖直方向是镜像的。
+        double yaw_min = 1e9, yaw_max = -1e9, pitch_min = 1e9, pitch_max = -1e9;
+        for (const auto& sample : samples) {
+            yaw_min = std::min(yaw_min, sample.yaw);
+            yaw_max = std::max(yaw_max, sample.yaw);
+            pitch_min = std::min(pitch_min, sample.pitch);
+            pitch_max = std::max(pitch_max, sample.pitch);
+        }
+        const double yaw_span = (yaw_max - yaw_min) * 180.0 / CV_PI;
+        const double pitch_span = (pitch_max - pitch_min) * 180.0 / CV_PI;
+        std::cout << "[hand_eye] 样本姿态跨度：yaw " << yaw_span << "°，pitch " << pitch_span
+                  << "°" << (pitch_span < 15.0
+                                 ? "（pitch 偏小：这一版外参**测不出** pitch 符号，"
+                                   "竖直方向要用 --q 的数据另外验）"
+                                 : "")
+                  << std::endl;
+    }
+    if (options.pitch_scale_fixed != 1.0) {
+        for (auto& sample : samples) sample.pitch *= options.pitch_scale_fixed;
+        std::cout << "[hand_eye] 已按 --pitch-scale " << options.pitch_scale_fixed
+                  << " 缩放 pitch（符号/标度修正）" << std::endl;
     }
 
     const double best_scale = scanYawScale(samples, options.fit, true);

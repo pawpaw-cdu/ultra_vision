@@ -21,10 +21,45 @@
 tracker:
   # ---- 跟踪判定 ------------------------------------------------------------
   min_detect_frames: 3          # 进入稳定跟踪前需要连续检测到的帧数
-  max_lost_frames: 15           # 连续丢失超过该帧数后判定目标丢失
-  max_match_distance: 1.5       # 观测装甲板与预测位置的最大匹配距离，单位：米
+  # 连续丢失超过该帧数后判定目标丢失。**必须 ≥ aim_pipeline.max_control_lost_frames**：
+  # 否则 tracker 先判 LOST → 我们立刻停止控制 → 云台停住 → 板自己飘出画面 → 越丢越久。
+  # 实测丢失频率高主要就是这么滚起来的（57Hz 下 25 帧 ≈ 0.44 s 的容错）。
+  max_lost_frames: 25
+  # 关联门限：**必须紧到能把"相邻/对角板"的观测挡在外面**。实测（2026-09-29 图像闭环
+  # 日志）识别会在物理板之间跳，视轴偏差一帧跳 ±12~16°、位置差 0.35~0.5 m；原来 1.5 m/45°
+  # 的门限把这些全放进来，闭环追着跳变就左右乱飞。而硬约束每帧都把模型钉在观测上，
+  # 正常情况下预测与观测只差几毫米，所以收紧到 0.35 m 是安全的。
+  max_match_distance: 0.35      # 观测装甲板与预测位置的最大匹配距离，单位：米
   reacquire_center_error: 0.25  # 重捕获时观测中心与预测中心的最大误差，单位：米
   max_camera_pose_dt: 0.05      # 图像时间戳与云台姿态时间戳允许的最大差值，单位：秒
+
+  # ---- 收敛看门狗（对齐 sp_vision 的 recent_nis_failures + diverged）----------
+  # 量测长期被拒 或 状态物理发散 或 帧间隔过长 → 立即判 lost 并用观测重新初始化
+  # （不再硬撑着滑行）。三条判据分别对应 sp_vision 的 recent_nis_failures 比例、
+  # Target::diverged()、以及 tracker.cpp 里的 `dt > 0.1s → lost`。
+  watchdog_enabled: true
+  watchdog_window: 20            # 统计窗口（只数有观测的帧）
+  watchdog_reject_ratio: 0.4     # 窗口内量测被拒比例 ≥ 它 → 判不收敛
+  watchdog_min_samples: 8        # 窗口里至少这么多帧才开始判
+  watchdog_max_speed: 12.0       # |v| 上限 m/s（超出视为发散）
+  watchdog_max_yaw_rate: 20.0    # |ω| 上限 rad/s
+  watchdog_max_range: 30.0       # 位置模长上限 m
+  watchdog_max_position_cov: 25.0  # P 的位置对角上限 m²
+  watchdog_max_frame_gap: 0.20   # 帧间隔上限 s（相机离线 / 时间戳跳变判据）
+  watchdog_min_converge_updates: 3  # 连续接受几帧才算"已收敛"（对齐 sp_vision 的 >3 帧）
+
+  # ---- 单板硬约束 ----------------------------------------------------------
+  # 打开：每帧把底盘中心平移，使"模型算出的这块板"**精确**落在观测位置上。
+  #   → 单板工况下消掉稳态径向偏差，但代价是**观测噪声 1:1 进中心**
+  #     （PnP 在 6 m 处抖动几厘米，中心就跟着抖几厘米 → 云台跟着抖）。
+  # 关闭：完全交给 EKF 滤波（更平滑），偏差由 EKF 自己的量测更新收敛。
+  # A/B 用 tools/replay_dataset 的"瞄点指令逐帧抖动 / 估计 vs 观测"两项判。
+  hard_plate_constraint: true
+
+  # 板号锁定：已关联的板只要代价不超过最优的该倍数就继续沿用。实测识别到的板会在物理板
+  # 之间跳（视轴偏差一帧跳 ±12~16°），图像闭环追跳变永不收敛；1.0 = 关闭。
+  plate_lock_margin: 1.35
+
 
   # ---- 估计器（ArmorEKF）---------------------------------------------------
   kalman:
@@ -47,18 +82,44 @@ tracker:
     process_noise_pos_max: 40.0
     process_noise_vel: 400.0    # 底盘角加速度过程噪声，用于适应小陀螺
     measure_noise: 0.01         # 距离测量方差，单位：平方米
-    armor_radius: 0.21          # 装甲板回转半径，单位：米
+    armor_radius: 0.25          # 装甲板回转半径，单位：米
     # 距离噪声随距离增长的系数。实测：4 m 距离帧间抖动中位 0.17 m、p90 0.48 m；
     # 7.5 m 靶面只剩 ~10 px，噪声远大于 0.1 的模型（σ≈0.26 m）。取 0.3 →
     # 4 m σ≈0.16 m、7.5 m σ≈0.42 m，与实测同量级（否则滤波器会 2~5 倍高估距离
     # 可信度，表现为距离乱跳 / 提前量不准）。
     range_noise_distance_scale: 0.3
-    # ---- UV（像素重投影）观测：这里只留开关，参数在 tracker.hpp ----------
-    # 打开后估计器改用"装甲板四角像素 + 重投影"更新，量测噪声就是像素噪声。
-    # 见 docs/uv_observation.md；tools/auto_aim_sim_test.sh --uv/--sigma 会改这几行。
-    uv_observation: false
-    uv_compact: false
-    uv_sigma_px: 6.0              # 像素噪声按**有效误差**给（旋转时 5~6 px）
+    # ---- 高速自旋（小陀螺）通用关联/NIS：见 tracker.hpp 的注释 --------------
+    # 关联角门限跟着滤波器自身的 yaw 标准差放大，收敛后自动收窄；上限必须 < 90°
+    # （否则相邻物理板会落进同一门限）。固定 20° 门限在 5 rad/s 下几帧就顶穿，
+    # 是"小陀螺不收敛"的直接原因（实测：放松门限后 ω 从 0 收敛到 4.73 rad/s）。
+    adaptive_association_gate: true
+    association_gate_sigma: 1.5
+    association_gate_max: 1.30
+    # 距离门限同理随距离噪声放大（上限 m）；角度门限仍是主判据，不会放进相邻板。
+    range_gate_sigma: 2.0
+    range_gate_max: 1.00
+    # 马氏距离关联（上科大 2026 §5B.4）：d²=rᵀS⁻¹r，门限=χ²(4,95%)=9.488。
+    # 它按滤波器自身协方差 S=H·P·Hᵀ+R 自校准，比固定/自适应角度门限更正统。
+    # 关掉 = 回到上面的 adaptive_association_gate 启发式（A/B 用）。
+    # 默认关：马氏门限依赖 R 与真实误差一致；当前远距 PnP 噪声（6.5 m 靶面 13 px）
+    # 比现有 R 大得多，开了反而接受率下降。等做完 fit_single + R 标定（文档 §5A.4/§5B.2）
+    # 再打开。开关已实现并有单测覆盖。
+    mahalanobis_matching: false
+    association_chi2: 9.488
+    # 物理量纲的 YPD 距离噪声系数：σ_dist = coeff·d（上科大 2026 §5B.2，范围 0.05~0.20）。
+    # 0 = 回到 measure_noise·(1+range_noise_distance_scale·d²) 的旧模型。
+    ypd_distance_sigma_coeff: 0.0
+    # NIS 降级为诊断量（对齐 sp_vision：始终应用更新、只统计失败率）。
+    # 关掉 = 恢复旧的硬门限行为（A/B 用）。
+    soft_nis_gate: true
+    # ---- 双模型（上科大 2026 §9.4.4）--------------------------------------
+    # 并行维护装甲板模型（直接跟踪可见板），低速时比整车模型少一层"半径/切向不可
+    # 观测"约束。第一阶段只并行运行、不参与输出；输出切换下一片再做。
+    plate_model_enabled: false
+    plate_model_process_acc: 20.0
+    plate_model_process_yaw_acc: 50.0
+    plate_model_enter_omega: 0.7
+    plate_model_exit_omega: 2.7
     uv_armor_height: 0.060        # 重投影用的板高（必须与 pnp 段语义一致）
 
   # ---- 装甲板几何（标定值，不是"标准尺寸"）---------------------------------
@@ -70,14 +131,32 @@ tracker:
     small_width: 0.1315         # 小装甲板等效宽度，单位：米
     large_width: 0.221          # 大装甲板等效宽度（按同样比例修正，待大板数据标定）
     height: 0.060               # 装甲板等效高度，单位：米
+    # PnP 降自由度：固定 tvec 与竖直板约束，只在方位角上做 1D 重投影精修
+    # （fit_single，上科大 2026 §5A.4）。提升 armor_yaw（径向角）精度 ——
+    # 它是 EKF 估计 ω 与关联板号的关键观测量。
+    # 默认关：1D 精修的收益取决于角点噪声与装甲板俯仰角。实测 3 m/0.3 px 下
+    # 只把径向角误差从 1.74° 降到 1.56°（~10%）；且 armor_pitch_deg 必须与实车一致。
+    # 建议：先标定实车俯仰角、并把角点精修（PCA/边缘）打开后再启用。
+    yaw_refine: false
+    yaw_refine_span_deg: 70.0
+    yaw_refine_coarse_deg: 5.0
+    armor_pitch_deg: 15.0
 
   # ---- 云台（机器人物理限制；换车只改这一段）-------------------------------
   # 选择器估算"云台转过去要多久"直接复用这里的角速度 / 角加速度，不再重复配置。
   gimbal:
-    pitch_min_degrees: -70.0       # 最小俯仰角；为模拟器保留余量
-    pitch_max_degrees: 70.0        # 最大俯仰角
-    max_yaw_velocity_degrees_per_sec: 360.0    # 最大偏航角速度
-    max_pitch_velocity_degrees_per_sec: 180.0  # 最大俯仰角速度
+    # pitch 限位与"最大角速度"**必须与下位机一致**，否则我们的轨迹会去要求机器到不了
+    # 的角度/速度：表现为"顶到限位回不来""跟不上、响应慢"。
+    # 2026-09-29 从这台车的电控代码抄回来（wheel_leg_2/gimbal/application/gimbal_task.c）：
+    #   #define Pitch_Max_Angle -0.49f   #define Pitch_Min_Angle 0.27f   →  [-28.1°, +15.5°]
+    #   Angle_Control_Limit(&Gimbal_Pitch_Control_Data, Pitch_Max_Angle, Pitch_Min_Angle)
+    #   视觉目标按固定步长 0.003 rad / 1 ms 周期逼近 → 最大 ≈3 rad/s = 172°/s（yaw/pitch 同）
+    #   （Yaw_Divide_Plus_x = Pitch_Divide_Plus_x = 0.003f，GIMBAL_CONTROL_TIME = 1ms）
+    # 注意上限只有 +15.5°：靶板举得太高时本来就打不到，这是机械/限位事实，不是控制 bug。
+    pitch_min_degrees: -28.1       # 最小俯仰角（= 下位机 Pitch_Max_Angle -0.49 rad）
+    pitch_max_degrees: 15.5        # 最大俯仰角（= 下位机 Pitch_Min_Angle 0.27 rad）
+    max_yaw_velocity_degrees_per_sec: 172.0    # = 下位机视觉步长 0.003rad/1ms
+    max_pitch_velocity_degrees_per_sec: 172.0
     max_yaw_acceleration_degrees_per_sec2: 1800.0    # 最大偏航角加速度
     max_pitch_acceleration_degrees_per_sec2: 1200.0  # 最大俯仰角加速度
     max_yaw_jerk_degrees_per_sec3: 20000.0     # 最大偏航加加速度
@@ -91,7 +170,10 @@ tracker:
     gravity: 9.81                # 重力加速度，单位：米/秒²
     command_latency: 0.08        # 云台指令下发并生效的延迟，单位：秒
     max_lead_time: 0.50          # 最大允许提前预测时间，单位：秒
-    max_control_lost_frames: 5   # 短暂检测丢失时继续使用预测结果的最大帧数
+    # 检测丢失时继续由我们控制（发"保持上一拍瞄点"）的最大帧数。90fps 下 25 帧 ≈ 0.28s：
+    # 之前 5 帧（≈55ms）太短，检测一断我们就把控制权交回下位机（mode=0）→ 遥控摇杆/它自己的
+    # 积分把云台带走（实测：无识别时云台自己从 26° 飘到 60°）。要"丢失就松手"就把它调回 5。
+    max_control_lost_frames: 25
     # 延迟补偿分档：快速旋转时用更大的提前量（参考实现用 decision_speed +
     # high/low_speed_delay_time 做同样的分档），慢速时用小值避免过头。
     decide_speed: 7.0            # 判定"高速旋转"的角速度阈值，单位：弧度/秒
@@ -100,7 +182,25 @@ tracker:
     # 板号锁定：已选中的板只要仍在可打范围内就保持锁定，除非另一块明显更优
     # （代价低于锁定板的该比例时才允许切换），防止在两块角度相近的板之间来回跳。
     lock_switch_margin: 0.65
+    # ---- 静止靶闸门（2026-09-29）------------------------------------------
+    # 实车静止靶实测：EKF 的 |v| p90=200 mm/s，|ω| p90=3.7°/s、p99=33°/s，
+    # 而提前量是 386 ms —— ω 的噪声尾巴会让瞄点相位错 7~22°（= 4.8° 的甩动）。
+    # 超过 enter 阈值才按"在动"处理（给提前量 + 给云台速度前馈）；
+    # 低于 exit 阈值当静止（两者都清零）；中间是滞回带，保持上次判定。
+    motion_gate_enabled: true
+    motion_gate_enter_speed: 0.50   # m/s：真实平移（≥0.5 m/s）立刻通过
+    motion_gate_exit_speed: 0.30    # m/s：滞回带下沿
+    motion_gate_enter_omega: 1.00   # rad/s(57°/s)：小陀螺(1.5~3 rad/s)立刻通过
+    motion_gate_exit_omega: 0.50    # rad/s(29°/s)
     spin_omega_threshold: 2.0    # 超过该角速度后进入小陀螺选板模式，单位：弧度/秒
+    # ---- 按估计转速分档（2026-10-05）------------------------------------
+    # |ω| > chase_omega_threshold 后"追最近板"物理上不可能（云台 172°/s = 3.0
+    # rad/s，板换位间隔 90°/ω 小于云台摆 90° 的 0.52 s），改为"守角+等板进窗"：
+    # 瞄预测的底盘中心，等板扫过视轴。实测 2/3/5 rad/s 的 TRACKING 占空 52/47/14%。
+    # 略低于理论边界 3.0（=172°/s）：留出加速度/加加速度的余量，3 rad/s 也走守角档。
+    chase_omega_threshold: 2.5
+    spin_hold_enabled: true
+    spin_fire_tolerance_degrees: 6.0
     coming_angle_degrees: 60.0   # 装甲板进入可射击扇区的角度范围，单位：度
     leaving_angle_degrees: 20.0  # 装甲板离开可射击扇区的判定角度，单位：度
 

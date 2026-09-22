@@ -11,7 +11,7 @@
 
 #include <cerrno>
 #include <cstring>
-#include <iostream>
+#include <opencv2/imgcodecs.hpp>
 #include <utility>
 
 namespace sim_receiver {
@@ -19,8 +19,7 @@ namespace sim_receiver {
 namespace {
 
 constexpr uint32_t kMagic = 0x44414544; // "DAED"
-constexpr uint32_t kVersion = 1;
-constexpr size_t kHeaderSize = 32;
+constexpr uint32_t kVersion = 2;   // v2 = v1 + 真实云台姿态 (gimbal_yaw/pitch)
 
 uint32_t readU32(const uint8_t* p) {
     return (static_cast<uint32_t>(p[0]) << 24) |
@@ -34,6 +33,14 @@ uint64_t readU64(const uint8_t* p) {
     for (int i = 0; i < 8; ++i) {
         value = (value << 8) | p[i];
     }
+    return value;
+}
+
+// 包头里的云台姿态是 f32 big-endian（Rust 侧 to_be_bytes）。
+float readF32(const uint8_t* p) {
+    const uint32_t bits = readU32(p);
+    float value = 0.0f;
+    std::memcpy(&value, &bits, sizeof(value));
     return value;
 }
 
@@ -83,18 +90,57 @@ int connectSocketAddress(const std::string& host, uint16_t port) {
 
 } // namespace
 
+BufferPool::Buffer BufferPool::acquire(std::size_t size) {
+    std::shared_ptr<std::vector<uint8_t>> storage;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!free_.empty()) {
+            storage = std::move(free_.back());
+            free_.pop_back();
+        }
+    }
+    if (!storage) {
+        storage = std::make_shared<std::vector<uint8_t>>();
+    }
+    // Exact size: the decoder consumes the whole buffer, so it must not carry
+    // stale bytes from a larger previous frame.
+    if (storage->size() != size) {
+        storage->resize(size);
+    }
+
+    // The deleter owns one reference and returns the storage to the pool when the
+    // last borrower drops it.  weak_ptr keeps this correct even if the pool is
+    // destroyed while a buffer is still in flight (endpoint reconfiguration).
+    std::weak_ptr<BufferPool> weak = shared_from_this();
+    return Buffer(storage.get(), [weak, storage](std::vector<uint8_t>*) mutable {
+        if (auto pool = weak.lock()) {
+            pool->release(std::move(storage));
+        }
+    });
+}
+
+std::size_t BufferPool::freeCount() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return free_.size();
+}
+
+void BufferPool::release(std::shared_ptr<std::vector<uint8_t>> buffer) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    free_.push_back(std::move(buffer));
+}
+
 TcpInput::TcpInput(std::string host, uint16_t port)
-    : host_(std::move(host)), port_(port) {}
+    : host_(std::move(host)), port_(port), pool_(std::make_shared<BufferPool>()) {}
 
 TcpInput::~TcpInput() {
     close();
 }
 
 TcpInput::TcpInput(TcpInput&& other) noexcept
-    : host_(std::move(other.host_)), port_(other.port_), sock_(other.sock_),
+    : host_(std::move(other.host_)), port_(other.port_), sock_(other.sock_.load()),
       command_sock_(other.command_sock_), command_port_(other.command_port_),
-      header_(other.header_), payload_(std::move(other.payload_)) {
-    other.sock_ = -1;
+      header_(other.header_), pool_(std::move(other.pool_)) {
+    other.sock_.store(-1);
     other.command_sock_ = -1;
 }
 
@@ -103,24 +149,26 @@ TcpInput& TcpInput::operator=(TcpInput&& other) noexcept {
         close();
         host_ = std::move(other.host_);
         port_ = other.port_;
-        sock_ = other.sock_;
+        sock_.store(other.sock_.load());
         command_sock_ = other.command_sock_;
         command_port_ = other.command_port_;
         header_ = other.header_;
-        payload_ = std::move(other.payload_);
-        other.sock_ = -1;
+        pool_ = std::move(other.pool_);
+        other.sock_.store(-1);
         other.command_sock_ = -1;
+        if (!pool_) pool_ = std::make_shared<BufferPool>();
     }
     return *this;
 }
 
 bool TcpInput::connect() {
     close();
+    if (!pool_) pool_ = std::make_shared<BufferPool>();
     return connectOnce();
 }
 
 bool TcpInput::connected() const {
-    return sock_ >= 0;
+    return sock_.load() >= 0;
 }
 
 bool TcpInput::sendLine(uint16_t command_port, const std::string& line) {
@@ -145,8 +193,9 @@ bool TcpInput::sendLine(uint16_t command_port, const std::string& line) {
 
 bool TcpInput::connectOnce() {
     closeImage();
-    sock_ = connectSocketAddress(host_, port_);
-    return sock_ >= 0;
+    const int fd = connectSocketAddress(host_, port_);
+    sock_.store(fd);
+    return fd >= 0;
 }
 
 bool TcpInput::connectCommandOnce() {
@@ -182,21 +231,32 @@ void TcpInput::closeCommand() {
 }
 
 void TcpInput::closeImage() {
-    if (sock_ >= 0) {
-        ::close(sock_);
-        sock_ = -1;
+    const int fd = sock_.exchange(-1);
+    if (fd >= 0) {
+        ::close(fd);
+    }
+}
+
+void TcpInput::shutdownImage() {
+    const int fd = sock_.load();
+    if (fd >= 0) {
+        ::shutdown(fd, SHUT_RDWR);
     }
 }
 
 bool TcpInput::readExact(void* buffer, size_t size) {
-    if (sock_ < 0 && !connectOnce()) {
+    if (sock_.load() < 0 && !connectOnce()) {
+        return false;
+    }
+    const int active = sock_.load();
+    if (active < 0) {
         return false;
     }
 
     uint8_t* out = static_cast<uint8_t*>(buffer);
     size_t done = 0;
     while (done < size) {
-        ssize_t n = ::recv(sock_, out + done, size - done, 0);
+        ssize_t n = ::recv(active, out + done, size - done, 0);
         if (n == 0) {
             return false;
         }
@@ -211,8 +271,9 @@ bool TcpInput::readExact(void* buffer, size_t size) {
     return true;
 }
 
-bool TcpInput::readFrame(SimFrame& frame) {
-    if (sock_ < 0 && !connectOnce()) {
+bool TcpInput::readPacket(SimPacket& packet) {
+    packet = SimPacket{};
+    if (sock_.load() < 0 && !connectOnce()) {
         return false;
     }
 
@@ -221,13 +282,15 @@ bool TcpInput::readFrame(SimFrame& frame) {
         return false;
     }
 
-    uint32_t magic = readU32(header_.data());
-    uint32_t version = readU32(header_.data() + 4);
-    uint32_t width = readU32(header_.data() + 8);
-    uint32_t height = readU32(header_.data() + 12);
-    uint32_t payload_len = readU32(header_.data() + 16);
-    uint64_t timestamp_us = readU64(header_.data() + 20);
-    uint32_t seq = readU32(header_.data() + 28);
+    const uint32_t magic = readU32(header_.data());
+    const uint32_t version = readU32(header_.data() + 4);
+    const uint32_t width = readU32(header_.data() + 8);
+    const uint32_t height = readU32(header_.data() + 12);
+    const uint32_t payload_len = readU32(header_.data() + 16);
+    const uint64_t timestamp_us = readU64(header_.data() + 20);
+    const uint32_t seq = readU32(header_.data() + 28);
+    const float gimbal_yaw = readF32(header_.data() + 32);
+    const float gimbal_pitch = readF32(header_.data() + 36);
 
     if (magic != kMagic || version != kVersion || payload_len == 0 ||
         payload_len > 20 * 1024 * 1024 || width == 0 || height == 0) {
@@ -235,21 +298,47 @@ bool TcpInput::readFrame(SimFrame& frame) {
         return false;
     }
 
-    payload_.resize(payload_len);
-    if (!readExact(payload_.data(), payload_.size())) {
+    // No copy: the JPEG bytes land straight in a pooled buffer that the decoder
+    // will release when it is done with them.
+    BufferPool::Buffer payload = pool_->acquire(payload_len);
+    if (!readExact(payload->data(), payload->size())) {
         closeImage();
-        return false;
+        return false;   // payload returns itself to the pool
     }
 
-    frame.local_timestamp_us = auto_aim::StandardClock::nowUs();
-    cv::Mat decoded = cv::imdecode(payload_, cv::IMREAD_COLOR);
+    packet.payload = std::move(payload);
+    packet.seq = seq;
+    packet.source_timestamp_us = timestamp_us;
+    packet.local_timestamp_us = auto_aim::StandardClock::nowUs();
+    packet.width = width;
+    packet.height = height;
+    packet.gimbal_yaw = gimbal_yaw;
+    packet.gimbal_pitch = gimbal_pitch;
+    return true;
+}
+
+cv::Mat TcpInput::decode(const SimPacket& packet) {
+    if (!packet.payload || packet.payload->empty()) {
+        return cv::Mat();
+    }
+    return cv::imdecode(*packet.payload, cv::IMREAD_COLOR);
+}
+
+bool TcpInput::readFrame(SimFrame& frame) {
+    SimPacket packet;
+    if (!readPacket(packet)) {
+        return false;
+    }
+    cv::Mat decoded = decode(packet);
     if (decoded.empty()) {
         return false;
     }
-
-    frame.bgr = decoded;
-    frame.seq = seq;
-    frame.source_timestamp_us = timestamp_us;
+    frame.bgr = std::move(decoded);
+    frame.seq = packet.seq;
+    frame.source_timestamp_us = packet.source_timestamp_us;
+    frame.local_timestamp_us = packet.local_timestamp_us;
+    frame.gimbal_yaw = packet.gimbal_yaw;
+    frame.gimbal_pitch = packet.gimbal_pitch;
     return true;
 }
 

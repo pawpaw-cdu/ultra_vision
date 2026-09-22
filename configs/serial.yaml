@@ -22,3 +22,36 @@ serial:
   # 这台车的编码器 yaw 正方向与本项目约定（正 yaw = 右转）**相反**，幅度 1:1，所以填 -1。
   # 工具和 tracker 共用这一项；哪天固件把符号改对了，这里改回 +1 即可。
   yaw_sign: -1.0
+
+  # ---- 下发命令的坐标系（2026-09-29 **按这台车的电控源码定案**）-------------
+  # 依据：wheel_leg_2/gimbal/application/{visual_task.c,gimbal_task.c}
+  #   · 回传： tj_t.yaw   = gimbal_control.gimbal_yaw_motor.absolute_angle
+  #           tj_t.pitch = gimbal_control.gimbal_pitch_motor.absolute_angle
+  #   · 这两个 absolute_angle 来自 **INS（陀螺）角**，不是电机编码器角：
+  #       gimbal_*_motor.absolute_angle = *(gimbal_INT_angle_point + INS_*_ADDRESS_OFFSET)
+  #   · 视觉值直接当**角度环目标**，反馈是同一个 absolute_angle：
+  #       Gimbal_Yaw_Vision_Data_Target   = rad_format(CV_EV.yaw)
+  #       Gimbal_Pitch_Vision_Data_Target = rad_format(CV_EV.pitch)
+  #       Pitch_Apid_Out = pid(pitch_angle_pid, gimbal_pitch_motor.absolute_angle,
+  #                            Gimbal_Pitch_Control_Data)
+  #   · 视觉灵敏度 Yaw_Vision_Plus = Pitch_Vision_Plus = 1.0（1:1）
+  #   · 目标按固定步长 0.003 rad / 1ms 逼近 → 最大 ≈172°/s；pitch 软限位 [-0.49,+0.27] rad
+  #   · CV_EV.yaw_vel/pitch_vel 是**速度环前馈**（加在陀螺速度环上，同帧同符号）
+  # 结论：命令就是**回传的那个绝对角**，1:1、绝对角、无镜像、无零点常数 —— 和 sp_vision 一样。
+  # 我们内部： yaw_internal = yaw_sign·回传 yaw（= -回传），pitch_internal = 回传 pitch，
+  # 所以 command_frame: motor + command_yaw_sign = yaw_sign = -1 + command_pitch_sign = +1。
+  # （之前的 world/几何换算是在"C 板命令帧未知"时的权宜方案，已作废，保留代码仅作对照。）
+  # 2026-09-29 第二轮实测：按"命令 = 回传角"发出去时，实车表现为**两轴都朝反方向转**
+  # （板从边缘进画 → 云台朝反方向转走），而流水线内部瞄点已经离线验证过是落在板上的
+  # （`~/t1` 录制：下发角与板的差 0.02°，见 docs §13）。设备源码里 mode 2 那条纯视觉支路
+  # 连前馈都标着"符号可能不对"，判断它相对回传角是**镜像**的，所以这里整体取镜像：
+  # 2026-09-29 第三轮：符号两版都试过、都是朝反方向转 ⇒ 不是"符号"，而是**两通道在云台
+  # 轴系里是耦合/旋转过的**（探针实测：cmd_pitch +10° → 电机 yaw −9.0°、pitch −9.45°）。
+  # 所以改用"实测拼装"：
+  #   命令 = 实测 hold 基准 (+az_x, −el_x)  +  M⁻¹ · (期望的电机角增量)
+  #   M = [[0.92, −0.90],[0.075, −0.945]]（探针台阶实测，命令→电机角），M⁻¹ 见 node.cpp 注释。
+  command_frame: motor
+  command_yaw_sign: 1.0
+  command_pitch_sign: 1.0
+  command_world_yaw_sign: 1.0     # 仅 command_frame: world 时使用（对照，别改）
+  command_world_pitch_sign: -1.0

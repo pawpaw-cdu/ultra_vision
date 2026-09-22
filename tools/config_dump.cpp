@@ -51,12 +51,6 @@ namespace
         std::cout << "tracker.armor_radius " << cfg.armor_radius << '\n';
         std::cout << "tracker.y_noise_mult " << cfg.y_noise_mult << '\n';
         std::cout << "tracker.p_cov_min " << cfg.p_cov_min << '\n';
-        std::cout << "tracker.uv_observation " << cfg.uv_observation << '\n';
-        std::cout << "tracker.uv_sigma_px " << cfg.uv_sigma_px << '\n';
-        std::cout << "tracker.uv_nis_threshold " << cfg.uv_nis_threshold << '\n';
-        std::cout << "tracker.uv_compact " << cfg.uv_compact << '\n';
-        std::cout << "tracker.uv_compact_sigma_px " << cfg.uv_compact_sigma_px << '\n';
-        std::cout << "tracker.uv_compact_sigma_angle " << cfg.uv_compact_sigma_angle << '\n';
         std::cout << "tracker.uv_armor_small_width " << cfg.uv_armor_small_width << '\n';
         std::cout << "tracker.uv_armor_large_width " << cfg.uv_armor_large_width << '\n';
         std::cout << "tracker.uv_armor_height " << cfg.uv_armor_height << '\n';
@@ -71,9 +65,48 @@ namespace
                   << cfg.range_noise_distance_scale << '\n';
         std::cout << "tracker.ypd_nis_threshold " << cfg.ypd_nis_threshold << '\n';
         std::cout << "tracker.max_angle_error " << cfg.max_angle_error << '\n';
+        std::cout << "tracker.adaptive_association_gate "
+                  << cfg.adaptive_association_gate << '\n';
+        std::cout << "tracker.association_gate_sigma "
+                  << cfg.association_gate_sigma << '\n';
+        std::cout << "tracker.association_gate_max "
+                  << cfg.association_gate_max << '\n';
+        std::cout << "tracker.range_gate_sigma "
+                  << cfg.range_gate_sigma << '\n';
+        std::cout << "tracker.range_gate_max "
+                  << cfg.range_gate_max << '\n';
+        std::cout << "tracker.mahalanobis_matching "
+                  << cfg.mahalanobis_matching << '\n';
+        std::cout << "tracker.association_chi2 "
+                  << cfg.association_chi2 << '\n';
+        std::cout << "tracker.ypd_distance_sigma_coeff "
+                  << cfg.ypd_distance_sigma_coeff << '\n';
+        std::cout << "tracker.soft_nis_gate " << cfg.soft_nis_gate << '\n';
+        std::cout << "tracker.plate_model_enabled " << cfg.plate_model_enabled << '\n';
+        std::cout << "tracker.plate_model_process_acc "
+                  << cfg.plate_model_process_acc << '\n';
+        std::cout << "tracker.plate_model_process_yaw_acc "
+                  << cfg.plate_model_process_yaw_acc << '\n';
+        std::cout << "tracker.plate_model_enter_omega "
+                  << cfg.plate_model_enter_omega << '\n';
+        std::cout << "tracker.plate_model_exit_omega "
+                  << cfg.plate_model_exit_omega << '\n';
         std::cout << "tracker.angle_match_weight " << cfg.angle_match_weight << '\n';
         std::cout << "tracker.position_nis_threshold " << cfg.position_nis_threshold << '\n';
         std::cout << "tracker.angle_nis_threshold " << cfg.angle_nis_threshold << '\n';
+        // 收敛看门狗（configs/tracker.yaml 的 watchdog_* 一组）
+        std::cout << "tracker.watchdog_enabled " << cfg.watchdog_enabled << '\n';
+        std::cout << "tracker.watchdog_window " << cfg.watchdog_window << '\n';
+        std::cout << "tracker.watchdog_reject_ratio " << cfg.watchdog_reject_ratio << '\n';
+        std::cout << "tracker.watchdog_min_samples " << cfg.watchdog_min_samples << '\n';
+        std::cout << "tracker.watchdog_max_speed " << cfg.watchdog_max_speed << '\n';
+        std::cout << "tracker.watchdog_max_yaw_rate " << cfg.watchdog_max_yaw_rate << '\n';
+        std::cout << "tracker.watchdog_max_range " << cfg.watchdog_max_range << '\n';
+        std::cout << "tracker.watchdog_max_position_cov " << cfg.watchdog_max_position_cov << '\n';
+        std::cout << "tracker.watchdog_max_frame_gap " << cfg.watchdog_max_frame_gap << '\n';
+        std::cout << "tracker.watchdog_min_converge_updates "
+                  << cfg.watchdog_min_converge_updates << '\n';
+        std::cout << "tracker.hard_plate_constraint " << cfg.hard_plate_constraint << '\n';
         for (std::size_t i = 0; i < cfg.armor_y_offsets.size(); ++i) {
             std::cout << "tracker.armor_y_offsets[" << i << "] "
                       << cfg.armor_y_offsets[i] << '\n';
@@ -161,6 +194,12 @@ namespace
         std::cout << "selector.max_lead_time " << selector.max_lead_time << '\n';
         std::cout << "selector.spin_omega_threshold "
                   << selector.spin_omega_threshold << '\n';
+        std::cout << "selector.chase_omega_threshold "
+                  << selector.chase_omega_threshold << '\n';
+        std::cout << "selector.spin_hold_enabled "
+                  << selector.spin_hold_enabled << '\n';
+        std::cout << "selector.spin_fire_tolerance "
+                  << selector.spin_fire_tolerance << '\n';
         std::cout << "selector.coming_angle " << selector.coming_angle << '\n';
         std::cout << "selector.leaving_angle " << selector.leaving_angle << '\n';
         std::cout << "selector.yaw_velocity " << selector.yaw_velocity << '\n';
@@ -175,6 +214,15 @@ namespace
         std::cout << "selector.low_speed_latency " << selector.low_speed_latency << '\n';
         std::cout << "selector.high_speed_latency " << selector.high_speed_latency << '\n';
         std::cout << "selector.lock_switch_margin " << selector.lock_switch_margin << '\n';
+        std::cout << "selector.motion_gate_enabled " << selector.motion_gate_enabled << '\n';
+        std::cout << "selector.motion_gate_enter_speed "
+                  << selector.motion_gate_enter_speed << '\n';
+        std::cout << "selector.motion_gate_exit_speed "
+                  << selector.motion_gate_exit_speed << '\n';
+        std::cout << "selector.motion_gate_enter_omega "
+                  << selector.motion_gate_enter_omega << '\n';
+        std::cout << "selector.motion_gate_exit_omega "
+                  << selector.motion_gate_exit_omega << '\n';
         std::cout << "selector.max_control_lost_frames "
                   << auto_aim::loadMaxControlLostFrames(tracker_file) << '\n';
         std::cout << "selector.fire_angle_tolerance_degrees "
@@ -227,6 +275,12 @@ namespace
         std::cout << "pnp.small_width " << geometry.small_width << '\n';
         std::cout << "pnp.large_width " << geometry.large_width << '\n';
         std::cout << "pnp.height " << geometry.height << '\n';
+        std::cout << "pnp.yaw_refine " << geometry.yaw_refine << '\n';
+        std::cout << "pnp.yaw_refine_span_deg "
+                  << geometry.yaw_refine_span_deg << '\n';
+        std::cout << "pnp.yaw_refine_coarse_deg "
+                  << geometry.yaw_refine_coarse_deg << '\n';
+        std::cout << "pnp.armor_pitch_deg " << geometry.armor_pitch_deg << '\n';
     }
 
     void dumpCamera(const YAML::Node& camera_file)
@@ -268,6 +322,24 @@ int main()
         dumpDetector(auto_aim::loadDetectorConfig(detector_file));
         dumpPnp(auto_aim::loadPnpGeometry(tracker_file));
         dumpCamera(camera_file);
+        // 串口/下发符号（真机闭环符号靠这两项，见 docs/auto_aim_aim_loop.md §9）
+        {
+            const YAML::Node serial_file = YAML::LoadFile(dir + "/serial.yaml");
+            const io::SerialConfig serial = auto_aim::loadSerialConfig(serial_file);
+            const YAML::Node node = serial_file["serial"] ? serial_file["serial"] : serial_file;
+            std::cout << "serial.yaw_sign（回传） "
+                      << (node["yaw_sign"].as<double>(1.0) < 0.0 ? -1 : 1) << '\n';
+            std::cout << "serial.command_frame（下发坐标系） "
+                      << (serial.command_frame == io::SerialConfig::CommandFrame::World ? "world"
+                                                                                        : "motor")
+                      << '\n';
+            std::cout << "serial.command_yaw_sign（motor 模式） " << serial.command_yaw_sign << '\n';
+            std::cout << "serial.command_pitch_sign（motor 模式） " << serial.command_pitch_sign << '\n';
+            std::cout << "serial.command_world_yaw_sign（world 模式） "
+                      << serial.command_world_yaw_sign << '\n';
+            std::cout << "serial.command_world_pitch_sign（pitch 通道） "
+                      << serial.command_world_pitch_sign << '\n';
+        }
 #ifdef ULTRA_VISION_USE_OPENVINO
         dumpNeural(auto_aim::loadNeuralDetectorConfig(detector_file, dir));
 #endif

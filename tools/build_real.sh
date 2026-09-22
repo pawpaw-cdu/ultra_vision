@@ -31,5 +31,5 @@ cmake -S "$REPO_ROOT" -B "$BUILD_DIR" \
   -DULTRA_VISION_BUILD_AUTO_BUFF=OFF \
   -DULTRA_VISION_BUILD_RUNE=OFF
 cmake --build "$BUILD_DIR" -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu)" \
-  --target auto_aim hik_probe gimbal_probe
-echo "[build_real] 完成：$BUILD_DIR/auto_aim"
+  --target auto_aim_real hik_probe gimbal_probe
+echo "[build_real] 完成：$BUILD_DIR/auto_aim_real"

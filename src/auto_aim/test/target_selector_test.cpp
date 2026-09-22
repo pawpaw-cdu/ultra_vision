@@ -91,6 +91,42 @@ int main()
     const auto far = selector.select(far_estimate, 0.0, 0.0);
     passed &= expect(!far.valid, "prediction beyond max lead time must be rejected");
 
+    // ---- 静止靶闸门（2026-09-29）------------------------------------------
+    // 实车静止靶上 EKF 的 |v|/|ω| 噪声（|v| p90 200 mm/s、|ω| p90 3.7°/s）会通过
+    // 提前量 + 云台角速度前馈变成可见抖动。闸门必须在"噪声量级"上判静止、
+    // 在"真实运动量级"上判在动。
+    {
+        auto noise = makeEstimate();
+        noise.velocity = {0.20, 0.0, -0.15};   // |v| = 250 mm/s：噪声量级
+        noise.omega = 0.06;                    // 3.4°/s：噪声量级
+        auto_aim::TargetSelector gate_selector(config);
+        const auto still_decision = gate_selector.select(noise, 0.0, 0.0);
+        passed &= expect(gate_selector.targetStill(),
+                         "measured EKF noise must be treated as a still target");
+        passed &= expect(near(still_decision.target_yaw_velocity, 0.0, 1e-9) &&
+                             near(still_decision.target_pitch_velocity, 0.0, 1e-9),
+                         "still target must not send a velocity feedforward to the gimbal");
+        const auto still_baseline = gate_selector.select(makeEstimate(), 0.0, 0.0);
+        passed &= expect(near(still_decision.aim_point[0], still_baseline.aim_point[0], 1e-9) &&
+                             near(still_decision.aim_point[2], still_baseline.aim_point[2], 1e-9),
+                         "still target must not apply the velocity lead");
+
+        auto spin = makeEstimate();
+        spin.omega = 2.0;   // 115°/s：真实小陀螺
+        auto_aim::TargetSelector spin_selector(config);
+        const auto spin_decision = spin_selector.select(spin, 0.0, 0.0);
+        passed &= expect(!spin_selector.targetStill() && spin_decision.valid,
+                         "real small-gyro rate must pass the motion gate immediately");
+
+        auto translate = makeEstimate();
+        translate.velocity = {0.8, 0.0, -0.8};   // 1.13 m/s：真实平移
+        auto_aim::TargetSelector pan_selector(config);
+        const auto pan_decision = pan_selector.select(translate, 0.0, 0.0);
+        passed &= expect(!pan_selector.targetStill() && pan_decision.valid &&
+                             pan_decision.aim_point[0] > 0.1,
+                         "real translation must pass the motion gate immediately");
+    }
+
     if (!passed) return 1;
     std::cout << "target_selector_test passed" << std::endl;
     return 0;

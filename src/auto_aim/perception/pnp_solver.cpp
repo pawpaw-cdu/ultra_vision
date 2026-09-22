@@ -1,8 +1,69 @@
 #include "pnp_solver.hpp"
+#include <cmath>
 #include <iostream>
+#include <limits>
 
 namespace auto_aim
 {
+    namespace
+    {
+        constexpr double kPi = 3.14159265358979323846;
+
+        /// @brief 装甲板在给定方位角 ψ 与机械俯仰角 β 下的相机系基向量。
+        ///        先取"竖直板"（法向 = 径向水平、竖直 = 相机 +y、切向 = 竖直×法向），
+        ///        再绕切向轴俯仰 β：n = cosβ·n0 + sinβ·v0，v = −sinβ·n0 + cosβ·v0。
+        ///        β=0 时退化为竖直板；β=15°（RM 规范）让正对相机的单板 yaw 一阶可观测。
+        void armorBasis(double psi, double pitch, cv::Vec3d& normal, cv::Vec3d& tangent,
+                        cv::Vec3d& vertical)
+        {
+            const cv::Vec3d n0(std::cos(psi), 0.0, std::sin(psi));
+            const cv::Vec3d v0(0.0, 1.0, 0.0);   // 相机 y 向下
+            const cv::Vec3d t0 = v0.cross(n0);
+            const double cp = std::cos(pitch);
+            const double sp = std::sin(pitch);
+            normal = cp * n0 + sp * v0;
+            vertical = -sp * n0 + cp * v0;
+            tangent = t0;   // 绕切向轴旋转，切向不变
+        }
+
+        /// @brief 给定 ψ 时四角在**归一化像平面**上的重投影误差平方和（按 fx/fy 折回像素）。
+        ///        归一化坐标用 undistortPoints 预先算好，所以这里只做针孔投影，
+        ///        畸变不会重复计入；对零畸变相机与直接投影等价。
+        double yawReprojectionCost(double psi, const cv::Vec3d& tvec,
+                                   double pitch,
+                                   double half_width, double half_height,
+                                   double fx, double fy,
+                                   const std::vector<cv::Point2f>& normalized)
+        {
+            cv::Vec3d normal, tangent, vertical;
+            armorBasis(psi, pitch, normal, tangent, vertical);
+            // 物点顺序（getArmor3DPoints）：lb, lt, rt, rb
+            //   P = tvec + obj.y·tangent + obj.z·vertical
+            const double obj_y[4] = {half_width, half_width, -half_width, -half_width};
+            const double obj_z[4] = {-half_height, half_height, half_height, -half_height};
+            double cost = 0.0;
+            for (int i = 0; i < 4; ++i) {
+                const cv::Vec3d point = tvec + obj_y[i] * tangent + obj_z[i] * vertical;
+                if (point[2] <= 1e-3) return 1e12;   // 跑到相机背面：非法
+                const double du = fx * (point[0] / point[2] - normalized[i].x);
+                const double dv = fy * (point[1] / point[2] - normalized[i].y);
+                cost += du * du + dv * dv;
+            }
+            return cost;
+        }
+
+        cv::Mat rotationFromYaw(double psi, double pitch)
+        {
+            cv::Vec3d normal, tangent, vertical;
+            armorBasis(psi, pitch, normal, tangent, vertical);
+            // 列 = 物体 x(法向) / y(切向) / z(竖直)，与 getArmor3DPoints 对应。
+            return (cv::Mat_<double>(3, 3) <<
+                normal[0], tangent[0], vertical[0],
+                normal[1], tangent[1], vertical[1],
+                normal[2], tangent[2], vertical[2]);
+        }
+    }
+
     cv::Mat CAMERA_MATRIX = (cv::Mat_<double>(3,3) << 1286.0, 0.0, 645.0,
                                                      0.0, 1288.0, 483.0,
                                                      0.0, 0.0, 1.0);
@@ -20,20 +81,127 @@ namespace auto_aim
         };
     }
 
+    namespace
+    {
+        /// @brief 一次 solvePnP（IPPE）+ 一次 1D yaw 精修。两个公开重载共用。
+        bool solveAndRefine(auto_aim::Armor& armor, const cv::Mat& camera_matrix,
+                            const cv::Mat& dist_coeffs, const PnpGeometry& geometry)
+        {
+            const int type = (armor.armor_type == auto_aim::small) ? 0 : 1;
+            const std::vector<cv::Point3f> obj_points = getArmor3DPoints(
+                type, geometry.small_width, geometry.large_width, geometry.height);
+            const std::vector<cv::Point2f> img_points = {
+                armor.left.bottom, armor.left.top,
+                armor.right.top, armor.right.bottom};
+
+            if (!cv::solvePnP(obj_points, img_points, camera_matrix, dist_coeffs,
+                              armor.rvec, armor.tvec, false, cv::SOLVEPNP_IPPE)) {
+                return false;
+            }
+            // 降自由度精修（fit_single，上科大 2026 §5A.4）：固定 tvec + 竖直板约束，
+            // 只在方位角上做一维重投影最小化。失败时保留 IPPE 的结果。
+            refineArmorYaw(armor, camera_matrix, dist_coeffs, geometry);
+            return true;
+        }
+    }
+
     bool solveArmorPnP(auto_aim::Armor& armor,
                        const cv::Mat& camera_matrix,
                        const cv::Mat& dist_coeffs,
                        float small_width, float large_width, float height)
     {
-        int type = (armor.armor_type == auto_aim::small) ? 0 : 1;
-        std::vector<cv::Point3f> obj_points = getArmor3DPoints(type, small_width, large_width, height);
+        PnpGeometry geometry;
+        geometry.small_width = small_width;
+        geometry.large_width = large_width;
+        geometry.height = height;
+        return solveAndRefine(armor, camera_matrix, dist_coeffs, geometry);
+    }
 
-        std::vector<cv::Point2f> img_points = {
-            armor.left.bottom, armor.left.top,
-            armor.right.top, armor.right.bottom
-        };
+    bool solveArmorPnP(auto_aim::Armor& armor,
+                       const cv::Mat& camera_matrix,
+                       const cv::Mat& dist_coeffs,
+                       const PnpGeometry& geometry)
+    {
+        return solveAndRefine(armor, camera_matrix, dist_coeffs, geometry);
+    }
 
-        return cv::solvePnP(obj_points, img_points, camera_matrix, dist_coeffs,
-                            armor.rvec, armor.tvec, false, cv::SOLVEPNP_IPPE);
+    bool refineArmorYaw(auto_aim::Armor& armor,
+                        const cv::Mat& camera_matrix,
+                        const cv::Mat& dist_coeffs,
+                        const PnpGeometry& geometry)
+    {
+        if (!geometry.yaw_refine) return false;
+        if (armor.tvec.empty() || armor.rvec.empty()) return false;
+        if (armor.tvec.rows != 3 || camera_matrix.rows != 3) return false;
+
+        const int type = (armor.armor_type == auto_aim::small) ? 0 : 1;
+        const float width = (type == 0) ? geometry.small_width : geometry.large_width;
+        const double half_width = 0.5 * static_cast<double>(width);
+        const double half_height = 0.5 * static_cast<double>(geometry.height);
+
+        const std::vector<cv::Point2f> image_points = {
+            armor.left.bottom, armor.left.top, armor.right.top, armor.right.bottom};
+        for (const cv::Point2f& point : image_points) {
+            if (!std::isfinite(point.x) || !std::isfinite(point.y)) return false;
+        }
+
+        const cv::Vec3d tvec(
+            armor.tvec.at<double>(0), armor.tvec.at<double>(1), armor.tvec.at<double>(2));
+        if (!std::isfinite(tvec[0]) || !std::isfinite(tvec[1]) || !std::isfinite(tvec[2]) ||
+            tvec[2] <= 1e-3) {
+            return false;
+        }
+
+        // 角点 → 归一化像平面（一次），之后重投影只做针孔投影。
+        std::vector<cv::Point2f> normalized;
+        try {
+            cv::undistortPoints(image_points, normalized, camera_matrix, dist_coeffs);
+        } catch (const cv::Exception&) {
+            return false;
+        }
+        if (normalized.size() != 4) return false;
+
+        const double fx = camera_matrix.at<double>(0, 0);
+        const double fy = camera_matrix.at<double>(1, 1);
+        if (!(fx > 1.0) || !(fy > 1.0)) return false;
+
+        // 初值：PnP 解出的法向方位角（与 tracker 的 armorRadialAngle 同口径地
+        // 处理"可见面朝相机"造成的 ±π 折叠）。
+        cv::Mat rotation;
+        cv::Rodrigues(armor.rvec, rotation);
+        cv::Vec3d normal(rotation.at<double>(0, 0), rotation.at<double>(1, 0),
+                         rotation.at<double>(2, 0));
+        if (normal.dot(tvec) > 0.0) normal = -normal;
+        const double psi0 = std::atan2(normal[2], normal[0]);
+
+        const double span = geometry.yaw_refine_span_deg * kPi / 180.0;
+        const double coarse = std::max(0.5 * kPi / 180.0,
+                                       geometry.yaw_refine_coarse_deg * kPi / 180.0);
+        const double pitch = geometry.armor_pitch_deg * kPi / 180.0;
+        double best_psi = psi0;
+        double best_cost = std::numeric_limits<double>::max();
+        for (double offset = -span; offset <= span + 1e-9; offset += coarse) {
+            const double psi = psi0 + offset;
+            const double cost = yawReprojectionCost(
+                psi, tvec, pitch, half_width, half_height, fx, fy, normalized);
+            if (cost < best_cost) {
+                best_cost = cost;
+                best_psi = psi;
+            }
+        }
+        // 细扫：在最优点附近 0.1° 步长收敛（1D，成本极低）。
+        const double fine = 0.1 * kPi / 180.0;
+        for (double psi = best_psi - coarse; psi <= best_psi + coarse + 1e-9; psi += fine) {
+            const double cost = yawReprojectionCost(
+                psi, tvec, pitch, half_width, half_height, fx, fy, normalized);
+            if (cost < best_cost) {
+                best_cost = cost;
+                best_psi = psi;
+            }
+        }
+        if (!std::isfinite(best_cost) || best_cost >= 1e11) return false;
+
+        cv::Rodrigues(rotationFromYaw(best_psi, pitch), armor.rvec);
+        return true;
     }
 }

@@ -19,7 +19,7 @@ endif()
 
 # Use TCP simulator input by default on macOS, where the bundled Galaxy SDK is unavailable.
 # On Linux the hardware camera path remains the default.
-set(_auto_aim_sim_default OFF)
+set(_auto_aim_sim_default ON)
 if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
   set(_auto_aim_sim_default ON)
 endif()
@@ -193,6 +193,22 @@ target_include_directories(gimbal_probe PRIVATE
 )
 target_link_libraries(gimbal_probe PRIVATE ${OpenCV_LIBS} ${YAML_CPP_LDFLAGS} Threads::Threads)
 
+# 下发角度符号探针（真机）：量"命令 ↔ 回传"的符号关系，确定 command_yaw_sign。
+add_executable(gimbal_sign_probe
+    tools/gimbal_sign_probe.cpp
+    io/gimbal/gimbal.cpp
+    io/gimbal/protocol.cpp
+    io/serial/crc16.cpp
+    io/serial/serial_port.cpp
+)
+target_include_directories(gimbal_sign_probe PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/auto_aim
+    ${CMAKE_SOURCE_DIR}
+    ${OpenCV_INCLUDE_DIRS}
+    ${YAML_CPP_INCLUDE_DIRS}
+)
+target_link_libraries(gimbal_sign_probe PRIVATE ${OpenCV_LIBS} ${YAML_CPP_LDFLAGS} Threads::Threads)
+
 # 海康相机探针：用我们自己的 HikCamera 驱动打开相机、抓帧、存图（需要 MVS SDK）。
 if(ULTRA_VISION_USE_HIK_CAMERA)
   add_executable(hik_probe
@@ -214,6 +230,44 @@ endif()
 # calibrate_camera：棋盘格 → 相机内参
 # hand_eye_calibrate：静止标定物 + 多组云台姿态 → 相机→云台外参（手眼）
 # （原 calibrate_capture"拍照存盘"工具已删除：现场标定直接在 hand_eye_calibrate --live 里完成）
+
+# 实车数据集离线回放（配合 node.cpp 的 ULTRA_VISION_RECORD）
+# 实车数据集离线回放（配合 node.cpp 的 ULTRA_VISION_RECORD）
+set(REPLAY_SOURCES
+    tools/replay_dataset.cpp
+    src/auto_aim/perception/detector.cpp
+    src/auto_aim/perception/pnp_solver.cpp
+    src/auto_aim/perception/armor_source.cpp
+    src/auto_aim/Kalman/tracker.cpp
+    src/auto_aim/Kalman/tracker_association.cpp
+    src/auto_aim/Kalman/tracker_watchdog.cpp
+    src/auto_aim/Kalman/tracker_lifecycle.cpp
+    src/auto_aim/Kalman/tracker_accessors.cpp
+    src/auto_aim/Kalman/tracker_scale.cpp
+    src/auto_aim/control/aim_pipeline.cpp
+    src/auto_aim/control/aim_signal_filter.cpp
+    src/auto_aim/control/target_selector.cpp
+    src/auto_aim/control/gimbal_aimer.cpp
+    src/auto_aim/control/gimbal_controller.cpp
+    src/auto_aim/control/shooter.cpp
+    src/auto_aim/estimation/rotation_rate_estimator.cpp
+)
+# 回放要尽量还原真机的检测链：有 OpenVINO 就把神经网络那条路也编进来
+if(ULTRA_VISION_USE_OPENVINO)
+  list(APPEND REPLAY_SOURCES
+      src/auto_aim/perception/async_detector.cpp
+      src/auto_aim/perception/nn_detector.cpp
+      src/auto_aim/perception/keypoint_refiner.cpp)
+endif()
+add_executable(replay_dataset ${REPLAY_SOURCES})
+target_include_directories(replay_dataset PRIVATE
+  ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src/auto_aim ${CMAKE_SOURCE_DIR}/common
+  ${CMAKE_SOURCE_DIR}/io)
+target_link_libraries(replay_dataset PRIVATE ${OpenCV_LIBS} ${YAML_CPP_LDFLAGS} Threads::Threads)
+if(ULTRA_VISION_USE_OPENVINO)
+  target_link_libraries(replay_dataset PRIVATE openvino::runtime)
+  target_compile_definitions(replay_dataset PRIVATE ULTRA_VISION_USE_OPENVINO=1)
+endif()
 
 add_executable(calibrate_camera tools/calibrate_camera.cpp)
 target_include_directories(calibrate_camera PRIVATE

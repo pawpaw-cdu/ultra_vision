@@ -64,29 +64,51 @@ namespace auto_aim::visualization
         }
 
         /// @brief 一条曲线一组值：`pushAll({a, b, c})` 对应按注册顺序的曲线。
-        void pushAll(const std::vector<double>& values)
+        /// @param timestamp_seconds 写 CSV 时放在**第一列**的时间戳（秒）。窗口不用它，但
+        ///        离线分析必须要 —— 上一次实机取证的 CSV 没有时间列，"命令停了多久""过冲
+        ///        持续几秒"只能靠帧号估，和状态行的 1 Hz 打印对不上（吃过这个亏）。
+        void pushAll(const std::vector<double>& values, double timestamp_seconds = -1.0)
         {
             for (std::size_t i = 0; i < values.size() && i < curves_.size(); ++i) {
                 curves_[i].values.push_back(values[i]);
                 while (curves_[i].values.size() > history_) curves_[i].values.pop_front();
             }
             if (csv_.is_open()) {
+                if (csv_with_time_) csv_ << (timestamp_seconds >= 0.0 ? timestamp_seconds : 0.0);
                 for (std::size_t i = 0; i < values.size(); ++i) {
-                    csv_ << (i == 0 ? "" : ",") << values[i];
+                    csv_ << ((i == 0 && !csv_with_time_) ? "" : ",") << values[i];
                 }
-                csv_ << '\n';
+                // 有 log 列时，换行留给 pushLog()（否则 log 会写到下一行去）。
+                if (log_columns_.empty()) csv_ << '\n';
             }
         }
 
-        bool openCsv(const std::string& path)
+        bool openCsv(const std::string& path, bool with_time = false)
         {
             csv_.open(path, std::ios::out | std::ios::trunc);
             if (!csv_.is_open()) return false;
+            csv_with_time_ = with_time;
+            if (csv_with_time_) csv_ << "t";
             for (std::size_t i = 0; i < curves_.size(); ++i) {
-                csv_ << (i == 0 ? "" : ",") << curves_[i].name;
+                csv_ << ((i == 0 && !csv_with_time_) ? "" : ",") << curves_[i].name;
             }
+            for (const std::string& name : log_columns_) csv_ << ',' << name;
             csv_ << '\n';
             return true;
+        }
+
+        /// @brief 只落 CSV、不画图的一列（诊断量：状态、门限、距离…）。
+        ///        画面上多一条不同量纲的曲线反而看不清，但这些量离线分析必需 ——
+        ///        例如"丢目标那一段到底是我们关掉了控制，还是识别没出框"。
+        void addLogColumn(const std::string& name) { log_columns_.push_back(name); }
+
+        /// @brief 写一行 log 列（`pushAll` 之后调用；列数不够时补 0）。
+        void pushLog(const std::vector<double>& values)
+        {
+            if (!csv_.is_open()) return;
+            for (std::size_t i = 0; i < log_columns_.size(); ++i) {
+                csv_ << ',' << (i < values.size() ? values[i] : 0.0);
+            }
         }
 
         int panelCount() const
@@ -276,7 +298,9 @@ namespace auto_aim::visualization
         std::size_t active_ = 0;
         int panelsUsed_ = 0;
         std::vector<Curve> curves_;
+        std::vector<std::string> log_columns_;
         std::ofstream csv_;
+        bool csv_with_time_ = false;
     };
 } // namespace auto_aim::visualization
 

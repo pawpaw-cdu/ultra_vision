@@ -119,6 +119,15 @@ namespace auto_aim
 
             const double dt = timestamp - samples_.back().timestamp;
             const double step = std::abs(unwrapped - reference);
+            // ---- 阶跃（不是转速）：整窗重来，绝不跨着它拟合 ----
+            // 位置被硬约束钉住时，径向角的 90° 跳只能来自装甲板朝向的翻面
+            // （对称板的 PnP 二义），不是底盘在转。见 config 注释里的实测。
+            if (step > config_.max_step_angle) {
+                reset();
+                sample_interval_ = 0.0;
+                samples_.push_back({timestamp, radial_angle});
+                return false;
+            }
             const double max_step = std::min(
                 config_.max_rate * dt + 0.35, 2.35);
             if (dt > 1e-6 && step > max_step) {

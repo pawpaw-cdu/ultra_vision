@@ -1,0 +1,191 @@
+#ifndef AUTO_AIM_CONFIG_TRACKER_CONFIG_LOADER_HPP
+#define AUTO_AIM_CONFIG_TRACKER_CONFIG_LOADER_HPP
+
+// 从 config_loader.hpp 抽出的 tracker.yaml 解析（最大的一个 loader）。
+
+#include <algorithm>
+#include <array>
+
+#include <yaml-cpp/yaml.h>
+
+#include "Kalman/tracker.hpp"
+
+namespace auto_aim
+{
+    inline TrackerConfig loadTrackerConfig(const YAML::Node& tracker_file)
+    {
+        const YAML::Node tracker = tracker_file["tracker"];
+        TrackerConfig cfg;
+
+        cfg.min_detect_frames =
+            tracker["min_detect_frames"].as<int>(cfg.min_detect_frames);
+        cfg.max_lost_frames =
+            tracker["max_lost_frames"].as<int>(cfg.max_lost_frames);
+        cfg.reacquire_frames =
+            tracker["reacquire_frames"].as<int>(cfg.reacquire_frames);
+        cfg.max_match_distance =
+            tracker["max_match_distance"].as<double>(cfg.max_match_distance);
+        cfg.reacquire_center_error =
+            tracker["reacquire_center_error"].as<double>(cfg.reacquire_center_error);
+        cfg.reacquire_max_dt =
+            tracker["reacquire_max_dt"].as<double>(cfg.reacquire_max_dt);
+        cfg.max_camera_pose_dt =
+            tracker["max_camera_pose_dt"].as<double>(cfg.max_camera_pose_dt);
+        // 收敛看门狗
+        cfg.watchdog_enabled = tracker["watchdog_enabled"].as<bool>(cfg.watchdog_enabled);
+        cfg.watchdog_window = tracker["watchdog_window"].as<int>(cfg.watchdog_window);
+        cfg.watchdog_reject_ratio =
+            tracker["watchdog_reject_ratio"].as<double>(cfg.watchdog_reject_ratio);
+        cfg.watchdog_min_samples =
+            tracker["watchdog_min_samples"].as<int>(cfg.watchdog_min_samples);
+        cfg.watchdog_max_speed = tracker["watchdog_max_speed"].as<double>(cfg.watchdog_max_speed);
+        cfg.watchdog_max_yaw_rate =
+            tracker["watchdog_max_yaw_rate"].as<double>(cfg.watchdog_max_yaw_rate);
+        cfg.watchdog_max_range = tracker["watchdog_max_range"].as<double>(cfg.watchdog_max_range);
+        cfg.watchdog_max_position_cov =
+            tracker["watchdog_max_position_cov"].as<double>(cfg.watchdog_max_position_cov);
+        cfg.watchdog_max_frame_gap =
+            tracker["watchdog_max_frame_gap"].as<double>(cfg.watchdog_max_frame_gap);
+        cfg.watchdog_min_converge_updates = tracker["watchdog_min_converge_updates"]
+                                                .as<int>(cfg.watchdog_min_converge_updates);
+
+        // 把识别到的装甲板当硬约束（默认开）
+        cfg.hard_plate_constraint =
+            tracker["hard_plate_constraint"].as<bool>(cfg.hard_plate_constraint);
+        cfg.plate_lock_margin =
+            tracker["plate_lock_margin"].as<double>(cfg.plate_lock_margin);
+
+        if (const YAML::Node rotation = tracker["rotation_rate"]) {
+            cfg.rotation_rate.window =
+                rotation["window"].as<double>(cfg.rotation_rate.window);
+            cfg.rotation_rate.min_span =
+                rotation["min_span"].as<double>(cfg.rotation_rate.min_span);
+            cfg.rotation_rate.max_sample_gap =
+                rotation["max_sample_gap"].as<double>(
+                    cfg.rotation_rate.max_sample_gap);
+            cfg.rotation_rate.max_rate =
+                rotation["max_rate"].as<double>(cfg.rotation_rate.max_rate);
+            cfg.rotation_rate.min_rate =
+                rotation["min_rate"].as<double>(cfg.rotation_rate.min_rate);
+            cfg.rotation_rate.max_residual =
+                rotation["max_residual"].as<double>(
+                    cfg.rotation_rate.max_residual);
+            cfg.rotation_rate.min_slopes =
+                rotation["min_slopes"].as<int>(cfg.rotation_rate.min_slopes);
+            cfg.omega_measure_noise =
+                rotation["measure_noise"].as<double>(cfg.omega_measure_noise);
+            cfg.omega_nis_threshold =
+                rotation["nis_threshold"].as<double>(cfg.omega_nis_threshold);
+        }
+
+        if (const YAML::Node kalman = tracker["kalman"]) {
+            cfg.process_noise_pos =
+                kalman["process_noise_pos"].as<double>(cfg.process_noise_pos);
+            cfg.process_noise_pos_speed_ref =
+                kalman["process_noise_pos_speed_ref"].as<double>(
+                    cfg.process_noise_pos_speed_ref);
+            cfg.process_noise_pos_max =
+                kalman["process_noise_pos_max"].as<double>(
+                    cfg.process_noise_pos_max);
+            cfg.process_noise_vel =
+                kalman["process_noise_vel"].as<double>(cfg.process_noise_vel);
+            cfg.measure_noise =
+                kalman["measure_noise"].as<double>(cfg.measure_noise);
+            cfg.default_dt = kalman["default_dt"].as<double>(cfg.default_dt);
+            cfg.armor_radius =
+                kalman["armor_radius"].as<double>(cfg.armor_radius);
+            cfg.y_noise_mult =
+                kalman["y_noise_mult"].as<double>(cfg.y_noise_mult);
+            cfg.p_cov_min = kalman["p_cov_min"].as<double>(cfg.p_cov_min);
+            cfg.angle_measure_noise =
+                kalman["angle_measure_noise"].as<double>(cfg.angle_measure_noise);
+            cfg.bearing_measure_noise =
+                kalman["bearing_measure_noise"].as<double>(
+                    cfg.bearing_measure_noise);
+            cfg.pitch_measure_noise =
+                kalman["pitch_measure_noise"].as<double>(
+                    cfg.pitch_measure_noise);
+            cfg.range_noise_distance_scale =
+                kalman["range_noise_distance_scale"].as<double>(
+                    cfg.range_noise_distance_scale);
+            cfg.ypd_nis_threshold =
+                kalman["ypd_nis_threshold"].as<double>(cfg.ypd_nis_threshold);
+            cfg.max_angle_error =
+                kalman["max_angle_error"].as<double>(cfg.max_angle_error);
+            cfg.adaptive_association_gate = kalman["adaptive_association_gate"]
+                                                .as<bool>(cfg.adaptive_association_gate);
+            cfg.association_gate_sigma = kalman["association_gate_sigma"]
+                                             .as<double>(cfg.association_gate_sigma);
+            cfg.association_gate_max = kalman["association_gate_max"]
+                                           .as<double>(cfg.association_gate_max);
+            cfg.range_gate_sigma =
+                kalman["range_gate_sigma"].as<double>(cfg.range_gate_sigma);
+            cfg.range_gate_max =
+                kalman["range_gate_max"].as<double>(cfg.range_gate_max);
+            cfg.mahalanobis_matching =
+                kalman["mahalanobis_matching"].as<bool>(cfg.mahalanobis_matching);
+            cfg.association_chi2 =
+                kalman["association_chi2"].as<double>(cfg.association_chi2);
+            cfg.ypd_distance_sigma_coeff = kalman["ypd_distance_sigma_coeff"]
+                                               .as<double>(cfg.ypd_distance_sigma_coeff);
+            cfg.soft_nis_gate =
+                kalman["soft_nis_gate"].as<bool>(cfg.soft_nis_gate);
+            cfg.plate_model_enabled =
+                kalman["plate_model_enabled"].as<bool>(cfg.plate_model_enabled);
+            cfg.plate_model_process_acc =
+                kalman["plate_model_process_acc"].as<double>(cfg.plate_model_process_acc);
+            cfg.plate_model_process_yaw_acc = kalman["plate_model_process_yaw_acc"]
+                                                  .as<double>(cfg.plate_model_process_yaw_acc);
+            cfg.plate_model_enter_omega = kalman["plate_model_enter_omega"]
+                                              .as<double>(cfg.plate_model_enter_omega);
+            cfg.plate_model_exit_omega = kalman["plate_model_exit_omega"]
+                                             .as<double>(cfg.plate_model_exit_omega);
+            cfg.angle_match_weight =
+                kalman["angle_match_weight"].as<double>(cfg.angle_match_weight);
+            cfg.position_nis_threshold =
+                kalman["position_nis_threshold"].as<double>(
+                    cfg.position_nis_threshold);
+            cfg.angle_nis_threshold =
+                kalman["angle_nis_threshold"].as<double>(
+                    cfg.angle_nis_threshold);
+
+            cfg.uv_armor_small_width =
+                kalman["uv_armor_small_width"].as<double>(cfg.uv_armor_small_width);
+            cfg.uv_armor_large_width =
+                kalman["uv_armor_large_width"].as<double>(cfg.uv_armor_large_width);
+            cfg.uv_armor_height =
+                kalman["uv_armor_height"].as<double>(cfg.uv_armor_height);
+
+            if (const YAML::Node offsets = kalman["armor_y_offsets"]) {
+                const std::vector<double> values =
+                    offsets.as<std::vector<double>>();
+                if (values.size() == cfg.armor_y_offsets.size()) {
+                    std::copy(values.begin(), values.end(),
+                              cfg.armor_y_offsets.begin());
+                } else {
+                    std::cerr << "Ignoring armor_y_offsets: expected four values"
+                              << std::endl;
+                }
+            }
+        }
+        // UV 观测的板面尺寸必须与 PnP 完全一致（否则"重投影"和"观测"不是同一个
+        // 几何量，残差会带上模型偏差），所以直接复用 pnp 段，不在 kalman 段重复配置。
+        if (const YAML::Node pnp = tracker["pnp"]) {
+            cfg.armor_small_width =
+                pnp["small_width"].as<double>(cfg.armor_small_width);
+            cfg.armor_large_width =
+                pnp["large_width"].as<double>(cfg.armor_large_width);
+            cfg.armor_height = pnp["height"].as<double>(cfg.armor_height);
+            // UV 的板高没单独配就直接跟 PnP 走：这两处必须是同一个几何量，
+            // 否则"重投影的模型"和"观测的角点"不是一回事，残差会带模型偏差。
+            if (!tracker["kalman"]["uv_armor_height"]) {
+                cfg.uv_armor_height = cfg.armor_height;
+            }
+        }
+        return cfg;
+    }
+
+    // `tracker_file` is the parsed tracker.yaml root node.
+}
+
+#endif // AUTO_AIM_CONFIG_TRACKER_CONFIG_LOADER_HPP

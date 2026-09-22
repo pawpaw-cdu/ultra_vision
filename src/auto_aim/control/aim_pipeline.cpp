@@ -31,7 +31,6 @@ namespace auto_aim
     AimPipeline::Outcome AimPipeline::update(const FrameInput& input)
     {
         Outcome outcome;
-        control_enabled_.store(input.allow_control, std::memory_order_relaxed);
         // ---- 1. 估计：只有拿到**新**观测才更新；否则保持状态并让选择器按年龄外推 ----
         // （异步神经网络跟不上相机帧率时这是常态，不是异常。）
         if (input.fresh) {
@@ -48,6 +47,13 @@ namespace auto_aim
             tracker_.getState() == TrackerState::TRACKING ||
             (tracker_.getState() == TrackerState::TEMP_LOST &&
              tracker_.getLostCount() <= config_.max_control_lost_frames);
+        // ---- 接管闸门：**必须"现在确实有可用目标"才允许下发控制帧** ----
+        // 之前这里只判 input.allow_control（=下位机在自瞄模式），于是没有目标时
+        // 控制器线程仍以 100 Hz 发 mode=1，把**上一次的目标角**当命令发下去：
+        // 云台就朝一个过期目标一路走（实测：全程 armors=0 时 sent 仍到 118 Hz，
+        // 云台被带到远处角度/顶到 pitch 限位）。没有可用目标时只发 mode=0 心跳。
+        control_enabled_.store(input.allow_control && outcome.track_usable,
+                               std::memory_order_relaxed);
 
         // ---- 2. 选板 + 提前量 ----
         TargetDecision decision;
@@ -58,6 +64,8 @@ namespace auto_aim
             estimate.yaw = tracker_.getYawWorld();
             estimate.omega = tracker_.getOmega();
             estimate.armor_radius = tracker_.getArmorRadius();
+            // 未收敛（刚入靶/刚重捕）时不允许用 ω 做提前量，见 TargetEstimate::converged。
+            estimate.converged = tracker_.watchdogStats().converged;
             // 观测年龄 = 现在 − 最后一次**新观测**的时刻。异步检测、慢推理、
             // 仿真里的"曝光→到手"延迟都体现在这一项里（时间基由调用方给）。
             estimate.age = last_detection_time_ > 0.0
@@ -67,8 +75,48 @@ namespace auto_aim
         outcome.decision = decision;
 
         // ---- 3. 瞄点：稳定跟踪用回归滤波，刚入靶用观测方向直接解 ----
+        // 静止目标 + 有新观测：**直接瞄"刚观测到的那块板"**，不走选板器。
+        // 为什么（2026-09-29 实测，`~/t1` 录制 35 帧）：选板器要靠模型 yaw 状态推算四块板
+        // 各自的角度，而 yaw 状态在刚入靶/刚重捕时还没收敛 → 它挑到相邻 90° 的那块板
+        // （obs_id=2 却 aim_id=1，35 帧只有 4 帧瞄对），云台就去追不存在的板 → 板出画（转飞）。
+        // 观测到的那块板本身就是最准的瞄点（硬约束也把模型该板钉在它上面），静止时不需要
+        // "挑下一块"这种逻辑，也不需要 yaw 状态。旋转靶仍走下面的选板器。
         GimbalTargetAngles desired;
-        if (decision.valid) {
+        bool aimed_at_observed = false;
+        // 没有**新观测**的这一帧（检测断续很常见）：不要用滑行的模型状态重新"选板" ——
+        // 那正是"识别一断就跳到相邻板、云台瞎转"的来源。保持上一拍算好的瞄点即可。
+        if (outcome.track_usable && !input.fresh && have_last_desired_ && last_desired_.valid) {
+            desired = last_desired_;
+            aimed_at_observed = true;
+        }
+        if (!aimed_at_observed && outcome.track_usable && tracker_.hasObservation() &&
+            selector_.targetStill()) {
+            const auto& observed = tracker_.getLastObservedArmor();
+            if (observed.solve_result && observed.tvec.rows == 3) {
+                std::array<double, 3> aim_camera{{
+                    observed.tvec.at<double>(0),
+                    observed.tvec.at<double>(1),
+                    observed.tvec.at<double>(2),
+                }};
+                const double distance = std::sqrt(
+                    aim_camera[0] * aim_camera[0] + aim_camera[1] * aim_camera[1] +
+                    aim_camera[2] * aim_camera[2]);
+                const double flight_time =
+                    distance / std::max(1.0, selector_.projectileSpeed());
+                // 弹道下坠补偿：相机系 y 向下，下坠要让瞄点**抬高** → y 减小。
+                aim_camera[1] -= 0.5 * 9.81 * flight_time * flight_time;
+                const auto solved =
+                    bootstrap_aimer_.solveTargetAngles(aim_camera, current_yaw, current_pitch);
+                if (solved.valid) {
+                    desired = solved;
+                    desired.yaw_velocity = 0.0;
+                    desired.pitch_velocity = 0.0;
+                    aim_filter_.reset();
+                    aimed_at_observed = true;
+                }
+            }
+        }
+        if (!aimed_at_observed && decision.valid) {
             const auto filtered = aim_filter_.update(
                 decision.target_yaw, decision.target_pitch, decision.armor_id, now);
             desired.valid = filtered.valid;
@@ -77,7 +125,7 @@ namespace auto_aim
             desired.velocity_valid = true;
             desired.yaw_velocity = decision.target_yaw_velocity;
             desired.pitch_velocity = decision.target_pitch_velocity;
-        } else if (tracker_.hasObservation()) {
+        } else if (!aimed_at_observed && tracker_.hasObservation()) {
             const auto& observed = tracker_.getLastObservedArmor();
             if (observed.tvec.rows == 3 && observed.solve_result) {
                 const std::array<double, 3> target_camera{{
@@ -149,6 +197,11 @@ namespace auto_aim
         // ---- 5. 开火决策（判据在 ShootEvaluator，一处裁决） ----
         const auto shooter_output = shooter_.update(decision, outcome.aim_ready, now,
                                                     shoot_input);
+        // 记录本拍最终瞄点：没有新观测的帧直接复用（见上面"保持上一拍瞄点"）。
+        if (desired.valid) {
+            last_desired_ = desired;
+            have_last_desired_ = true;
+        }
         outcome.fire = input.fire_enabled && shooter_output.fire;
         outcome.fired_now = outcome.fire && !last_fire_;
         last_fire_ = outcome.fire;
