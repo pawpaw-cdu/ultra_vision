@@ -98,6 +98,21 @@ namespace auto_aim
         if (!isFinite(config_.command_latency) || config_.command_latency < 0.0) {
             config_.command_latency = 0.08;
         }
+        if (!isFinite(config_.decide_speed) || config_.decide_speed < 0.0) {
+            config_.decide_speed = 7.0;
+        }
+        if (!isFinite(config_.low_speed_latency) ||
+            config_.low_speed_latency < 0.0) {
+            config_.low_speed_latency = 0.06;
+        }
+        if (!isFinite(config_.high_speed_latency) ||
+            config_.high_speed_latency < config_.low_speed_latency) {
+            config_.high_speed_latency = 0.13;
+        }
+        if (!isFinite(config_.lock_switch_margin) ||
+            config_.lock_switch_margin <= 0.0) {
+            config_.lock_switch_margin = 0.65;
+        }
         if (!isFinite(config_.max_lead_time) || config_.max_lead_time <= 0.0) {
             config_.max_lead_time = 0.50;
         }
@@ -174,12 +189,23 @@ namespace auto_aim
             return result;
         }
 
-        const double seed_time = config_.command_latency +
+        // The estimate is expressed at the time of the last detection, not now.
+        // Carry its age into the lead so a slow asynchronous detector is
+        // compensated instead of biasing the aim point behind the target.
+        const double estimate_age = std::max(
+            0.0, std::min(estimate.age, config_.max_lead_time));
+        // A fast target needs a larger allowance than a slow one; see the config
+        // comment. The split is on the chassis yaw rate, like the reference.
+        const double latency = std::abs(estimate.omega) > config_.decide_speed
+            ? config_.high_speed_latency
+            : config_.low_speed_latency;
+        const double seed_time = latency + estimate_age +
             center_distance / config_.projectile_speed;
 
         struct Evaluated {
             TargetDecision decision;
             double delta = 0.0;
+            double cost = std::numeric_limits<double>::max();
             bool eligible = false;
         };
         std::array<Evaluated, 4> evaluated;
@@ -215,8 +241,8 @@ namespace auto_aim
                 gimbal_time = gimbalTravelTime(
                     config_, current_yaw, current_pitch, raw_yaw, raw_pitch);
 
-                const double next_time = config_.command_latency +
-                    gimbal_time + flight_time;
+                const double next_time =
+                    latency + estimate_age + gimbal_time + flight_time;
                 if (std::abs(next_time - aim_time) < 1e-4) {
                     aim_time = next_time;
                     converged = true;
@@ -306,8 +332,15 @@ namespace auto_aim
             candidate.gimbal_time = gimbal_time;
             candidate.lead_time = aim_time;
             candidate.time_to_handoff = time_to_handoff;
+            // Spinning chassis: a plate crosses the window in a fraction of the
+            // bullet's flight time, so requiring it to stay put for the whole
+            // lead time (`time_to_handoff > aim_time`) is unsatisfiable and
+            // silently disables firing. The reference implementation only asks
+            // for "inside the window and on the side where plates appear".
+            const bool spinning = std::abs(estimate.omega) >
+                config_.spin_omega_threshold;
             candidate.in_fire_window = abs_delta <= config_.coming_angle &&
-                incoming && time_to_handoff > aim_time;
+                incoming && (spinning || time_to_handoff > aim_time);
             evaluated[armor_id].decision = candidate;
             evaluated[armor_id].delta = delta;
             evaluated[armor_id].eligible = abs_delta <= config_.coming_angle &&
@@ -316,6 +349,7 @@ namespace auto_aim
             if (evaluated[armor_id].eligible) {
                 const double cost = abs_delta + 0.25 * gimbal_time +
                     0.05 * aim_time;
+                evaluated[armor_id].cost = cost;
                 if (cost < best_cost) {
                     best_cost = cost;
                     best_armor = armor_id;
@@ -323,9 +357,34 @@ namespace auto_aim
             }
         }
 
+        // Plate locking: when the previously chosen plate is still eligible,
+        // keep it unless another candidate is clearly cheaper. Without this the
+        // selector can alternate between two plates that sit at similar angles,
+        // which costs a gimbal round trip every time.
+        if (lock_id_ >= 0 && lock_id_ < 4 &&
+            evaluated[static_cast<std::size_t>(lock_id_)].eligible) {
+            const double locked_cost =
+                evaluated[static_cast<std::size_t>(lock_id_)].cost;
+            if (best_armor < 0 ||
+                best_cost >= locked_cost * config_.lock_switch_margin) {
+                best_armor = lock_id_;
+                best_cost = locked_cost;
+            }
+        }
+        lock_id_ = best_armor;
+
         if (best_armor < 0) return result;
 
         result = evaluated[best_armor].decision;
+
+        // No handoff blending while the chassis is spinning. The blend puts the
+        // aim point *between* two plates, so neither is ever aligned with the
+        // gimbal and the firing gate stays closed. During spin the plates sweep
+        // continuously anyway, so aiming straight at the chosen one is both
+        // simpler and correct.
+        const bool spin_mode = std::abs(estimate.omega) >
+            config_.spin_omega_threshold;
+        if (spin_mode) return result;
 
         int next_armor = -1;
         double next_cost = std::numeric_limits<double>::max();

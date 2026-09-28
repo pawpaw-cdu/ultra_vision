@@ -1,0 +1,17 @@
+# Golden-frame expectations for detector_golden_test.
+# frame,min_lights,min_armors,nn_labels
+#
+# min_lights / min_armors are recorded baselines of the CLASSICAL detector, with
+# "at least" semantics. They are deliberately set to what the tuned classical
+# pipeline currently produces, so a silent regression (for example the light-bar
+# tilt formula that scored vertical bars as 180 degrees and dropped half of
+# them) fails the test instead of passing unnoticed. The classical detector is
+# legacy: on these frames it is much weaker than the network.
+#
+# nn_labels must all be detected by the network. They are model-agnostic
+# ("colour/name/size"), so the same expectations hold for any detection head.
+sim_two_plates.jpg,0,0,blue/three/small
+sim_extinguish.jpg,2,1,blue/three/small
+real_0000.jpg,4,0,blue/one/small
+real_0040.jpg,1,0,blue/one/small
+real_0120.jpg,2,0,blue/one/small

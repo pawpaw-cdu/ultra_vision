@@ -1,0 +1,22 @@
+# 能量机关仿真的测试相机预置：近视角（约 6.9 m）
+#
+# 用法：DAEDALUS_CAMERA_CONFIG=<此文件> DAEDALUS_SCENARIO=energy_rune <daedalus>
+#
+# 距离选择说明：buff 关键点模型是固定尺度训练的，rune 在画面里占约 1/3 宽时
+# 检出最稳（8.25 m，见 rune_camera_far.yaml）；拉近到 6.9 m 后靶面像素变大约
+# 20%，瞄准容差更宽，但模型的检出分数会下降，需要用 tools/rune_sim_test.sh
+# 的 --score 参数配合调低阈值。
+scenario: energy_rune
+fov_degrees: 45.0
+
+energy_rune:
+  position: [-5.105, 2.45, -4.997]
+  target: [-0.16, 2.45, -0.22]
+
+armor_chassis:
+  position: [1.0, 0.25, 0.0]
+  target: [0.0, 0.15, 0.0]
+
+guided_dart:
+  position: [0.0, 3.0, 0.0]
+  target: [13.0, 9.0, -95.0]

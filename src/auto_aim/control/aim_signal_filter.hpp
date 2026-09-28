@@ -9,7 +9,7 @@ namespace auto_aim
         double measurement_noise = 0.0025;         // rad^2
         double initial_angle_covariance = 0.05;    // rad^2
         double initial_velocity_covariance = 4.0;  // rad^2/s^2
-        double reset_innovation = 0.35;            // rad
+        double reset_innovation = 20.0 * 3.14159265358979323846 / 180.0; // rad (20 deg)
         double reset_timeout = 0.20;               // s
         double max_dt = 0.10;                      // s
     };

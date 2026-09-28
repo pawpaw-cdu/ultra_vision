@@ -1,0 +1,18 @@
+# auto_aim 仿真相机预置：远距 6.5 m（比赛常态 7~8 m，先按"再近 1 m"调到 6.5）
+# 远距的意义：近距(1.0 m)下靶面有 65 px，PnP 极其容易，会掩盖距离方向的病态。
+# 6.5 m 下靶面约 13×6 px（1440x1080 / f=1447），1 px 关键点噪声 ≈ 0.5 m 距离误差。
+# 想换距离不用改这个文件：tools/auto_aim_sim_test.sh --distance 5.0 会沿同一条
+# 视线把相机挪到指定距离（写成 <out>/camera.yaml）。
+# 注意：距离一变，"FOV 能覆盖的横向范围"≈ 2·d·tan(20.5°) 也跟着变
+# （6.5 m → ±2.4 m），`--pan` 的横向限幅要跟着调，否则靶车直接出画。
+scenario: armor_chassis
+fov_degrees: 41.0
+energy_rune:
+  position: [-4.138, 0.45, -4.131]
+  target: [-0.16, 2.45, -0.22]
+armor_chassis:
+  position: [6.5, 0.45, 0.0]
+  target: [0.0, 0.15, 0.0]
+guided_dart:
+  position: [0.0, 3.0, 0.0]
+  target: [13.0, 9.0, -95.0]

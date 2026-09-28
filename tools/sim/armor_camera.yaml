@@ -1,0 +1,20 @@
+# auto_aim 仿真的测试相机预置：正对整车（四块小装甲板），与
+# simulator_system/simulator/config/camera.yaml 的 armor_chassis 段一致。
+#
+# 与能量机关的预置一样，这里只描述"用哪个场景、相机怎么摆"；分辨率/FPS 由
+# DAEDALUS_CAPTURE_* 决定（脚本里固定成 640×480 30 fps，与 configs/camera.yaml
+# 的标定矩阵 579.411@640×480、FOV 45° 对齐）。
+scenario: armor_chassis
+fov_degrees: 41.0
+
+energy_rune:
+  position: [-4.138, 0.45, -4.131]
+  target: [-0.16, 2.45, -0.22]
+
+armor_chassis:
+  position: [1.0, 0.25, 0.0]
+  target: [0.0, 0.15, 0.0]
+
+guided_dart:
+  position: [0.0, 3.0, 0.0]
+  target: [13.0, 9.0, -95.0]

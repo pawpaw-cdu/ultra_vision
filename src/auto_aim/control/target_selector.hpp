@@ -20,6 +20,19 @@ namespace auto_aim
         double pitch_acceleration = 20.94395102393195; // rad/s^2
         double handoff_start_angle = 0.17453292519943295; // 10 degrees
         double handoff_duration = 0.20; // s
+
+        // Latency is not a single number: a fast-spinning chassis is tracked
+        // from staler observations and the gimbal has been slewing, so its lead
+        // needs a larger allowance than a slow target. Mirrors the reference
+        // implementation's decision_speed / high_speed_delay_time split.
+        double decide_speed = 7.0;          // rad/s
+        double low_speed_latency = 0.06;    // s
+        double high_speed_latency = 0.13;   // s
+
+        // Plate locking: keep the chosen plate while it stays eligible unless
+        // another candidate is clearly cheaper. Stops the selector from
+        // alternating between two plates that sit at similar angles.
+        double lock_switch_margin = 0.65;
     };
 
     // Pure estimator output consumed by the selector. All values are in the
@@ -30,6 +43,11 @@ namespace auto_aim
         double yaw = 0.0;
         double omega = 0.0;
         double armor_radius = 0.21;
+        // Seconds between the observation that produced this state and the
+        // moment the decision is made. An asynchronous detector can be a couple
+        // of hundred milliseconds behind, which at 3 rad/s is tens of degrees,
+        // so the lead time has to account for it.
+        double age = 0.0;
     };
 
     // The selector's only output. The gimbal consumes `aim_point`; the
@@ -66,12 +84,22 @@ namespace auto_aim
                               double current_yaw,
                               double current_pitch);
 
+        /// @brief 实车用：弹速由下位机每帧回传（TJ_T 的 bullet_speed），不能写死。
+        ///        只接受合理值，异常值忽略（保留上一个有效弹速）。
+        void setProjectileSpeed(double speed)
+        {
+            if (speed >= 10.0 && speed <= 45.0) config_.projectile_speed = speed;
+        }
+        double projectileSpeed() const { return config_.projectile_speed; }
+
     private:
         double armorDelta(const TargetEstimate& estimate,
                           int armor_id,
                           double lead_time) const;
 
         TargetSelectorConfig config_;
+        // Plate chosen in the previous frame, or -1 when nothing was eligible.
+        int lock_id_ = -1;
     };
 }
 

@@ -53,6 +53,11 @@ namespace auto_aim
 
         cv::RotatedRect rrect = cv::minAreaRect(contour);
         Light light(rrect);
+        // find_lights already keeps only the requested enemy color, so the
+        // surviving light belongs to that color. Without this assignment
+        // Light::color stays uninitialized and the pair filter in find_armors
+        // compares garbage against enemy_color.
+        light.color = detector_color;
         light.min_ratio = config_.light_min_ratio;
         light.max_ratio = config_.light_max_ratio;
         light.max_light_angle = config_.light_max_angle;

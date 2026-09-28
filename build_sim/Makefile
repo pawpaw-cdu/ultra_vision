@@ -65,6 +65,16 @@ CMAKE_BINARY_DIR = /Users/a/Desktop/RM_source/Ultra_Vision/build_sim
 #=============================================================================
 # Targets provided globally by CMake.
 
+# Special rule for the target test
+test:
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --cyan "Running tests..."
+	/opt/homebrew/bin/ctest $(ARGS)
+.PHONY : test
+
+# Special rule for the target test
+test/fast: test
+.PHONY : test/fast
+
 # Special rule for the target edit_cache
 edit_cache:
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --cyan "Running CMake cache editor..."
@@ -175,17 +185,95 @@ hsv_tuner/fast:
 .PHONY : hsv_tuner/fast
 
 #=============================================================================
-# Target rules for targets named auto_aim
+# Target rules for targets named gimbal_probe
 
 # Build rule for target.
-auto_aim: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 auto_aim
-.PHONY : auto_aim
+gimbal_probe: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 gimbal_probe
+.PHONY : gimbal_probe
 
 # fast build rule for target.
-auto_aim/fast:
-	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/build
-.PHONY : auto_aim/fast
+gimbal_probe/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/build
+.PHONY : gimbal_probe/fast
+
+#=============================================================================
+# Target rules for targets named calibrate_camera
+
+# Build rule for target.
+calibrate_camera: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 calibrate_camera
+.PHONY : calibrate_camera
+
+# fast build rule for target.
+calibrate_camera/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/calibrate_camera.dir/build.make CMakeFiles/calibrate_camera.dir/build
+.PHONY : calibrate_camera/fast
+
+#=============================================================================
+# Target rules for targets named hand_eye_calibrate
+
+# Build rule for target.
+hand_eye_calibrate: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 hand_eye_calibrate
+.PHONY : hand_eye_calibrate
+
+# fast build rule for target.
+hand_eye_calibrate/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/build
+.PHONY : hand_eye_calibrate/fast
+
+#=============================================================================
+# Target rules for targets named config_dump
+
+# Build rule for target.
+config_dump: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 config_dump
+.PHONY : config_dump
+
+# fast build rule for target.
+config_dump/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/config_dump.dir/build.make CMakeFiles/config_dump.dir/build
+.PHONY : config_dump/fast
+
+#=============================================================================
+# Target rules for targets named buff_model_bench
+
+# Build rule for target.
+buff_model_bench: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 buff_model_bench
+.PHONY : buff_model_bench
+
+# fast build rule for target.
+buff_model_bench/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/buff_model_bench.dir/build.make CMakeFiles/buff_model_bench.dir/build
+.PHONY : buff_model_bench/fast
+
+#=============================================================================
+# Target rules for targets named buff_state_probe
+
+# Build rule for target.
+buff_state_probe: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 buff_state_probe
+.PHONY : buff_state_probe
+
+# fast build rule for target.
+buff_state_probe/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/buff_state_probe.dir/build.make CMakeFiles/buff_state_probe.dir/build
+.PHONY : buff_state_probe/fast
+
+#=============================================================================
+# Target rules for targets named nn_probe
+
+# Build rule for target.
+nn_probe: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 nn_probe
+.PHONY : nn_probe
+
+# fast build rule for target.
+nn_probe/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/nn_probe.dir/build.make CMakeFiles/nn_probe.dir/build
+.PHONY : nn_probe/fast
 
 #=============================================================================
 # Target rules for targets named sim_receiver
@@ -199,6 +287,666 @@ sim_receiver: cmake_check_build_system
 sim_receiver/fast:
 	$(MAKE) $(MAKESILENT) -f src/auto_aim/sim_receiver/CMakeFiles/sim_receiver.dir/build.make src/auto_aim/sim_receiver/CMakeFiles/sim_receiver.dir/build
 .PHONY : sim_receiver/fast
+
+#=============================================================================
+# Target rules for targets named auto_buff
+
+# Build rule for target.
+auto_buff: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 auto_buff
+.PHONY : auto_buff
+
+# fast build rule for target.
+auto_buff/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_buff/CMakeFiles/auto_buff.dir/build.make src/auto_buff/CMakeFiles/auto_buff.dir/build
+.PHONY : auto_buff/fast
+
+#=============================================================================
+# Target rules for targets named auto_buff_demo
+
+# Build rule for target.
+auto_buff_demo: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 auto_buff_demo
+.PHONY : auto_buff_demo
+
+# fast build rule for target.
+auto_buff_demo/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_buff/CMakeFiles/auto_buff_demo.dir/build.make src/auto_buff/CMakeFiles/auto_buff_demo.dir/build
+.PHONY : auto_buff_demo/fast
+
+#=============================================================================
+# Target rules for targets named auto_aim
+
+# Build rule for target.
+auto_aim: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 auto_aim
+.PHONY : auto_aim
+
+# fast build rule for target.
+auto_aim/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/build
+.PHONY : auto_aim/fast
+
+#=============================================================================
+# Target rules for targets named standard_clock_test
+
+# Build rule for target.
+standard_clock_test: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 standard_clock_test
+.PHONY : standard_clock_test
+
+# fast build rule for target.
+standard_clock_test/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/standard_clock_test.dir/build.make src/auto_aim/CMakeFiles/standard_clock_test.dir/build
+.PHONY : standard_clock_test/fast
+
+#=============================================================================
+# Target rules for targets named shoot_evaluator_test
+
+# Build rule for target.
+shoot_evaluator_test: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 shoot_evaluator_test
+.PHONY : shoot_evaluator_test
+
+# fast build rule for target.
+shoot_evaluator_test/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/shoot_evaluator_test.dir/build.make src/auto_aim/CMakeFiles/shoot_evaluator_test.dir/build
+.PHONY : shoot_evaluator_test/fast
+
+#=============================================================================
+# Target rules for targets named armor_ekf_uv_test
+
+# Build rule for target.
+armor_ekf_uv_test: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 armor_ekf_uv_test
+.PHONY : armor_ekf_uv_test
+
+# fast build rule for target.
+armor_ekf_uv_test/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_uv_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_uv_test.dir/build
+.PHONY : armor_ekf_uv_test/fast
+
+#=============================================================================
+# Target rules for targets named aim_signal_filter_test
+
+# Build rule for target.
+aim_signal_filter_test: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 aim_signal_filter_test
+.PHONY : aim_signal_filter_test
+
+# fast build rule for target.
+aim_signal_filter_test/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/aim_signal_filter_test.dir/build.make src/auto_aim/CMakeFiles/aim_signal_filter_test.dir/build
+.PHONY : aim_signal_filter_test/fast
+
+#=============================================================================
+# Target rules for targets named gimbal_aimer_test
+
+# Build rule for target.
+gimbal_aimer_test: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 gimbal_aimer_test
+.PHONY : gimbal_aimer_test
+
+# fast build rule for target.
+gimbal_aimer_test/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/gimbal_aimer_test.dir/build.make src/auto_aim/CMakeFiles/gimbal_aimer_test.dir/build
+.PHONY : gimbal_aimer_test/fast
+
+#=============================================================================
+# Target rules for targets named gimbal_controller_test
+
+# Build rule for target.
+gimbal_controller_test: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 gimbal_controller_test
+.PHONY : gimbal_controller_test
+
+# fast build rule for target.
+gimbal_controller_test/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/gimbal_controller_test.dir/build.make src/auto_aim/CMakeFiles/gimbal_controller_test.dir/build
+.PHONY : gimbal_controller_test/fast
+
+#=============================================================================
+# Target rules for targets named shooter_test
+
+# Build rule for target.
+shooter_test: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 shooter_test
+.PHONY : shooter_test
+
+# fast build rule for target.
+shooter_test/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/shooter_test.dir/build.make src/auto_aim/CMakeFiles/shooter_test.dir/build
+.PHONY : shooter_test/fast
+
+#=============================================================================
+# Target rules for targets named target_selector_test
+
+# Build rule for target.
+target_selector_test: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 target_selector_test
+.PHONY : target_selector_test
+
+# fast build rule for target.
+target_selector_test/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/target_selector_test.dir/build.make src/auto_aim/CMakeFiles/target_selector_test.dir/build
+.PHONY : target_selector_test/fast
+
+#=============================================================================
+# Target rules for targets named rotation_rate_estimator_test
+
+# Build rule for target.
+rotation_rate_estimator_test: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 rotation_rate_estimator_test
+.PHONY : rotation_rate_estimator_test
+
+# fast build rule for target.
+rotation_rate_estimator_test/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/rotation_rate_estimator_test.dir/build.make src/auto_aim/CMakeFiles/rotation_rate_estimator_test.dir/build
+.PHONY : rotation_rate_estimator_test/fast
+
+#=============================================================================
+# Target rules for targets named armor_ekf_test
+
+# Build rule for target.
+armor_ekf_test: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 armor_ekf_test
+.PHONY : armor_ekf_test
+
+# fast build rule for target.
+armor_ekf_test/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/build
+.PHONY : armor_ekf_test/fast
+
+#=============================================================================
+# Target rules for targets named gimbal_protocol_test
+
+# Build rule for target.
+gimbal_protocol_test: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 gimbal_protocol_test
+.PHONY : gimbal_protocol_test
+
+# fast build rule for target.
+gimbal_protocol_test/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/gimbal_protocol_test.dir/build.make src/auto_aim/CMakeFiles/gimbal_protocol_test.dir/build
+.PHONY : gimbal_protocol_test/fast
+
+#=============================================================================
+# Target rules for targets named gimbal_link_test
+
+# Build rule for target.
+gimbal_link_test: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 gimbal_link_test
+.PHONY : gimbal_link_test
+
+# fast build rule for target.
+gimbal_link_test/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/gimbal_link_test.dir/build.make src/auto_aim/CMakeFiles/gimbal_link_test.dir/build
+.PHONY : gimbal_link_test/fast
+
+#=============================================================================
+# Target rules for targets named detector_golden_test
+
+# Build rule for target.
+detector_golden_test: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 detector_golden_test
+.PHONY : detector_golden_test
+
+# fast build rule for target.
+detector_golden_test/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/detector_golden_test.dir/build.make src/auto_aim/CMakeFiles/detector_golden_test.dir/build
+.PHONY : detector_golden_test/fast
+
+#=============================================================================
+# Target rules for targets named buff_target_test
+
+# Build rule for target.
+buff_target_test: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 buff_target_test
+.PHONY : buff_target_test
+
+# fast build rule for target.
+buff_target_test/fast:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/buff_target_test.dir/build.make tests/CMakeFiles/buff_target_test.dir/build
+.PHONY : buff_target_test/fast
+
+#=============================================================================
+# Target rules for targets named buff_state_test
+
+# Build rule for target.
+buff_state_test: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 buff_state_test
+.PHONY : buff_state_test
+
+# fast build rule for target.
+buff_state_test/fast:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/buff_state_test.dir/build.make tests/CMakeFiles/buff_state_test.dir/build
+.PHONY : buff_state_test/fast
+
+io/gimbal/gimbal.o: io/gimbal/gimbal.cpp.o
+.PHONY : io/gimbal/gimbal.o
+
+# target to build an object file
+io/gimbal/gimbal.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/io/gimbal/gimbal.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/io/gimbal/gimbal.cpp.o
+.PHONY : io/gimbal/gimbal.cpp.o
+
+io/gimbal/gimbal.i: io/gimbal/gimbal.cpp.i
+.PHONY : io/gimbal/gimbal.i
+
+# target to preprocess a source file
+io/gimbal/gimbal.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/io/gimbal/gimbal.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/io/gimbal/gimbal.cpp.i
+.PHONY : io/gimbal/gimbal.cpp.i
+
+io/gimbal/gimbal.s: io/gimbal/gimbal.cpp.s
+.PHONY : io/gimbal/gimbal.s
+
+# target to generate assembly for a file
+io/gimbal/gimbal.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/io/gimbal/gimbal.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/io/gimbal/gimbal.cpp.s
+.PHONY : io/gimbal/gimbal.cpp.s
+
+io/gimbal/protocol.o: io/gimbal/protocol.cpp.o
+.PHONY : io/gimbal/protocol.o
+
+# target to build an object file
+io/gimbal/protocol.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/io/gimbal/protocol.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/io/gimbal/protocol.cpp.o
+.PHONY : io/gimbal/protocol.cpp.o
+
+io/gimbal/protocol.i: io/gimbal/protocol.cpp.i
+.PHONY : io/gimbal/protocol.i
+
+# target to preprocess a source file
+io/gimbal/protocol.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/io/gimbal/protocol.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/io/gimbal/protocol.cpp.i
+.PHONY : io/gimbal/protocol.cpp.i
+
+io/gimbal/protocol.s: io/gimbal/protocol.cpp.s
+.PHONY : io/gimbal/protocol.s
+
+# target to generate assembly for a file
+io/gimbal/protocol.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/io/gimbal/protocol.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/io/gimbal/protocol.cpp.s
+.PHONY : io/gimbal/protocol.cpp.s
+
+io/serial/crc16.o: io/serial/crc16.cpp.o
+.PHONY : io/serial/crc16.o
+
+# target to build an object file
+io/serial/crc16.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/io/serial/crc16.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/io/serial/crc16.cpp.o
+.PHONY : io/serial/crc16.cpp.o
+
+io/serial/crc16.i: io/serial/crc16.cpp.i
+.PHONY : io/serial/crc16.i
+
+# target to preprocess a source file
+io/serial/crc16.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/io/serial/crc16.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/io/serial/crc16.cpp.i
+.PHONY : io/serial/crc16.cpp.i
+
+io/serial/crc16.s: io/serial/crc16.cpp.s
+.PHONY : io/serial/crc16.s
+
+# target to generate assembly for a file
+io/serial/crc16.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/io/serial/crc16.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/io/serial/crc16.cpp.s
+.PHONY : io/serial/crc16.cpp.s
+
+io/serial/serial_port.o: io/serial/serial_port.cpp.o
+.PHONY : io/serial/serial_port.o
+
+# target to build an object file
+io/serial/serial_port.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/io/serial/serial_port.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/io/serial/serial_port.cpp.o
+.PHONY : io/serial/serial_port.cpp.o
+
+io/serial/serial_port.i: io/serial/serial_port.cpp.i
+.PHONY : io/serial/serial_port.i
+
+# target to preprocess a source file
+io/serial/serial_port.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/io/serial/serial_port.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/io/serial/serial_port.cpp.i
+.PHONY : io/serial/serial_port.cpp.i
+
+io/serial/serial_port.s: io/serial/serial_port.cpp.s
+.PHONY : io/serial/serial_port.s
+
+# target to generate assembly for a file
+io/serial/serial_port.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/io/serial/serial_port.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/io/serial/serial_port.cpp.s
+.PHONY : io/serial/serial_port.cpp.s
+
+src/auto_aim/perception/armor_source.o: src/auto_aim/perception/armor_source.cpp.o
+.PHONY : src/auto_aim/perception/armor_source.o
+
+# target to build an object file
+src/auto_aim/perception/armor_source.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/armor_source.cpp.o
+.PHONY : src/auto_aim/perception/armor_source.cpp.o
+
+src/auto_aim/perception/armor_source.i: src/auto_aim/perception/armor_source.cpp.i
+.PHONY : src/auto_aim/perception/armor_source.i
+
+# target to preprocess a source file
+src/auto_aim/perception/armor_source.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/armor_source.cpp.i
+.PHONY : src/auto_aim/perception/armor_source.cpp.i
+
+src/auto_aim/perception/armor_source.s: src/auto_aim/perception/armor_source.cpp.s
+.PHONY : src/auto_aim/perception/armor_source.s
+
+# target to generate assembly for a file
+src/auto_aim/perception/armor_source.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/armor_source.cpp.s
+.PHONY : src/auto_aim/perception/armor_source.cpp.s
+
+src/auto_aim/perception/async_detector.o: src/auto_aim/perception/async_detector.cpp.o
+.PHONY : src/auto_aim/perception/async_detector.o
+
+# target to build an object file
+src/auto_aim/perception/async_detector.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/async_detector.cpp.o
+.PHONY : src/auto_aim/perception/async_detector.cpp.o
+
+src/auto_aim/perception/async_detector.i: src/auto_aim/perception/async_detector.cpp.i
+.PHONY : src/auto_aim/perception/async_detector.i
+
+# target to preprocess a source file
+src/auto_aim/perception/async_detector.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/async_detector.cpp.i
+.PHONY : src/auto_aim/perception/async_detector.cpp.i
+
+src/auto_aim/perception/async_detector.s: src/auto_aim/perception/async_detector.cpp.s
+.PHONY : src/auto_aim/perception/async_detector.s
+
+# target to generate assembly for a file
+src/auto_aim/perception/async_detector.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/async_detector.cpp.s
+.PHONY : src/auto_aim/perception/async_detector.cpp.s
+
+src/auto_aim/perception/detector.o: src/auto_aim/perception/detector.cpp.o
+.PHONY : src/auto_aim/perception/detector.o
+
+# target to build an object file
+src/auto_aim/perception/detector.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/detector.cpp.o
+.PHONY : src/auto_aim/perception/detector.cpp.o
+
+src/auto_aim/perception/detector.i: src/auto_aim/perception/detector.cpp.i
+.PHONY : src/auto_aim/perception/detector.i
+
+# target to preprocess a source file
+src/auto_aim/perception/detector.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/detector.cpp.i
+.PHONY : src/auto_aim/perception/detector.cpp.i
+
+src/auto_aim/perception/detector.s: src/auto_aim/perception/detector.cpp.s
+.PHONY : src/auto_aim/perception/detector.s
+
+# target to generate assembly for a file
+src/auto_aim/perception/detector.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/detector.cpp.s
+.PHONY : src/auto_aim/perception/detector.cpp.s
+
+src/auto_aim/perception/keypoint_refiner.o: src/auto_aim/perception/keypoint_refiner.cpp.o
+.PHONY : src/auto_aim/perception/keypoint_refiner.o
+
+# target to build an object file
+src/auto_aim/perception/keypoint_refiner.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/keypoint_refiner.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/nn_probe.dir/build.make CMakeFiles/nn_probe.dir/src/auto_aim/perception/keypoint_refiner.cpp.o
+.PHONY : src/auto_aim/perception/keypoint_refiner.cpp.o
+
+src/auto_aim/perception/keypoint_refiner.i: src/auto_aim/perception/keypoint_refiner.cpp.i
+.PHONY : src/auto_aim/perception/keypoint_refiner.i
+
+# target to preprocess a source file
+src/auto_aim/perception/keypoint_refiner.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/keypoint_refiner.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/nn_probe.dir/build.make CMakeFiles/nn_probe.dir/src/auto_aim/perception/keypoint_refiner.cpp.i
+.PHONY : src/auto_aim/perception/keypoint_refiner.cpp.i
+
+src/auto_aim/perception/keypoint_refiner.s: src/auto_aim/perception/keypoint_refiner.cpp.s
+.PHONY : src/auto_aim/perception/keypoint_refiner.s
+
+# target to generate assembly for a file
+src/auto_aim/perception/keypoint_refiner.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/keypoint_refiner.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/nn_probe.dir/build.make CMakeFiles/nn_probe.dir/src/auto_aim/perception/keypoint_refiner.cpp.s
+.PHONY : src/auto_aim/perception/keypoint_refiner.cpp.s
+
+src/auto_aim/perception/nn_detector.o: src/auto_aim/perception/nn_detector.cpp.o
+.PHONY : src/auto_aim/perception/nn_detector.o
+
+# target to build an object file
+src/auto_aim/perception/nn_detector.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/nn_detector.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/nn_probe.dir/build.make CMakeFiles/nn_probe.dir/src/auto_aim/perception/nn_detector.cpp.o
+.PHONY : src/auto_aim/perception/nn_detector.cpp.o
+
+src/auto_aim/perception/nn_detector.i: src/auto_aim/perception/nn_detector.cpp.i
+.PHONY : src/auto_aim/perception/nn_detector.i
+
+# target to preprocess a source file
+src/auto_aim/perception/nn_detector.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/nn_detector.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/nn_probe.dir/build.make CMakeFiles/nn_probe.dir/src/auto_aim/perception/nn_detector.cpp.i
+.PHONY : src/auto_aim/perception/nn_detector.cpp.i
+
+src/auto_aim/perception/nn_detector.s: src/auto_aim/perception/nn_detector.cpp.s
+.PHONY : src/auto_aim/perception/nn_detector.s
+
+# target to generate assembly for a file
+src/auto_aim/perception/nn_detector.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/nn_detector.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/nn_probe.dir/build.make CMakeFiles/nn_probe.dir/src/auto_aim/perception/nn_detector.cpp.s
+.PHONY : src/auto_aim/perception/nn_detector.cpp.s
+
+src/auto_aim/perception/pnp_solver.o: src/auto_aim/perception/pnp_solver.cpp.o
+.PHONY : src/auto_aim/perception/pnp_solver.o
+
+# target to build an object file
+src/auto_aim/perception/pnp_solver.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/pnp_solver.cpp.o
+.PHONY : src/auto_aim/perception/pnp_solver.cpp.o
+
+src/auto_aim/perception/pnp_solver.i: src/auto_aim/perception/pnp_solver.cpp.i
+.PHONY : src/auto_aim/perception/pnp_solver.i
+
+# target to preprocess a source file
+src/auto_aim/perception/pnp_solver.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/pnp_solver.cpp.i
+.PHONY : src/auto_aim/perception/pnp_solver.cpp.i
+
+src/auto_aim/perception/pnp_solver.s: src/auto_aim/perception/pnp_solver.cpp.s
+.PHONY : src/auto_aim/perception/pnp_solver.s
+
+# target to generate assembly for a file
+src/auto_aim/perception/pnp_solver.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/pnp_solver.cpp.s
+.PHONY : src/auto_aim/perception/pnp_solver.cpp.s
+
+src/auto_buff/rune_blade_state.o: src/auto_buff/rune_blade_state.cpp.o
+.PHONY : src/auto_buff/rune_blade_state.o
+
+# target to build an object file
+src/auto_buff/rune_blade_state.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/buff_state_probe.dir/build.make CMakeFiles/buff_state_probe.dir/src/auto_buff/rune_blade_state.cpp.o
+.PHONY : src/auto_buff/rune_blade_state.cpp.o
+
+src/auto_buff/rune_blade_state.i: src/auto_buff/rune_blade_state.cpp.i
+.PHONY : src/auto_buff/rune_blade_state.i
+
+# target to preprocess a source file
+src/auto_buff/rune_blade_state.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/buff_state_probe.dir/build.make CMakeFiles/buff_state_probe.dir/src/auto_buff/rune_blade_state.cpp.i
+.PHONY : src/auto_buff/rune_blade_state.cpp.i
+
+src/auto_buff/rune_blade_state.s: src/auto_buff/rune_blade_state.cpp.s
+.PHONY : src/auto_buff/rune_blade_state.s
+
+# target to generate assembly for a file
+src/auto_buff/rune_blade_state.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/buff_state_probe.dir/build.make CMakeFiles/buff_state_probe.dir/src/auto_buff/rune_blade_state.cpp.s
+.PHONY : src/auto_buff/rune_blade_state.cpp.s
+
+tools/buff_model_bench.o: tools/buff_model_bench.cpp.o
+.PHONY : tools/buff_model_bench.o
+
+# target to build an object file
+tools/buff_model_bench.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/buff_model_bench.dir/build.make CMakeFiles/buff_model_bench.dir/tools/buff_model_bench.cpp.o
+.PHONY : tools/buff_model_bench.cpp.o
+
+tools/buff_model_bench.i: tools/buff_model_bench.cpp.i
+.PHONY : tools/buff_model_bench.i
+
+# target to preprocess a source file
+tools/buff_model_bench.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/buff_model_bench.dir/build.make CMakeFiles/buff_model_bench.dir/tools/buff_model_bench.cpp.i
+.PHONY : tools/buff_model_bench.cpp.i
+
+tools/buff_model_bench.s: tools/buff_model_bench.cpp.s
+.PHONY : tools/buff_model_bench.s
+
+# target to generate assembly for a file
+tools/buff_model_bench.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/buff_model_bench.dir/build.make CMakeFiles/buff_model_bench.dir/tools/buff_model_bench.cpp.s
+.PHONY : tools/buff_model_bench.cpp.s
+
+tools/buff_state_probe.o: tools/buff_state_probe.cpp.o
+.PHONY : tools/buff_state_probe.o
+
+# target to build an object file
+tools/buff_state_probe.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/buff_state_probe.dir/build.make CMakeFiles/buff_state_probe.dir/tools/buff_state_probe.cpp.o
+.PHONY : tools/buff_state_probe.cpp.o
+
+tools/buff_state_probe.i: tools/buff_state_probe.cpp.i
+.PHONY : tools/buff_state_probe.i
+
+# target to preprocess a source file
+tools/buff_state_probe.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/buff_state_probe.dir/build.make CMakeFiles/buff_state_probe.dir/tools/buff_state_probe.cpp.i
+.PHONY : tools/buff_state_probe.cpp.i
+
+tools/buff_state_probe.s: tools/buff_state_probe.cpp.s
+.PHONY : tools/buff_state_probe.s
+
+# target to generate assembly for a file
+tools/buff_state_probe.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/buff_state_probe.dir/build.make CMakeFiles/buff_state_probe.dir/tools/buff_state_probe.cpp.s
+.PHONY : tools/buff_state_probe.cpp.s
+
+tools/calibrate_camera.o: tools/calibrate_camera.cpp.o
+.PHONY : tools/calibrate_camera.o
+
+# target to build an object file
+tools/calibrate_camera.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/calibrate_camera.dir/build.make CMakeFiles/calibrate_camera.dir/tools/calibrate_camera.cpp.o
+.PHONY : tools/calibrate_camera.cpp.o
+
+tools/calibrate_camera.i: tools/calibrate_camera.cpp.i
+.PHONY : tools/calibrate_camera.i
+
+# target to preprocess a source file
+tools/calibrate_camera.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/calibrate_camera.dir/build.make CMakeFiles/calibrate_camera.dir/tools/calibrate_camera.cpp.i
+.PHONY : tools/calibrate_camera.cpp.i
+
+tools/calibrate_camera.s: tools/calibrate_camera.cpp.s
+.PHONY : tools/calibrate_camera.s
+
+# target to generate assembly for a file
+tools/calibrate_camera.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/calibrate_camera.dir/build.make CMakeFiles/calibrate_camera.dir/tools/calibrate_camera.cpp.s
+.PHONY : tools/calibrate_camera.cpp.s
+
+tools/config_dump.o: tools/config_dump.cpp.o
+.PHONY : tools/config_dump.o
+
+# target to build an object file
+tools/config_dump.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/config_dump.dir/build.make CMakeFiles/config_dump.dir/tools/config_dump.cpp.o
+.PHONY : tools/config_dump.cpp.o
+
+tools/config_dump.i: tools/config_dump.cpp.i
+.PHONY : tools/config_dump.i
+
+# target to preprocess a source file
+tools/config_dump.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/config_dump.dir/build.make CMakeFiles/config_dump.dir/tools/config_dump.cpp.i
+.PHONY : tools/config_dump.cpp.i
+
+tools/config_dump.s: tools/config_dump.cpp.s
+.PHONY : tools/config_dump.s
+
+# target to generate assembly for a file
+tools/config_dump.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/config_dump.dir/build.make CMakeFiles/config_dump.dir/tools/config_dump.cpp.s
+.PHONY : tools/config_dump.cpp.s
+
+tools/gimbal_probe.o: tools/gimbal_probe.cpp.o
+.PHONY : tools/gimbal_probe.o
+
+# target to build an object file
+tools/gimbal_probe.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/tools/gimbal_probe.cpp.o
+.PHONY : tools/gimbal_probe.cpp.o
+
+tools/gimbal_probe.i: tools/gimbal_probe.cpp.i
+.PHONY : tools/gimbal_probe.i
+
+# target to preprocess a source file
+tools/gimbal_probe.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/tools/gimbal_probe.cpp.i
+.PHONY : tools/gimbal_probe.cpp.i
+
+tools/gimbal_probe.s: tools/gimbal_probe.cpp.s
+.PHONY : tools/gimbal_probe.s
+
+# target to generate assembly for a file
+tools/gimbal_probe.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/tools/gimbal_probe.cpp.s
+.PHONY : tools/gimbal_probe.cpp.s
+
+tools/hand_eye_calibrate.o: tools/hand_eye_calibrate.cpp.o
+.PHONY : tools/hand_eye_calibrate.o
+
+# target to build an object file
+tools/hand_eye_calibrate.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/tools/hand_eye_calibrate.cpp.o
+.PHONY : tools/hand_eye_calibrate.cpp.o
+
+tools/hand_eye_calibrate.i: tools/hand_eye_calibrate.cpp.i
+.PHONY : tools/hand_eye_calibrate.i
+
+# target to preprocess a source file
+tools/hand_eye_calibrate.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/tools/hand_eye_calibrate.cpp.i
+.PHONY : tools/hand_eye_calibrate.cpp.i
+
+tools/hand_eye_calibrate.s: tools/hand_eye_calibrate.cpp.s
+.PHONY : tools/hand_eye_calibrate.s
+
+# target to generate assembly for a file
+tools/hand_eye_calibrate.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/tools/hand_eye_calibrate.cpp.s
+.PHONY : tools/hand_eye_calibrate.cpp.s
 
 tools/hsv_tuner.o: tools/hsv_tuner.cpp.o
 .PHONY : tools/hsv_tuner.o
@@ -224,6 +972,30 @@ tools/hsv_tuner.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hsv_tuner.dir/build.make CMakeFiles/hsv_tuner.dir/tools/hsv_tuner.cpp.s
 .PHONY : tools/hsv_tuner.cpp.s
 
+tools/nn_probe.o: tools/nn_probe.cpp.o
+.PHONY : tools/nn_probe.o
+
+# target to build an object file
+tools/nn_probe.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/nn_probe.dir/build.make CMakeFiles/nn_probe.dir/tools/nn_probe.cpp.o
+.PHONY : tools/nn_probe.cpp.o
+
+tools/nn_probe.i: tools/nn_probe.cpp.i
+.PHONY : tools/nn_probe.i
+
+# target to preprocess a source file
+tools/nn_probe.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/nn_probe.dir/build.make CMakeFiles/nn_probe.dir/tools/nn_probe.cpp.i
+.PHONY : tools/nn_probe.cpp.i
+
+tools/nn_probe.s: tools/nn_probe.cpp.s
+.PHONY : tools/nn_probe.s
+
+# target to generate assembly for a file
+tools/nn_probe.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/nn_probe.dir/build.make CMakeFiles/nn_probe.dir/tools/nn_probe.cpp.s
+.PHONY : tools/nn_probe.cpp.s
+
 # Help Target
 help:
 	@echo "The following are some of the valid targets for this Makefile:"
@@ -236,12 +1008,91 @@ help:
 	@echo "... install/strip"
 	@echo "... list_install_components"
 	@echo "... rebuild_cache"
+	@echo "... test"
+	@echo "... aim_signal_filter_test"
+	@echo "... armor_ekf_test"
+	@echo "... armor_ekf_uv_test"
 	@echo "... auto_aim"
+	@echo "... auto_buff"
+	@echo "... auto_buff_demo"
+	@echo "... buff_model_bench"
+	@echo "... buff_state_probe"
+	@echo "... buff_state_test"
+	@echo "... buff_target_test"
+	@echo "... calibrate_camera"
+	@echo "... config_dump"
+	@echo "... detector_golden_test"
+	@echo "... gimbal_aimer_test"
+	@echo "... gimbal_controller_test"
+	@echo "... gimbal_link_test"
+	@echo "... gimbal_probe"
+	@echo "... gimbal_protocol_test"
+	@echo "... hand_eye_calibrate"
 	@echo "... hsv_tuner"
+	@echo "... nn_probe"
+	@echo "... rotation_rate_estimator_test"
+	@echo "... shoot_evaluator_test"
+	@echo "... shooter_test"
 	@echo "... sim_receiver"
+	@echo "... standard_clock_test"
+	@echo "... target_selector_test"
+	@echo "... io/gimbal/gimbal.o"
+	@echo "... io/gimbal/gimbal.i"
+	@echo "... io/gimbal/gimbal.s"
+	@echo "... io/gimbal/protocol.o"
+	@echo "... io/gimbal/protocol.i"
+	@echo "... io/gimbal/protocol.s"
+	@echo "... io/serial/crc16.o"
+	@echo "... io/serial/crc16.i"
+	@echo "... io/serial/crc16.s"
+	@echo "... io/serial/serial_port.o"
+	@echo "... io/serial/serial_port.i"
+	@echo "... io/serial/serial_port.s"
+	@echo "... src/auto_aim/perception/armor_source.o"
+	@echo "... src/auto_aim/perception/armor_source.i"
+	@echo "... src/auto_aim/perception/armor_source.s"
+	@echo "... src/auto_aim/perception/async_detector.o"
+	@echo "... src/auto_aim/perception/async_detector.i"
+	@echo "... src/auto_aim/perception/async_detector.s"
+	@echo "... src/auto_aim/perception/detector.o"
+	@echo "... src/auto_aim/perception/detector.i"
+	@echo "... src/auto_aim/perception/detector.s"
+	@echo "... src/auto_aim/perception/keypoint_refiner.o"
+	@echo "... src/auto_aim/perception/keypoint_refiner.i"
+	@echo "... src/auto_aim/perception/keypoint_refiner.s"
+	@echo "... src/auto_aim/perception/nn_detector.o"
+	@echo "... src/auto_aim/perception/nn_detector.i"
+	@echo "... src/auto_aim/perception/nn_detector.s"
+	@echo "... src/auto_aim/perception/pnp_solver.o"
+	@echo "... src/auto_aim/perception/pnp_solver.i"
+	@echo "... src/auto_aim/perception/pnp_solver.s"
+	@echo "... src/auto_buff/rune_blade_state.o"
+	@echo "... src/auto_buff/rune_blade_state.i"
+	@echo "... src/auto_buff/rune_blade_state.s"
+	@echo "... tools/buff_model_bench.o"
+	@echo "... tools/buff_model_bench.i"
+	@echo "... tools/buff_model_bench.s"
+	@echo "... tools/buff_state_probe.o"
+	@echo "... tools/buff_state_probe.i"
+	@echo "... tools/buff_state_probe.s"
+	@echo "... tools/calibrate_camera.o"
+	@echo "... tools/calibrate_camera.i"
+	@echo "... tools/calibrate_camera.s"
+	@echo "... tools/config_dump.o"
+	@echo "... tools/config_dump.i"
+	@echo "... tools/config_dump.s"
+	@echo "... tools/gimbal_probe.o"
+	@echo "... tools/gimbal_probe.i"
+	@echo "... tools/gimbal_probe.s"
+	@echo "... tools/hand_eye_calibrate.o"
+	@echo "... tools/hand_eye_calibrate.i"
+	@echo "... tools/hand_eye_calibrate.s"
 	@echo "... tools/hsv_tuner.o"
 	@echo "... tools/hsv_tuner.i"
 	@echo "... tools/hsv_tuner.s"
+	@echo "... tools/nn_probe.o"
+	@echo "... tools/nn_probe.i"
+	@echo "... tools/nn_probe.s"
 .PHONY : help
 
 

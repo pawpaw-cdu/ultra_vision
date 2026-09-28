@@ -1,5 +1,7 @@
 #include "gimbal_controller.hpp"
 
+#include "common/standard_clock.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -104,6 +106,12 @@ namespace auto_aim
         return result;
     }
 
+    void GimbalController::setTargetProvider(TargetProvider provider)
+    {
+        std::lock_guard<std::mutex> lock(provider_mutex_);
+        provider_ = std::move(provider);
+    }
+
     void GimbalController::stop()
     {
         stop_requested_.store(true);
@@ -128,7 +136,21 @@ namespace auto_aim
 
             GimbalTargetAngles target;
             uint64_t generation = 0;
+            TargetProvider provider;
             {
+                std::lock_guard<std::mutex> lock(provider_mutex_);
+                provider = provider_;
+            }
+            if (provider) {
+                // 控制线程内重算瞄准（sp_vision commandgener 的做法）：用"当前时刻"
+                // 预测提前量，避免目标角在两帧之间变旧。
+                // 注意：必须用 StandardClock 的秒（与视觉帧时间戳同一 epoch），
+                // 用 steady_clock 的 epoch 会让 detection_age 变成负数。
+                const double now_seconds = StandardClock::nowSeconds();
+                if (!provider(target, now_seconds)) continue;
+                std::lock_guard<std::mutex> lock(target_mutex_);
+                generation = target_generation_;
+            } else {
                 std::lock_guard<std::mutex> lock(target_mutex_);
                 target = target_;
                 generation = target_generation_;
@@ -168,9 +190,7 @@ namespace auto_aim
                 snapshot_.desired_pitch = command.desired_pitch;
                 snapshot_.target_generation = latest_generation;
                 snapshot_.processed_generation = processed_generation_;
-                snapshot_.timestamp_us = static_cast<uint64_t>(
-                    std::chrono::duration_cast<std::chrono::microseconds>(
-                        std::chrono::system_clock::now().time_since_epoch()).count());
+                snapshot_.timestamp_us = StandardClock::nowUs();
                 history_.push_back(snapshot_);
                 while (history_.size() > 2000) history_.pop_front();
             }

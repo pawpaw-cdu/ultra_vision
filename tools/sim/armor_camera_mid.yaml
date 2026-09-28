@@ -1,0 +1,13 @@
+# auto_aim 仿真相机预置：中距 4 m（对应我们目前自瞄的上限工况）
+# 相机高 0.45 m、离靶 4 m、看向车体装甲板中心（与实车相机高度/俯仰接近）。
+scenario: armor_chassis
+fov_degrees: 41.0
+energy_rune:
+  position: [-4.138, 0.45, -4.131]
+  target: [-0.16, 2.45, -0.22]
+armor_chassis:
+  position: [4.0, 0.45, 0.0]
+  target: [0.0, 0.15, 0.0]
+guided_dart:
+  position: [0.0, 3.0, 0.0]
+  target: [13.0, 9.0, -95.0]

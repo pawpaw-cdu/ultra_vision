@@ -13,7 +13,7 @@ namespace auto_aim
 
     struct Light : public cv::RotatedRect
     {
-        int color;
+        int color = 0;
         double min_ratio = 0.1;
         double max_ratio = 0.4;
         double max_light_angle = 40.0;
@@ -50,16 +50,15 @@ namespace auto_aim
         this->top    = this->center - dir * half_len;
         this->bottom = this->center + dir * half_len;
 
-        // 计算有符号倾斜角（与垂直轴的夹角）
-        cv::Point2f vertical(0, 1);
-        float dot = dir.x * vertical.x + dir.y * vertical.y;
-        float angle_rad = std::acos(std::clamp(dot, -1.0f, 1.0f));
-
-        //float angle_rad = std::atan2(std::abs(p[1].x - p[2].x),std::abs(p[1].y - p[2].y));
-        //float sign = 1.0f;
-        
-        float sign = (dir.x > 0) ? 1.0f : -1.0f;
-        this->tilt_angle = sign * angle_rad * 180.0f / CV_PI;
+        // 灯条长轴与图像竖直方向的夹角。灯条是一条无向线段，长轴方向
+        // (0,-1) 和 (0,1) 必须给出同一个倾角，所以先用 atan2 求方向角，
+        // 再折叠到 [-90, 90)。若改用 acos(dir·vertical)，竖直灯条会被算成
+        // 0 或 180 度，使 |tilt| < max_angle 的筛选随机丢弃一半竖直灯条，
+        // 导致同一块装甲板的两根灯条经常只剩一根、无法配对。
+        float tilt_deg = std::atan2(dir.x, -dir.y) * 180.0f / CV_PI;
+        if (tilt_deg >= 90.0f) tilt_deg -= 180.0f;
+        else if (tilt_deg < -90.0f) tilt_deg += 180.0f;
+        this->tilt_angle = tilt_deg;
     
         }
 

@@ -523,26 +523,33 @@ LOST -> DETECTING -> TRACKING -> TEMP_LOST -> LOST
 | `src/auto_aim/perception/detector.cpp` | 灯条和装甲板检测 |
 | `src/auto_aim/perception/pnp_solver.cpp` | 装甲板 PnP 定位 |
 | `src/auto_aim/node_sim.cpp` | TCP 仿真图像、统一整车估计、可视化和 FIRE |
-| `src/auto_aim/node.cpp` | 实车相机入口，目前仍使用多 Tracker 旧结构 |
+| `src/auto_aim/node.cpp` | 实车相机入口，与仿真共用同一个整车 Tracker |
+| `src/auto_aim/config_loader.hpp` | 两个入口共用的 detector/tracker/PnP 配置解析 |
+| `src/auto_aim/visualization/projection.hpp` | 两个入口共用的整车模型投影叠加 |
 | `configs/tracker.yaml` | EKF、关联、NIS 和状态机参数 |
 
-当前最重要的架构差异是：
+当前两条入口已经统一到同一个整车估计器：
 
-> 仿真入口已经使用一个整车 Tracker，实车入口仍然是“每块检测板一个 Tracker”的旧结构。
+> 仿真入口和实车入口都使用单个整车 Tracker、同一套 `config_loader.hpp`
+> 配置解析和同一套 `projection.hpp` 可视化，多板观测通过 `updateYpdBatch()`
+> 一次批量更新。
 
-因此文档中推荐的整车估计流程应优先迁移到实车 `node.cpp`，否则仿真中验证的整车稳定性不能直接代表实车效果。
+仍然存在的差异是坐标系和闭环范围：仿真入口通过 `CameraPose` 把估计提升到
+世界系并接入了选择、云台和火控，实车入口目前没有云台角度与 IMU 反馈，因此
+以恒等 `CameraPose`（即相机系）运行，只做估计和可视化。接入姿态反馈后，只需
+在 `update()` 前调用 `tracker.setCameraPose()`，估计器无需再改动。
 
 ## 16. 当前方案的边界
 
 当前实现还没有解决以下问题：
 
-1. 底盘中心仍是相机坐标系下的相对估计，没有世界坐标变换。
+1. 实车入口的底盘中心仍是相机坐标系下的相对估计；仿真入口已通过 `CameraPose` 升到世界系，实车缺少姿态反馈。
 2. 没有接入 IMU、云台角度和手眼变换。
 3. 没有显式补偿相机自身运动带来的相对速度。
 4. 装甲板半径固定为 `0.21 m`，没有估计半径误差和车型差异。
 5. 没有真实装甲板数字分类，`plate_id` 只是几何编号。
 6. 没有完整云台控制、弹道补偿和射击闭环。
-7. 实车和仿真主循环尚未统一。
+7. 实车入口已迁移到统一整车 Tracker，但仍未接入选择、云台和火控闭环。
 
 这些限制意味着目前的状态估计更适合作为视觉预测核心，而不是完整的火控状态源。
 
@@ -580,7 +587,7 @@ LOST -> DETECTING -> TRACKING -> TEMP_LOST -> LOST
 
 后续最优先的工程改动不是继续堆滤波参数，而是：
 
-1. 将实车入口迁移到统一整车 Tracker。
-2. 接入 IMU、云台和手眼坐标变换。
+1. 在实车入口接入云台角度与 IMU 反馈，把估计从相机系切换到云台/世界坐标系。
+2. 把实车入口接入选择、云台和火控闭环，替换当前仅估计加可视化的形态。
 3. 将固定半径模型扩展为可配置或可估计的车型模型。
 4. 建立地面真值回放和静止漂移自动评测。

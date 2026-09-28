@@ -2,6 +2,7 @@
 #define AUTO_AIM_SHOOTER_HPP
 
 #include "target_selector.hpp"
+#include "shoot_evaluator.hpp"
 
 namespace auto_aim
 {
@@ -10,7 +11,15 @@ namespace auto_aim
     enum class ShooterErrorReason {
         NONE,
         OUT_OF_FIRE_WINDOW,
-        GIMBAL_ERROR
+        GIMBAL_ERROR,
+        // 以下来自 ShootEvaluator 的结论（决策②集中在那一处，见 shoot_evaluator.hpp）
+        NO_TARGET,
+        BALLISTICS_INVALID,
+        ALREADY_HIT,
+        COOLDOWN,
+        RATE_TOO_HIGH,
+        OUT_OF_RANGE,
+        NOT_SETTLED,
     };
 
     struct ShooterConfig {
@@ -36,7 +45,8 @@ namespace auto_aim
 
         ShooterOutput update(const TargetDecision& decision,
                              bool aim_ready,
-                             double timestamp);
+                             double timestamp,
+                             const ShootInput& shoot_input = {});
 
         ShooterState state() const { return state_; }
 
@@ -45,6 +55,10 @@ namespace auto_aim
             const TargetDecision* decision = nullptr;
             bool aim_ready = false;
             double timestamp = 0.0;
+            // 判据输入（由入口填）。填了就以 ShootEvaluator 的结论为准。
+            ShootInput shoot_input;
+            bool has_verdict = false;
+            ShootVerdict verdict = ShootVerdict::NoTarget;
         };
 
         ShooterOutput fireDecisionRoot(const TickContext& context);
@@ -54,6 +68,7 @@ namespace auto_aim
         ShooterOutput endBranch();
 
         ShooterConfig config_;
+        ShootEvaluator evaluator_;
         ShooterState state_ = ShooterState::IDLE;
         int last_armor_id_ = -1;
         bool last_fire_time_initialized_ = false;

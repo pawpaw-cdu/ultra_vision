@@ -1,4 +1,5 @@
 #include "energy_detector.hpp"
+#include "common/standard_clock.hpp"
 #include <cmath>
 #include <chrono>
 #include <algorithm>
@@ -21,8 +22,7 @@ void EnergyDetector::reset() {
 }
 
 double EnergyDetector::getTimestamp() {
-    auto now = std::chrono::steady_clock::now();
-    return std::chrono::duration<double>(now.time_since_epoch()).count();
+    return StandardClock::nowSeconds();
 }
 
 bool EnergyDetector::findSameBlade(const std::vector<cv::Point2f>& centers, cv::Point2f& matched) {

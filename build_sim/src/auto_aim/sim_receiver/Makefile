@@ -65,6 +65,16 @@ CMAKE_BINARY_DIR = /Users/a/Desktop/RM_source/Ultra_Vision/build_sim
 #=============================================================================
 # Targets provided globally by CMake.
 
+# Special rule for the target test
+test:
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --cyan "Running tests..."
+	/opt/homebrew/bin/ctest $(ARGS)
+.PHONY : test
+
+# Special rule for the target test
+test/fast: test
+.PHONY : test/fast
+
 # Special rule for the target edit_cache
 edit_cache:
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --cyan "Running CMake cache editor..."
@@ -199,6 +209,30 @@ src/tcp_input.cpp.s:
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/sim_receiver/CMakeFiles/sim_receiver.dir/build.make src/auto_aim/sim_receiver/CMakeFiles/sim_receiver.dir/src/tcp_input.cpp.s
 .PHONY : src/tcp_input.cpp.s
 
+src/telemetry_receiver.o: src/telemetry_receiver.cpp.o
+.PHONY : src/telemetry_receiver.o
+
+# target to build an object file
+src/telemetry_receiver.cpp.o:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/sim_receiver/CMakeFiles/sim_receiver.dir/build.make src/auto_aim/sim_receiver/CMakeFiles/sim_receiver.dir/src/telemetry_receiver.cpp.o
+.PHONY : src/telemetry_receiver.cpp.o
+
+src/telemetry_receiver.i: src/telemetry_receiver.cpp.i
+.PHONY : src/telemetry_receiver.i
+
+# target to preprocess a source file
+src/telemetry_receiver.cpp.i:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/sim_receiver/CMakeFiles/sim_receiver.dir/build.make src/auto_aim/sim_receiver/CMakeFiles/sim_receiver.dir/src/telemetry_receiver.cpp.i
+.PHONY : src/telemetry_receiver.cpp.i
+
+src/telemetry_receiver.s: src/telemetry_receiver.cpp.s
+.PHONY : src/telemetry_receiver.s
+
+# target to generate assembly for a file
+src/telemetry_receiver.cpp.s:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/sim_receiver/CMakeFiles/sim_receiver.dir/build.make src/auto_aim/sim_receiver/CMakeFiles/sim_receiver.dir/src/telemetry_receiver.cpp.s
+.PHONY : src/telemetry_receiver.cpp.s
+
 src/vision_date_recevier.o: src/vision_date_recevier.cpp.o
 .PHONY : src/vision_date_recevier.o
 
@@ -235,10 +269,14 @@ help:
 	@echo "... install/strip"
 	@echo "... list_install_components"
 	@echo "... rebuild_cache"
+	@echo "... test"
 	@echo "... sim_receiver"
 	@echo "... src/tcp_input.o"
 	@echo "... src/tcp_input.i"
 	@echo "... src/tcp_input.s"
+	@echo "... src/telemetry_receiver.o"
+	@echo "... src/telemetry_receiver.i"
+	@echo "... src/telemetry_receiver.s"
 	@echo "... src/vision_date_recevier.o"
 	@echo "... src/vision_date_recevier.i"
 	@echo "... src/vision_date_recevier.s"

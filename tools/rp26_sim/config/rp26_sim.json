@@ -1,0 +1,10 @@
+{
+  "rune_detect": {
+    "model": "../../models/openvino/RuneDetectionModel-master/model/model-0624.onnx",
+    "device": "CPU",
+    "confidence_threshold": 0.65,
+    "keypoint_confidence_threshold": 0.5,
+    "nms_distance_threshold": 30.0,
+    "min_valid_keypoints": 5
+  }
+}

@@ -36,6 +36,10 @@ namespace auto_aim
     {
     public:
         using SendFunction = std::function<bool(double, double)>;
+        // 目标角提供者（借鉴 sp_vision 的 commandgener：瞄准/弹道解算放在**控制线程**
+        // 里按控制频率重算，并用"当前时刻"预测提前量，而不是每帧算一次）。
+        // 返回 false 表示本周期没有可用目标 → 本周期不下发（云台保持）。
+        using TargetProvider = std::function<bool(GimbalTargetAngles&, double now_seconds)>;
 
         GimbalController(const GimbalAimConfig& config,
                          SendFunction send,
@@ -46,6 +50,9 @@ namespace auto_aim
         GimbalController& operator=(const GimbalController&) = delete;
 
         void setTargetAngles(const GimbalTargetAngles& target);
+        /// @brief 设置目标角提供者；设置后每个控制周期都会调用它重新取目标角
+        ///        （与 setTargetAngles 二选一：provider 优先）。
+        void setTargetProvider(TargetProvider provider);
         GimbalControllerSnapshot snapshot() const;
         GimbalControllerSnapshot snapshotAt(uint64_t timestamp_us) const;
         void stop();
@@ -56,6 +63,8 @@ namespace auto_aim
         GimbalAimConfig config_;
         GimbalAimer aimer_;
         SendFunction send_;
+        TargetProvider provider_;
+        mutable std::mutex provider_mutex_;
         double command_period_ = 0.01;
 
         mutable std::mutex target_mutex_;

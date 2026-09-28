@@ -1,4 +1,9 @@
-# Simulator TCP server. Use the host machine's IP when the simulator is
-# running outside this machine.
+# 仿真器 TCP 地址。视觉端和仿真器**分工**跑的时候，这里填**仿真器那台机器**的 IP：
+#   · 仿真器跑在这台 Mac 上 → 就是下面这个 en0 地址（2026-09-27 实测）；
+#   · 视觉端在别的机器（NUC/机器人工控机）上时，也可以临时用
+#     `ULTRA_VISION_SIM_HOST=<仿真器机器IP>` 覆盖这一行，不必改文件。
+# 注意网络要真的通（不同网段/NAT 里连不上时，视觉端会一直
+# "Waiting for simulator frames"），并且**仿真器必须跑在有 GPU 的机器上**：
+# 1440x1080@30 在软件渲染（VM/无 GPU 驱动）上只有个位数 fps，自瞄没法用。
 host: 10.117.214.138
 port: 7666

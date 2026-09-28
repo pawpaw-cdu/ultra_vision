@@ -68,6 +68,16 @@ public:
         return true;
     }
 
+    bool sendResetCommand() {
+        if (stop_requested_.load()) return false;
+        {
+            std::lock_guard<std::mutex> lock(command_mutex);
+            reset_pending = true;
+        }
+        command_cv.notify_one();
+        return true;
+    }
+
     bool sendGimbalCommand(double yaw, double pitch) {
         if (stop_requested_.load() || !std::isfinite(yaw) || !std::isfinite(pitch)) {
             return false;
@@ -80,7 +90,8 @@ public:
         return true;
     }
 
-    cv::Mat getFrame(uint64_t* sequence, uint64_t* timestamp_us) {
+    cv::Mat getFrame(uint64_t* sequence, uint64_t* source_timestamp_us,
+                     uint64_t* local_timestamp_us) {
         std::unique_lock<std::mutex> lock(mutex);
         frame_cv.wait_for(lock, std::chrono::milliseconds(100), [this] {
             return stop_requested_.load() || frame_ready;
@@ -89,7 +100,8 @@ public:
             return cv::Mat();
         }
         if (sequence) *sequence = latest_sequence_;
-        if (timestamp_us) *timestamp_us = latest_timestamp_us_;
+        if (source_timestamp_us) *source_timestamp_us = latest_source_timestamp_us_;
+        if (local_timestamp_us) *local_timestamp_us = latest_local_timestamp_us_;
         frame_ready = false;
         return std::move(latest_frame);
     }
@@ -112,7 +124,8 @@ private:
                 std::lock_guard<std::mutex> lock(mutex);
                 latest_frame = std::move(frame.bgr);
                 latest_sequence_ = frame.seq;
-                latest_timestamp_us_ = frame.timestamp_us;
+                latest_source_timestamp_us_ = frame.source_timestamp_us;
+                latest_local_timestamp_us_ = frame.local_timestamp_us;
                 frame_ready = true;
             }
             frame_cv.notify_one();
@@ -122,15 +135,19 @@ private:
     void commandLoop() {
         while (!stop_requested_.load()) {
             bool fire_pending_now = false;
+            bool reset_pending_now = false;
             std::optional<GimbalCommand> gimbal_pending_now;
             {
                 std::unique_lock<std::mutex> lock(command_mutex);
                 command_cv.wait(lock, [this] {
-                    return stop_requested_.load() || fire_pending || gimbal_pending.has_value();
+                    return stop_requested_.load() || fire_pending || reset_pending ||
+                           gimbal_pending.has_value();
                 });
                 if (stop_requested_.load()) break;
                 fire_pending_now = fire_pending;
                 fire_pending = false;
+                reset_pending_now = reset_pending;
+                reset_pending = false;
                 gimbal_pending_now = std::move(gimbal_pending);
                 gimbal_pending.reset();
             }
@@ -146,6 +163,9 @@ private:
             }
             if (fire_pending_now && !input.sendLine(command_port_, "FIRE\n")) {
                 std::cerr << "Failed to send simulator fire command" << std::endl;
+            }
+            if (reset_pending_now && !input.sendLine(command_port_, "RESET\n")) {
+                std::cerr << "Failed to send simulator reset command" << std::endl;
             }
         }
     }
@@ -173,7 +193,8 @@ private:
     std::condition_variable command_cv;
     cv::Mat latest_frame;
     uint64_t latest_sequence_ = 0;
-    uint64_t latest_timestamp_us_ = 0;
+    uint64_t latest_source_timestamp_us_ = 0;
+    uint64_t latest_local_timestamp_us_ = 0;
     bool frame_ready = false;
     struct GimbalCommand {
         double yaw = 0.0;
@@ -181,6 +202,7 @@ private:
     };
 
     bool fire_pending = false;
+    bool reset_pending = false;
     std::optional<GimbalCommand> gimbal_pending;
     std::atomic<bool> stop_requested_{false};
     std::atomic<bool> connected_{false};
@@ -227,12 +249,18 @@ bool VisionDateRecevier::sendFireCommand() {
     return impl_->sendFireCommand();
 }
 
+bool VisionDateRecevier::sendResetCommand() {
+    return impl_->sendResetCommand();
+}
+
 bool VisionDateRecevier::sendGimbalCommand(double yaw, double pitch) {
     return impl_->sendGimbalCommand(yaw, pitch);
 }
 
-cv::Mat VisionDateRecevier::getFrame(uint64_t* sequence, uint64_t* timestamp_us) {
-    return impl_->getFrame(sequence, timestamp_us);
+cv::Mat VisionDateRecevier::getFrame(uint64_t* sequence,
+                                     uint64_t* source_timestamp_us,
+                                     uint64_t* local_timestamp_us) {
+    return impl_->getFrame(sequence, source_timestamp_us, local_timestamp_us);
 }
 
 } // namespace sim_receiver
