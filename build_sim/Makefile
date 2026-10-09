@@ -445,6 +445,19 @@ spin_geom_check/fast:
 .PHONY : spin_geom_check/fast
 
 #=============================================================================
+# Target rules for targets named local_fit_from_csv
+
+# Build rule for target.
+local_fit_from_csv: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 local_fit_from_csv
+.PHONY : local_fit_from_csv
+
+# fast build rule for target.
+local_fit_from_csv/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/local_fit_from_csv.dir/build.make src/auto_aim/CMakeFiles/local_fit_from_csv.dir/build
+.PHONY : local_fit_from_csv/fast
+
+#=============================================================================
 # Target rules for targets named auto_aim_local_fit
 
 # Build rule for target.
@@ -1727,6 +1740,7 @@ help:
 	@echo "... gimbal_sign_probe"
 	@echo "... hand_eye_calibrate"
 	@echo "... hsv_tuner"
+	@echo "... local_fit_from_csv"
 	@echo "... local_trajectory_fitter_test"
 	@echo "... nn_probe"
 	@echo "... pnp_yaw_refine_test"

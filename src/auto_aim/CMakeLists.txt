@@ -125,6 +125,9 @@ if(ULTRA_VISION_BUILD_TESTS)
     add_executable(spin_geom_check ${CMAKE_SOURCE_DIR}/tools/spin_geom_check.cpp)
     target_link_libraries(spin_geom_check PRIVATE auto_aim_spin_geometry)
 
+    add_executable(local_fit_from_csv ${CMAKE_SOURCE_DIR}/tools/local_fit_from_csv.cpp)
+    target_link_libraries(local_fit_from_csv PRIVATE auto_aim_local_fit)
+
     # ---- 局部拟合器（小陀螺 θ/ω + 慢层 α/R；可选组件，仅当找到 Ceres 时编译）----
     # 与 spin_geometry 同款：单独成库、不进 auto_aim_core；Tracker 通过注入回调
     # 使用它（见 Kalman/tracker.hpp 的 setLocalFitter）。默认不接管主链路。
