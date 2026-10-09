@@ -7,5 +7,6 @@ data/*.png
 !data/model_switch.png
 !data/observability.png
 !data/pnp_vs_fit.png
+!data/a_segment.png
 !data/value_vs_distance.png
 !data/value_vs_noise.png

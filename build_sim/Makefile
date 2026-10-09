@@ -458,6 +458,19 @@ local_fit_from_csv/fast:
 .PHONY : local_fit_from_csv/fast
 
 #=============================================================================
+# Target rules for targets named local_fit_from_lightbars
+
+# Build rule for target.
+local_fit_from_lightbars: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 local_fit_from_lightbars
+.PHONY : local_fit_from_lightbars
+
+# fast build rule for target.
+local_fit_from_lightbars/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/local_fit_from_lightbars.dir/build.make src/auto_aim/CMakeFiles/local_fit_from_lightbars.dir/build
+.PHONY : local_fit_from_lightbars/fast
+
+#=============================================================================
 # Target rules for targets named auto_aim_local_fit
 
 # Build rule for target.
@@ -1741,6 +1754,7 @@ help:
 	@echo "... hand_eye_calibrate"
 	@echo "... hsv_tuner"
 	@echo "... local_fit_from_csv"
+	@echo "... local_fit_from_lightbars"
 	@echo "... local_trajectory_fitter_test"
 	@echo "... nn_probe"
 	@echo "... pnp_yaw_refine_test"

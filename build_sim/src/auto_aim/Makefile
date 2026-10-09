@@ -256,6 +256,20 @@ local_fit_from_csv/fast:
 .PHONY : local_fit_from_csv/fast
 
 # Convenience name for target.
+src/auto_aim/CMakeFiles/local_fit_from_lightbars.dir/rule:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/auto_aim/CMakeFiles/local_fit_from_lightbars.dir/rule
+.PHONY : src/auto_aim/CMakeFiles/local_fit_from_lightbars.dir/rule
+
+# Convenience name for target.
+local_fit_from_lightbars: src/auto_aim/CMakeFiles/local_fit_from_lightbars.dir/rule
+.PHONY : local_fit_from_lightbars
+
+# fast build rule for target.
+local_fit_from_lightbars/fast:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/local_fit_from_lightbars.dir/build.make src/auto_aim/CMakeFiles/local_fit_from_lightbars.dir/build
+.PHONY : local_fit_from_lightbars/fast
+
+# Convenience name for target.
 src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/rule:
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/rule
 .PHONY : src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/rule
@@ -828,6 +842,30 @@ __/__/tools/local_fit_from_csv.s: __/__/tools/local_fit_from_csv.cpp.s
 __/__/tools/local_fit_from_csv.cpp.s:
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/local_fit_from_csv.dir/build.make src/auto_aim/CMakeFiles/local_fit_from_csv.dir/__/__/tools/local_fit_from_csv.cpp.s
 .PHONY : __/__/tools/local_fit_from_csv.cpp.s
+
+__/__/tools/local_fit_from_lightbars.o: __/__/tools/local_fit_from_lightbars.cpp.o
+.PHONY : __/__/tools/local_fit_from_lightbars.o
+
+# target to build an object file
+__/__/tools/local_fit_from_lightbars.cpp.o:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/local_fit_from_lightbars.dir/build.make src/auto_aim/CMakeFiles/local_fit_from_lightbars.dir/__/__/tools/local_fit_from_lightbars.cpp.o
+.PHONY : __/__/tools/local_fit_from_lightbars.cpp.o
+
+__/__/tools/local_fit_from_lightbars.i: __/__/tools/local_fit_from_lightbars.cpp.i
+.PHONY : __/__/tools/local_fit_from_lightbars.i
+
+# target to preprocess a source file
+__/__/tools/local_fit_from_lightbars.cpp.i:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/local_fit_from_lightbars.dir/build.make src/auto_aim/CMakeFiles/local_fit_from_lightbars.dir/__/__/tools/local_fit_from_lightbars.cpp.i
+.PHONY : __/__/tools/local_fit_from_lightbars.cpp.i
+
+__/__/tools/local_fit_from_lightbars.s: __/__/tools/local_fit_from_lightbars.cpp.s
+.PHONY : __/__/tools/local_fit_from_lightbars.s
+
+# target to generate assembly for a file
+__/__/tools/local_fit_from_lightbars.cpp.s:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/local_fit_from_lightbars.dir/build.make src/auto_aim/CMakeFiles/local_fit_from_lightbars.dir/__/__/tools/local_fit_from_lightbars.cpp.s
+.PHONY : __/__/tools/local_fit_from_lightbars.cpp.s
 
 __/__/tools/spin_geom_check.o: __/__/tools/spin_geom_check.cpp.o
 .PHONY : __/__/tools/spin_geom_check.o
@@ -1764,6 +1802,7 @@ help:
 	@echo "... gimbal_link_test"
 	@echo "... gimbal_protocol_test"
 	@echo "... local_fit_from_csv"
+	@echo "... local_fit_from_lightbars"
 	@echo "... local_trajectory_fitter_test"
 	@echo "... pnp_yaw_refine_test"
 	@echo "... rotation_rate_estimator_test"
@@ -1810,6 +1849,9 @@ help:
 	@echo "... __/__/tools/local_fit_from_csv.o"
 	@echo "... __/__/tools/local_fit_from_csv.i"
 	@echo "... __/__/tools/local_fit_from_csv.s"
+	@echo "... __/__/tools/local_fit_from_lightbars.o"
+	@echo "... __/__/tools/local_fit_from_lightbars.i"
+	@echo "... __/__/tools/local_fit_from_lightbars.s"
 	@echo "... __/__/tools/spin_geom_check.o"
 	@echo "... __/__/tools/spin_geom_check.i"
 	@echo "... __/__/tools/spin_geom_check.s"

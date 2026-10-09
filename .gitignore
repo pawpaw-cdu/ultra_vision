@@ -20,3 +20,5 @@ hand_eye.yaml
 camera_intrinsics.yaml
 /tmp_*
 CMakeCache.txt
+__pycache__/
+*.pyc
