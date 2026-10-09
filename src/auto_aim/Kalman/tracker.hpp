@@ -454,6 +454,9 @@ namespace auto_aim
         {
             std::vector<LightBarObservation> obs;  // 每帧 2 根灯条
             int plate_hint = -1;                   // 种子帧板号（0..3，-1=未知）
+            // 两段式相对身份：种子帧 PnP 板心 (x,z) 与时间。先用最长弧拟合出旋转中心 C，
+            // 再用"板心相对 C 的方位角"定各弧的相位偏移（用位置量，避开病态的单帧 PnP yaw）。
+            double seed_cx = 0.0, seed_cz = 0.0, seed_t = 0.0;
             double u = 0.0, v = 0.0, t = 0.0;      // 最近一次板心(px)与时间
             double vu = 0.0, vv = 0.0;             // 板心速度(px/s)，用于关联预测
         };

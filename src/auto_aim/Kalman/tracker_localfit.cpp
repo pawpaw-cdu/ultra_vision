@@ -78,6 +78,10 @@ namespace auto_aim
             local_fit_arcs_.push_back(LocalFitArc{});
             arc = &local_fit_arcs_.back();
             arc->plate_hint = (armor_id >= 0 && armor_id <= 3) ? armor_id : -1;
+            // 两段式相对身份：记种子帧 PnP 板心 (x,z) 与时间（用位置定相位，不用病态 yaw）。
+            arc->seed_cx = armor.tvec.at<double>(0);
+            arc->seed_cz = armor.tvec.at<double>(2);
+            arc->seed_t = t;
         }
         else
         {
@@ -125,8 +129,12 @@ namespace auto_aim
     {
         if (!cfg_.local_fit.enabled) return false;
 
+        struct AuxArc { std::vector<LightBarObservation> obs; double cx, cz, t; };
         std::vector<LightBarObservation> window;
+        std::vector<AuxArc> aux;
+        int ref_hint = 0;
         LocalFitterCallback fitter;
+        std::string dbg_k;
         {
             std::lock_guard<std::mutex> lock(local_fit_mutex_);
             if (!local_fitter_) return false;
@@ -138,34 +146,58 @@ namespace auto_aim
             std::sort(cand.begin(), cand.end(), [](const LocalFitArc* x, const LocalFitArc* y) {
                 return x->obs.size() > y->obs.size();
             });
+            fitter = local_fitter_;
+            window = cand.front()->obs;   // 参考弧（最长）
+            ref_hint = (cand.front()->plate_hint >= 0 && cand.front()->plate_hint <= 3)
+                           ? cand.front()->plate_hint : 0;
             if (cfg_.local_fit.joint_plates)
             {
-                // 多板联合：堆叠多块板（同板号只取最长的一条，避免相位冲突）
-                std::vector<int> used;
-                for (const LocalFitArc* a : cand)
-                {
-                    if (static_cast<int>(used.size()) >= cfg_.local_fit.joint_max_arcs) break;
-                    if (a->plate_hint >= 0 &&
-                        std::find(used.begin(), used.end(), a->plate_hint) != used.end())
-                        continue;
-                    if (a->plate_hint >= 0) used.push_back(a->plate_hint);
-                    window.insert(window.end(), a->obs.begin(), a->obs.end());
-                }
+                // 其余弧先暂存（相位偏移要等参考弧拟合出中心 C 后才能定）。
+                for (std::size_t i = 1; i < cand.size() &&
+                     static_cast<int>(aux.size()) + 1 < cfg_.local_fit.joint_max_arcs; ++i)
+                    aux.push_back(AuxArc{ cand[i]->obs, cand[i]->seed_cx, cand[i]->seed_cz, cand[i]->seed_t });
             }
-            else
-            {
-                window = cand.front()->obs;   // 单板：最长弧
-            }
-            fitter = local_fitter_;
         }
         LocalFitResult result;
-        const bool ok = fitter(window, result) && result.valid;
-        // 诊断/实验：每次拟合结果落 CSV（env ULTRA_VISION_LOCAL_FIT_LOG 指定路径）。
-        if (const char* p = std::getenv("ULTRA_VISION_LOCAL_FIT_LOG")) {
-            static std::ofstream log(p, std::ios::out);
-            log << result.timestamp << ',' << window.size() << ',' << result.omega << ','
-                << result.reprojection_rmse_px << ',' << (ok ? 1 : 0) << '\n';
+        bool ok = false;
+        if (aux.empty())
+        {
+            ok = fitter(window, result) && result.valid;
         }
+        else
+        {
+            // 两段式多板联合：① 先拟合参考弧得旋转中心 C 与 θ(t)=yaw+ω(t−t_end)；
+            // ② 各弧用"种子帧 PnP 板心相对 C 的方位角"定相位偏移 k（用位置量，避开病态 yaw）；
+            // ③ 堆叠后联合拟合。
+            const std::vector<LightBarObservation> ref_window = window;
+            LocalFitResult ref;
+            if (fitter(ref_window, ref) && ref.valid)
+            {
+                const double Cx = ref.center[0], Cz = ref.center[2];
+                std::vector<int> used{ref_hint};
+                for (const auto& ax : aux)
+                {
+                    const double th_obs = std::atan2(ax.cx - Cx, ax.cz - Cz);
+                    const double th_ref = ref.yaw + ref.omega * (ax.t - ref.timestamp);
+                    int k = static_cast<int>(std::lround(
+                        std::remainder(th_obs - th_ref, 2.0 * M_PI) / (0.5 * M_PI)));
+                    k = ((k % 4) + 4) % 4;
+                    const int k_abs = (ref_hint + k) % 4;   // 参考弧的绝对板号 + 相对偏移
+                    if (std::find(used.begin(), used.end(), k_abs) != used.end()) continue;
+                    used.push_back(k_abs);
+                    dbg_k += std::to_string(k_abs);
+                    for (const auto& o : ax.obs) { LightBarObservation c = o; c.armor_id = k_abs; window.push_back(c); }
+                }
+                ok = fitter(window, result) && result.valid;
+            }
+            if (!ok) { window = ref_window; ok = fitter(window, result) && result.valid; }  // 退化为单板
+        }
+        // 诊断/实验：每次拟合结果落 CSV（env ULTRA_VISION_LOCAL_FIT_LOG 指定路径）。
+            if (const char* p = std::getenv("ULTRA_VISION_LOCAL_FIT_LOG")) {
+                static std::ofstream log(p, std::ios::out);
+                log << result.timestamp << ',' << window.size() << ',' << result.omega << ','
+                    << result.reprojection_rmse_px << ',' << (ok ? 1 : 0) << ',' << dbg_k << '\n';
+            }
         if (!ok) return false;
 
         std::lock_guard<std::mutex> lock(local_fit_mutex_);
@@ -214,6 +246,12 @@ namespace auto_aim
         const double cam_yaw = camera_pose_.valid ? camera_pose_.yaw : 0.0;
         conv.yaw = wrapPi(conv.yaw + cam_yaw * cfg_.local_fit.yaw_rate_sign);
         conv.omega *= cfg_.local_fit.yaw_rate_sign;
+
+        // 板号绝对偏移不可靠（plateIdFor 在多板同现时会错）→ 拟合 yaw 可能整体差 k·90°。
+        // EKF 自身 yaw 平滑、不会差 90°：把 fit.yaw 吸附到"与 EKF yaw 最近的、模 90° 同余"
+        // 的那个值，消掉未知的 k·90°（只修正板偏移，不改 ω/中心）。
+        const double ekf_yaw = ekf_.getYaw();
+        conv.yaw = ekf_yaw + std::remainder(conv.yaw - ekf_yaw, 0.5 * M_PI);
 
         return ekf_.updateWithLocalFit(conv, cfg_.local_fit.yaw_noise, cfg_.local_fit.omega_noise,
                                        std::numeric_limits<double>::infinity());
