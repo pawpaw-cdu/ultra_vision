@@ -26,7 +26,7 @@ namespace auto_aim
         double fx = 800.0, fy = 800.0, cx = 432.0, cy = 960.0;
     };
 
-    struct LocalFitConfig
+    struct LocalTrajectoryFitConfig
     {
         LocalFitIntrinsics K;
         double lightbar_len = 0.10;     // 灯条长度 L（板高，米）
@@ -66,10 +66,10 @@ namespace auto_aim
             double yawAt(double t) const { return theta0 + omega * t + 0.5 * beta * t * t; }
         };
 
-        explicit LocalTrajectoryFitter(LocalFitConfig config = {}) : config_(std::move(config)) {}
+        explicit LocalTrajectoryFitter(LocalTrajectoryFitConfig config = {}) : config_(std::move(config)) {}
 
-        void setConfig(const LocalFitConfig& config) { config_ = config; }
-        const LocalFitConfig& config() const { return config_; }
+        void setConfig(const LocalTrajectoryFitConfig& config) { config_ = config; }
+        const LocalTrajectoryFitConfig& config() const { return config_; }
 
         /// @brief 快层：固定 α、R，拟合 C,h,θ0,ω,β（多板联合）。
         bool fitFast(const std::vector<LightBarObservation>& observations, double alpha_fixed,
@@ -85,7 +85,7 @@ namespace auto_aim
                         double& info_alpha, double& info_R) const;
 
     private:
-        LocalFitConfig config_;
+        LocalTrajectoryFitConfig config_;
     };
 }  // namespace auto_aim
 

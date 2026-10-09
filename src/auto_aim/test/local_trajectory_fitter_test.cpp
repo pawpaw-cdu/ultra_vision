@@ -11,13 +11,13 @@
 namespace
 {
     using auto_aim::LightBarObservation;
-    using auto_aim::LocalFitConfig;
+    using auto_aim::LocalTrajectoryFitConfig;
     using auto_aim::LocalFitResult;
     using auto_aim::LocalTrajectoryFitter;
 
     struct Model
     {
-        LocalFitConfig cfg;
+        LocalTrajectoryFitConfig cfg;
         double alpha = 15.0 * M_PI / 180.0;
         double R = 0.20;
         double h = 0.10;

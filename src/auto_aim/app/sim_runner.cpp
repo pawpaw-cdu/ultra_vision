@@ -65,7 +65,11 @@ namespace auto_aim
             }
 
             const auto_aim::DetectorConfig det_cfg = auto_aim::loadDetectorConfig(detector_cfg);
-            const auto_aim::TrackerConfig track_cfg = auto_aim::loadTrackerConfig(tracker_cfg);
+            auto_aim::TrackerConfig track_cfg = auto_aim::loadTrackerConfig(tracker_cfg);
+            // P2 A/B 开关：ULTRA_VISION_LOCAL_FIT=1 时打开局部拟合器（否则用 yaml 的默认）。
+            if (const char* lf = std::getenv("ULTRA_VISION_LOCAL_FIT")) {
+                track_cfg.local_fit.enabled = (std::atoi(lf) == 1);
+            }
             const auto_aim::PnpGeometry pnp_geometry = auto_aim::loadPnpGeometry(tracker_cfg);
 
             // Optional neural-network detector. It replaces the light-bar pipeline but
@@ -193,6 +197,29 @@ namespace auto_aim
 
             estimate_recorder_ = std::make_unique<auto_aim::app::CsvSink>(
                 "ULTRA_VISION_ESTIMATE_CSV", "x,y,z,color,distance,time_us,plate_id\n");
+
+#ifdef ULTRA_VISION_HAVE_LOCAL_FIT
+            if (track_cfg.local_fit.enabled) {
+                auto_aim::LocalTrajectoryFitConfig fcfg;
+                if (camera_matrix_.rows == 3) {
+                    fcfg.K = { camera_matrix_.at<double>(0, 0), camera_matrix_.at<double>(1, 1),
+                               camera_matrix_.at<double>(0, 2), camera_matrix_.at<double>(1, 2) };
+                }
+                fcfg.lightbar_len = 0.060;    // 仿真小装甲板灯条/板高
+                fcfg.plate_width = 0.1315;    // 仿真小装甲板等效宽度
+                fcfg.gimbal_pitch = 0.0;
+                fcfg.center_init = {{ 0.0, 0.0, 3.0 }};
+                local_fitter_ = std::make_unique<auto_aim::LocalTrajectoryFitter>(fcfg);
+                auto* fitter = local_fitter_.get();
+                pipeline_->tracker().setLocalFitter(
+                    [fitter](const std::vector<auto_aim::LightBarObservation>& obs,
+                             auto_aim::LocalFitResult& out) {
+                        return fitter->fit(obs, 15.0 * M_PI / 180.0, 0.20, out);
+                    });
+                pipeline_->tracker().startLocalFitWorker();
+                std::cout << "[local_fit] enabled (P2 A/B)" << std::endl;
+            }
+#endif
             observation_recorder_ = std::make_unique<auto_aim::app::CsvSink>(
                 "ULTRA_VISION_OBSERVATION_CSV",
                 "x,y,z,rx,ry,rz,tracker_x,tracker_y,tracker_z,"
@@ -511,8 +538,13 @@ namespace auto_aim
             }
             // 移动而不是拷贝：检出结果只进这一条流水线，搬走 vector 就够
             //（每帧省掉一次 Armor 列表（含嵌套 vector/cv::Mat 头）的深拷贝）。
+            // 局部拟合器：把本帧灯条端点推入缓冲（内部按 cfg.local_fit.enabled 早退）。
+            for (const auto& a : source_result_.armors) {
+                tracker.pushArmorLightBars(a, observation_time);
+            }
             frame.armors = std::move(source_result_.armors);
             const auto outcome = pipeline_->update(frame);
+            tracker.applyLatestLocalFit();
 
             last_decision_ = outcome.decision;
             aim_ready_ = outcome.aim_ready;

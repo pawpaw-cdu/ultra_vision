@@ -321,7 +321,8 @@ namespace auto_aim
             std::function<bool(const std::vector<LightBarObservation>&, LocalFitResult&)>;
         void setLocalFitter(LocalFitterCallback fn);
         /// @brief 把一块装甲板的两根灯条端点推入拟合缓冲（每帧调用）。
-        void pushArmorLightBars(const Armor& armor);
+        ///        timestamp 用**曝光时刻**（观测时间），保证 θ(t) 的时间基正确。
+        void pushArmorLightBars(const Armor& armor, double timestamp);
         /// @brief 同步跑一次拟合（把当前缓冲喂给回调）；返回是否产出有效结果。
         bool runLocalFitNow();
         /// @brief 启动/停止内部异步拟合线程（低频）。

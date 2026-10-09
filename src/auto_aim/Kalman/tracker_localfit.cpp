@@ -32,12 +32,12 @@ namespace auto_aim
         stopLocalFitWorker();
     }
 
-    void Tracker::pushArmorLightBars(const Armor& armor)
+    void Tracker::pushArmorLightBars(const Armor& armor, double timestamp)
     {
         if (!cfg_.local_fit.enabled) return;
 
         std::lock_guard<std::mutex> lock(local_fit_mutex_);
-        const double t = last_timestamp_;
+        const double t = timestamp;
         auto push_bar = [&](const Light& bar, double offset)
         {
             LightBarObservation o;

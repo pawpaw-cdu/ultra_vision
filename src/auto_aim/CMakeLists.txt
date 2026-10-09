@@ -144,6 +144,10 @@ if(ULTRA_VISION_BUILD_TESTS)
     )
     target_link_libraries(local_trajectory_fitter_test PRIVATE auto_aim_local_fit)
     add_test(NAME local_trajectory_fitter_test COMMAND local_trajectory_fitter_test)
+
+    # 仿真入口接入（P2 A/B）：把拟合器链进 auto_aim_sim，用 ULTRA_VISION_LOCAL_FIT 开关。
+    target_link_libraries(auto_aim_sim PRIVATE auto_aim_local_fit)
+    target_compile_definitions(auto_aim_sim PRIVATE ULTRA_VISION_HAVE_LOCAL_FIT=1)
   else()
     message(STATUS "auto_aim_spin_geometry: 跳过（未找到 Ceres；见 docs/spin_geometry_estimator.md）")
   endif()

@@ -88,7 +88,7 @@ namespace auto_aim
         inline double projectU(const LocalFitIntrinsics& K, const double* pc) { return K.fx * pc[0] / pc[2] + K.cx; }
         inline double projectV(const LocalFitIntrinsics& K, const double* pc) { return K.fy * pc[1] / pc[2] + K.cy; }
 
-        void endpointPc(const LocalFitConfig& cfg, double alpha, double R, double h, double theta,
+        void endpointPc(const LocalTrajectoryFitConfig& cfg, double alpha, double R, double h, double theta,
                         double a, double b, const double* center, const double* drift, double dt,
                         double* pc)
         {
@@ -102,7 +102,7 @@ namespace auto_aim
         }
 
         // 固定快层参数、对 (α,R) 的残差向量（每观测 4 个）。
-        void slowResiduals(const std::vector<LightBarObservation>& obs, const LocalFitConfig& cfg,
+        void slowResiduals(const std::vector<LightBarObservation>& obs, const LocalTrajectoryFitConfig& cfg,
                            const LocalTrajectoryFitter::FastFit& f, double alpha, double R,
                            std::vector<double>& out)
         {
