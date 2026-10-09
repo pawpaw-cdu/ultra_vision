@@ -22,3 +22,4 @@ camera_intrinsics.yaml
 CMakeCache.txt
 __pycache__/
 *.pyc
+docs/_eq/
