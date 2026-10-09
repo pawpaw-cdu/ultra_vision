@@ -12,6 +12,7 @@
 // 真机入口 node.cpp 以后接的是同一套能力层，只把这里的 TCP 帧源/时间基换成相机 + 串口。
 
 #include <chrono>
+#include <cstdlib>
 #include <thread>
 
 #include <opencv2/opencv.hpp>
@@ -89,7 +90,23 @@ int main(int argc, char** argv)
         lap(4);
 
         // 瞄准结果叠画（整车轮廓 + 观测板高亮 + 提前点）；无显示时整段跳过。
-        if (runner.showDisplay()) {
+        // ULTRA_VISION_SNAPSHOT_DIR=<dir>：不依赖 GUI，另存成对快照
+        //   sim_XXXX.png = 算法收到的仿真原图（仿真器画面）
+        //   proc_XXXX.png = 叠加检测/整车/提前点后的处理画面
+        const char* snap_dir = std::getenv("ULTRA_VISION_SNAPSHOT_DIR");
+        if (runner.showDisplay() || snap_dir != nullptr) {
+            if (snap_dir != nullptr && tracker.hasObservation()) {
+                static int snap_k = 0;
+                ++snap_k;
+                if (snap_k % 30 == 0 && snap_k <= 420) {
+                    cv::imwrite(cv::format("%s/sim_%04d.png", snap_dir, snap_k), image);
+                    cv::Mat overlayed = image.clone();
+                    auto_aim::app::drawAimOverlay(overlayed, tracker, runner.lastDecision(),
+                                                  runner.lastGimbalCommand(), runner.shooterStatus(),
+                                                  camera_matrix, dist_coeffs);
+                    cv::imwrite(cv::format("%s/proc_%04d.png", snap_dir, snap_k), overlayed);
+                }
+            }
             auto_aim::app::drawAimOverlay(image, tracker, runner.lastDecision(),
                                           runner.lastGimbalCommand(), runner.shooterStatus(),
                                           camera_matrix, dist_coeffs);

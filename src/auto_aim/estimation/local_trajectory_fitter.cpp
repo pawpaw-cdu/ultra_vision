@@ -138,12 +138,14 @@ namespace auto_aim
         const double t0 = observations.front().timestamp;
 
         double best_cost = std::numeric_limits<double>::infinity();
+        // 多起点：ω 的符号/倍率 + 初相相位（相位初值若差 ~90° 会掉进"镜像/旋转"坏局部解）。
+        for (double ph0 : { 0.0, 0.5 * M_PI, M_PI, -0.5 * M_PI })
         for (double w0 : { cfg.omega_init, -cfg.omega_init, 2.0 * cfg.omega_init,
                            -2.0 * cfg.omega_init })
         {
             double center[3] = { cfg.center_init[0], cfg.center_init[1], cfg.center_init[2] };
             double h = cfg.h_init;
-            double phase[2] = { 0.0, w0 };
+            double phase[2] = { ph0, w0 };
             double beta = 0.0;
             double vel[3] = { 0.0, 0.0, 0.0 };
             ceres::Problem problem;

@@ -70,6 +70,10 @@ namespace auto_aim
             if (const char* lf = std::getenv("ULTRA_VISION_LOCAL_FIT")) {
                 track_cfg.local_fit.enabled = (std::atoi(lf) == 1);
             }
+            // B 段标定项（拟合 θ 约定 → EKF yaw/ω 约定）：仿真里给个环境变量便于扫符号。
+            if (const char* s = std::getenv("ULTRA_VISION_LOCAL_FIT_SIGN")) {
+                track_cfg.local_fit.yaw_rate_sign = std::atof(s);
+            }
             const auto_aim::PnpGeometry pnp_geometry = auto_aim::loadPnpGeometry(tracker_cfg);
 
             // Optional neural-network detector. It replaces the light-bar pipeline but
@@ -214,7 +218,13 @@ namespace auto_aim
                 pipeline_->tracker().setLocalFitter(
                     [fitter](const std::vector<auto_aim::LightBarObservation>& obs,
                              auto_aim::LocalFitResult& out) {
-                        const bool ok = fitter->fit(obs, 15.0 * M_PI / 180.0, 0.20, out);
+                        // 仿真靶 α=0（真实裁判系统 15° 支架在仿真里没建模）。慢层还没接
+                        // α 估计，所以这里用环境变量给（默认 15°，仿真应设 0）。
+                        const double alpha_deg = [] {
+                            const char* v = std::getenv("ULTRA_VISION_LOCAL_FIT_ALPHA_DEG");
+                            return v != nullptr ? std::atof(v) : 15.0;
+                        }();
+                        const bool ok = fitter->fit(obs, alpha_deg * M_PI / 180.0, 0.20, out);
                         static int dbg = 0;
                         if (std::getenv("ULTRA_VISION_LOCAL_FIT_DBG") && ++dbg % 40 == 0) {
                             std::cerr << "[local_fit] ok=" << ok << " rmse="
@@ -391,6 +401,22 @@ namespace auto_aim
                                             camera_matrix_.at<double>(1, 1),
                                             camera_matrix_.at<double>(0, 2),
                                             camera_matrix_.at<double>(1, 2));
+#ifdef ULTRA_VISION_HAVE_LOCAL_FIT
+                // 局部拟合器在 pipeline 初始化时创建，那时 camera_matrix_ 还没算出来
+                // （它依赖首帧尺寸）→ 拟合器会拿到默认内参(f≈800) 导致 ω 完全错。
+                // 这里把真实内参补给它（只在变化时更新）。
+                if (local_fitter_) {
+                    auto fcfg = local_fitter_->config();
+                    const double fx = camera_matrix_.at<double>(0, 0);
+                    const double fy = camera_matrix_.at<double>(1, 1);
+                    const double cx = camera_matrix_.at<double>(0, 2);
+                    const double cy = camera_matrix_.at<double>(1, 2);
+                    if (fcfg.K.fx != fx || fcfg.K.cx != cx || fcfg.K.cy != cy) {
+                        fcfg.K = auto_aim::LocalFitIntrinsics{ fx, fy, cx, cy };
+                        local_fitter_->setConfig(fcfg);
+                    }
+                }
+#endif
             }
 
             // ------------------- 检测（共用组件：传统/神经网络 + 动态 ROI + PnP）----
@@ -547,8 +573,13 @@ namespace auto_aim
             // 移动而不是拷贝：检出结果只进这一条流水线，搬走 vector 就够
             //（每帧省掉一次 Armor 列表（含嵌套 vector/cv::Mat 头）的深拷贝）。
             // 局部拟合器：把本帧灯条端点推入缓冲（内部按 cfg.local_fit.enabled 早退）。
+            // 时间用**曝光戳**（ω=dθ/dt，dt 精度直接决定 ω）：仿真里回传的曝光时刻比
+            // "到手时刻−中位延迟"更准（后者带网络/解码抖动，会把 ω 带偏）。
+            const double local_fit_time = (frame_source_timestamp_us_ > 0)
+                ? auto_aim::StandardClock::secondsFromUs(frame_source_timestamp_us_)
+                : observation_time;
             for (const auto& a : source_result_.armors) {
-                tracker.pushArmorLightBars(a, observation_time, tracker.plateIdFor(a));
+                tracker.pushArmorLightBars(a, local_fit_time, tracker.plateIdFor(a));
             }
             if (std::getenv("ULTRA_VISION_LOCAL_FIT_DBG") && tracker.getState() != auto_aim::TrackerState::LOST) {
                 static int dbg2 = 0;

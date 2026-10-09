@@ -58,9 +58,19 @@ namespace auto_aim
         int period_frames = 10;         // 每多少帧触发一次拟合（低频异步）
         double max_result_age = 0.20;   // s：拟合结果比当前帧老过它就外推/丢弃
         int max_window_gap_frames = 6;  // 连续丢帧超过它就清空窗口（避免跨运动段）
+        // ---- A 段（单板正面弧切分）------------------------------------------
+        // 正对门控：图像两灯条中心距 sep 与"该深度的最大值" sep_max=W·fx/depth 之比
+        // = cos(板相对相机偏角)。只累计 sep > front_gate·sep_max 的帧（默认 0.5 →
+        // |偏角|<60°），离开即清段——保证图像左右=板面切向、且相位跨度可控。
+        double front_gate = 0.5;
+        double assoc_gate_px = 45.0;    // 帧间板心关联门限（px），配合常速预测
+        double min_depth = 1.5;         // 参与局部拟合的板深下限（m，滤掉近处杂检/道具）
+        double max_depth = 9.0;         // 上限（m）
         double yaw_noise = 0.02;        // 拟合 yaw 的观测噪声（rad²，质量再缩放）
         double omega_noise = 0.05;      // 拟合 ω 的观测噪声
-        double yaw_rate_sign = 1.0;     // 相机系→整车系 yaw 符号（标定项，默认 +1）
+        // 相机系→整车系符号（标定项）：拟合器的 θ 约定（相机 X-Z 平面，从 +Z 向 +X 量）
+        // 与 EKF 的 ω/yaw 约定相反 → 仿真实测 -1（gyro5 A/B：+1 会让 EKF ω 更差，-1 明显更稳）。
+        double yaw_rate_sign = -1.0;
         bool also_update_center = false; // 是否把拟合中心也当观测（默认否，先只给 yaw/ω）
     };
 
@@ -433,11 +443,19 @@ namespace auto_aim
 
         // ---- 局部拟合器状态 ------------------------------------------------------
         mutable std::mutex local_fit_mutex_;
-        std::vector<LightBarObservation> local_fit_buffer_;
+        // A 段：一条"单块板正面弧"的缓冲。按**几何航迹**（图像板心最近邻+常速预测）
+        // 关联，不用 plate_id 做身份——同一帧里可能有多块板被映到同一个 id，用 id
+        // 分桶会把不同物理板的弧混在一起。plate_hint 只用于取拟合的 yaw 偏移。
+        struct LocalFitArc
+        {
+            std::vector<LightBarObservation> obs;  // 每帧 2 根灯条
+            int plate_hint = -1;                   // 种子帧板号（0..3，-1=未知）
+            double u = 0.0, v = 0.0, t = 0.0;      // 最近一次板心(px)与时间
+            double vu = 0.0, vv = 0.0;             // 板心速度(px/s)，用于关联预测
+        };
+        std::vector<LocalFitArc> local_fit_arcs_;
         std::optional<LocalFitResult> latest_local_fit_;
         LocalFitterCallback local_fitter_;
-        int local_fit_frame_counter_ = 0;
-        int local_fit_segment_plate_ = -1;   // 当前弧段的板号（-1 = 无）
         std::thread local_fit_thread_;
         std::atomic<bool> local_fit_running_{false};
     };

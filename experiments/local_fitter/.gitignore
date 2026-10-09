@@ -8,5 +8,7 @@ data/*.png
 !data/observability.png
 !data/pnp_vs_fit.png
 !data/a_segment.png
+!data/spin_sweep.png
+!data/spin_sweep_ekf.png
 !data/value_vs_distance.png
 !data/value_vs_noise.png

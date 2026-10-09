@@ -75,7 +75,9 @@ tracker:
     max_window_gap_frames: 6   # 连续丢帧超过它就清窗（避免跨运动段）
     yaw_noise: 0.02            # 拟合 yaw 的观测噪声（rad²）
     omega_noise: 0.05          # 拟合 ω 的观测噪声
-    yaw_rate_sign: 1.0         # 相机系→整车系 yaw 符号（标定项）
+    # 相机系→整车系符号（标定项）：拟合器 θ 约定与 EKF ω 约定相反 → -1
+    # （gyro5 A/B：+1 会把 EKF 的 ω 拉坏，-1 让 ω 明显更稳、更接近真值）
+    yaw_rate_sign: -1.0
     also_update_center: false  # 是否把拟合中心也当观测（先只给 yaw/ω）
 
 
