@@ -139,6 +139,16 @@ R 冻结，与上表一致。）
 > （新增结果：`data/identifiability.csv`、`multi_slow.csv`、`model_switch.csv`、
 > `observability.csv`、`pnp_compare.csv` 及对应 `data/*.png`）
 
+### 系统收益量化（VALUE_ANALYSIS.md）
+
+把"可观测性 → 单帧 PnP yaw 方差 → (θ,ω)EKF → 瞄点脱靶量 → 命中率"整条推完
+（`src/value_analysis.cpp`，纯解析 + 2 状态 Kalman，可复现）：
+
+- 单帧 PnP yaw 误差 **∝ 角点噪声**（3 m 处 6.7°@0.5px → 174°@13px）；
+  多帧拟合 **∝ σ_px/√N_eff**（同条件 0.07°→1.8°）。
+- 真实角点精度（4~13 px）下：单帧 PnP 命中率 **0.09~0.28**，拟合 **≈1.0**。
+- 详见 [`VALUE_ANALYSIS.md`](VALUE_ANALYSIS.md) 与 `data/value_vs_noise.png`。
+
 ## 已知限制 / 待办
 
 ### 极端 / 模型失配压测（`data/stress.csv`）——**这才是可相信的量级**

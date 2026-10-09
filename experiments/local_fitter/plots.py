@@ -98,6 +98,35 @@ def fig_pnp():
     fig.tight_layout(); fig.savefig(os.path.join(DATA, "pnp_vs_fit.png"), dpi=120); plt.close(fig)
 
 
+def fig_value():
+    rows = read("value_analysis.csv")
+    d = [float(r["d_m"]) for r in rows]
+    fig, ax = plt.subplots(1, 2, figsize=(11, 4))
+    ax[0].plot(d, [float(r["ekf_yaw_pnp_deg"]) for r in rows], "o-", label="PnP-only EKF")
+    ax[0].plot(d, [float(r["ekf_yaw_fit_deg"]) for r in rows], "s-", label="local-fit EKF")
+    ax[0].set_xlabel("distance (m)"); ax[0].set_ylabel("steady-state yaw sigma (deg)")
+    ax[0].set_yscale("log"); ax[0].set_title("EKF yaw sigma vs distance"); ax[0].legend()
+    ax[1].plot(d, [float(r["miss_pnp_cm"]) for r in rows], "o-", label="PnP-only")
+    ax[1].plot(d, [float(r["miss_fit_cm"]) for r in rows], "s-", label="local-fit")
+    ax[1].axhline(6.75, ls="--", c="k", lw=1, label="armor half-width")
+    ax[1].set_xlabel("distance (m)"); ax[1].set_ylabel("miss at target (cm)")
+    ax[1].set_title("aim miss distance"); ax[1].legend()
+    fig.tight_layout(); fig.savefig(os.path.join(DATA, "value_vs_distance.png"), dpi=120); plt.close(fig)
+
+    rows2 = read("value_vs_noise.csv")
+    sp = [float(r["sigma_px"]) for r in rows2]
+    fig, ax = plt.subplots(1, 2, figsize=(11, 4))
+    ax[0].plot(sp, [float(r["yaw_pnp_deg"]) for r in rows2], "o-", label="PnP-only")
+    ax[0].plot(sp, [float(r["yaw_fit_deg"]) for r in rows2], "s-", label="local-fit")
+    ax[0].set_xlabel("corner noise sigma (px)"); ax[0].set_ylabel("yaw error (deg)")
+    ax[0].set_yscale("log"); ax[0].set_title("yaw error vs corner noise @3m"); ax[0].legend()
+    ax[1].plot(sp, [float(r["hit_pnp"]) for r in rows2], "o-", label="PnP-only")
+    ax[1].plot(sp, [float(r["hit_fit"]) for r in rows2], "s-", label="local-fit")
+    ax[1].set_xlabel("corner noise sigma (px)"); ax[1].set_ylabel("hit probability")
+    ax[1].set_title("hit probability vs corner noise @3m"); ax[1].legend()
+    fig.tight_layout(); fig.savefig(os.path.join(DATA, "value_vs_noise.png"), dpi=120); plt.close(fig)
+
+
 if __name__ == "__main__":
     have = set(os.listdir(DATA))
     if "identifiability.csv" in have:
@@ -110,4 +139,6 @@ if __name__ == "__main__":
         fig_observability()
     if "pnp_compare.csv" in have:
         fig_pnp()
+    if "value_analysis.csv" in have:
+        fig_value()
     print("wrote data/*.png")

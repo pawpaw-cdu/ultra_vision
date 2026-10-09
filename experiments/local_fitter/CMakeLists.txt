@@ -19,3 +19,8 @@ if(OpenCV_FOUND)
   target_include_directories(rm_demo PRIVATE ${OpenCV_INCLUDE_DIRS})
   target_link_libraries(rm_demo PRIVATE ${OpenCV_LIBS})
 endif()
+
+# 系统收益量化（纯解析 + 2 状态 Kalman，不依赖 OpenCV/Ceres）
+add_executable(value_analysis src/value_analysis.cpp)
+target_include_directories(value_analysis PRIVATE include)
+target_link_libraries(value_analysis PRIVATE Eigen3::Eigen)
