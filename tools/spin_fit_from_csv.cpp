@@ -3,7 +3,7 @@
 // "观测 vs 拟合" 端点导出，供绘图与判读。
 //
 // 用法:
-//   spin_fit_from_csv <bars.csv> [fx] [cx] [cy] [c] [L] [out_prefix] [--noswap]
+//   spin_fit_from_csv <bars.csv> [fx] [cx] [cy] [c] [L] [out_prefix] [dist_hint]
 //   bars.csv 列: t,u_lt,v_lt,u_lb,v_lb,u_rt,v_rt,u_rb,v_rb   （与 spin_video_demo 输出一致）
 //   默认对每帧自动判断左右（按 u 均值），保证同一根灯条在整段保持同一 side 号。
 #include <algorithm>
@@ -45,6 +45,7 @@ int main(int argc, char** argv)
     double c_off = (argc > 5) ? std::atof(argv[5]) : 0.0655;
     double L_len = (argc > 6) ? std::atof(argv[6]) : 0.060;
     const std::string prefix = (argc > 7) ? argv[7] : "fit";
+    const double dist_hint = (argc > 8) ? std::atof(argv[8]) : 0.8;
 
     std::ifstream is(csv);
     if (!is) { std::cerr << "cannot open " << csv << "\n"; return 1; }
@@ -70,24 +71,16 @@ int main(int argc, char** argv)
 
     std::vector<auto_aim::SpinBarObservation> obs;
     obs.reserve(rows.size() * 2);
+    // side 语义：CSV 的 u_lt/u_lb 列 = 这块装甲板"自己的左灯条"（检测器/仿真导出的语义左右），
+    // 直接固定映射到 side=-1；u_rt/u_rb → side=+1。**不要按图像 u 重新归一化**——
+    // 板绕一圈时语义左灯条会在图像上跑到右边，按图像重排会把 side 标签撕成两半，拟合必然发散。
     for (const auto& r : rows)
     {
-        // 统一左右：左灯条 = u 均值较小的一根，side=-1（与 spin_video_demo 约定一致）
-        const double ul_mean = 0.5 * (r.ul + r.ulb);
-        const double ur_mean = 0.5 * (r.ur + r.urb);
-        // side=-1 的那根永远是屏幕左侧灯条，保证整段 side 语义一致
-        const bool left_is_l = ul_mean <= ur_mean;
         auto_aim::SpinBarObservation a, b;
         a.t = r.t; a.plate = 0; a.side = -1;
         b.t = r.t; b.plate = 0; b.side = +1;
-        a.u_top = left_is_l ? r.ul : r.ur;
-        a.v_top = left_is_l ? r.vl : r.vr;
-        a.u_bot = left_is_l ? r.ulb : r.urb;
-        a.v_bot = left_is_l ? r.vlb : r.vrb;
-        b.u_top = left_is_l ? r.ur : r.ul;
-        b.v_top = left_is_l ? r.vr : r.vl;
-        b.u_bot = left_is_l ? r.urb : r.ulb;
-        b.v_bot = left_is_l ? r.vrb : r.vlb;
+        a.u_top = r.ul;  a.v_top = r.vl;  a.u_bot = r.ulb; a.v_bot = r.vlb;
+        b.u_top = r.ur;  b.v_top = r.vr;  b.u_bot = r.urb; b.v_bot = r.vrb;
         obs.push_back(a);
         obs.push_back(b);
     }
@@ -96,8 +89,7 @@ int main(int argc, char** argv)
     cfg.K.fx = fx; cfg.K.fy = fx; cfg.K.cx = cx; cfg.K.cy = cy;
     cfg.bar_offset_c = c_off;
     cfg.bar_length_L = L_len;
-    // 近距离、强透视：初值给近一点
-    cfg.distance_hint = 0.8;
+    cfg.distance_hint = dist_hint;
     cfg.estimate_axis = true;
     cfg.spline_knots = 12;
 
@@ -114,6 +106,13 @@ int main(int argc, char** argv)
     std::cout << "arc coverage = " << res.arc_coverage_deg << " deg\n";
     std::cout << "reproj rmse = " << res.reproj_rmse_px << " px\n";
     std::cout << "t window = [" << res.t_begin << ", " << res.t_end << "]\n";
+    if (res.valid && !res.spline.empty())
+    {
+        const double y0 = res.yawAt(res.t_begin) * 180.0 / M_PI;
+        const double y1 = res.yawAt(res.t_end) * 180.0 / M_PI;
+        std::cout << "yaw sweep = " << (y1 - y0) << " deg  (y0=" << y0 << " y1=" << y1
+                  << ", 不可分辨 k*90)\n";
+    }
 
     // 导出观测 vs 拟合端点
     std::ofstream os(prefix + "_pts.csv");
