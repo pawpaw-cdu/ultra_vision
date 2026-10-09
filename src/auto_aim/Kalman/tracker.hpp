@@ -437,6 +437,7 @@ namespace auto_aim
         std::optional<LocalFitResult> latest_local_fit_;
         LocalFitterCallback local_fitter_;
         int local_fit_frame_counter_ = 0;
+        int local_fit_segment_plate_ = -1;   // 当前弧段的板号（-1 = 无）
         std::thread local_fit_thread_;
         std::atomic<bool> local_fit_running_{false};
     };

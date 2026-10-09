@@ -39,6 +39,14 @@ namespace auto_aim
 
         std::lock_guard<std::mutex> lock(local_fit_mutex_);
         const double t = timestamp;
+
+        // 分段弧：换板 / 断帧都开新段（一段 = 一块板连续可见的弧）。
+        const double gap = local_fit_buffer_.empty() ? 0.0
+                                                     : t - local_fit_buffer_.back().timestamp;
+        if (armor_id != local_fit_segment_plate_ || gap > cfg_.local_fit.max_result_age) {
+            local_fit_buffer_.clear();
+            local_fit_segment_plate_ = armor_id;
+        }
         auto push_bar = [&](const Light& bar, double offset)
         {
             LightBarObservation o;
@@ -53,25 +61,11 @@ namespace auto_aim
         push_bar(armor.left, +0.5 * k_local_fit_plate_width);
         push_bar(armor.right, -0.5 * k_local_fit_plate_width);
 
-        // 丢帧过久 → 清窗（避免跨运动段拼接）
-        if (local_fit_buffer_.size() >= 2)
-        {
-            // 保留最近 window_frames 个不同时间戳
-            double oldest = local_fit_buffer_.back().timestamp;
-            int seen = 0;
-            size_t cut = local_fit_buffer_.size();
-            for (size_t i = local_fit_buffer_.size(); i-- > 0;)
-            {
-                if (local_fit_buffer_[i].timestamp != oldest)
-                {
-                    oldest = local_fit_buffer_[i].timestamp;
-                    if (++seen >= cfg_.local_fit.window_frames) { cut = i; break; }
-                }
-            }
-            if (cut < local_fit_buffer_.size())
-                local_fit_buffer_.erase(local_fit_buffer_.begin(),
-                                        local_fit_buffer_.begin() + cut);
-        }
+        // 段内只保留最近 window_frames 帧（每帧 2 根灯条）
+        const size_t cap = static_cast<size_t>(2 * std::max(1, cfg_.local_fit.window_frames));
+        if (local_fit_buffer_.size() > cap)
+            local_fit_buffer_.erase(local_fit_buffer_.begin(),
+                                    local_fit_buffer_.end() - static_cast<long>(cap));
     }
 
     bool Tracker::runLocalFitNow()

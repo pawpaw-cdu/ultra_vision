@@ -166,6 +166,10 @@ namespace auto_aim
                 new ceres::AutoDiffCostFunction<VelPrior, 3, 3>(new VelPrior(0.6)), nullptr, vel);
             problem.SetParameterLowerBound(&h, 0, -2.0);
             problem.SetParameterUpperBound(&h, 0, 2.0);
+            // θ0 只在 cos/sin 里出现 → 模 2π 等价，限定到 [-π,π] 即可（防优化器沿
+            // 无穷方向漂走）。yaw_off 是常数，会被 θ0 吸收。
+            problem.SetParameterLowerBound(phase, 0, -M_PI);
+            problem.SetParameterUpperBound(phase, 0, M_PI);
             problem.SetParameterLowerBound(phase, 1, -30.0);
             problem.SetParameterUpperBound(phase, 1, 30.0);
             for (int i = 0; i < 3; ++i)
