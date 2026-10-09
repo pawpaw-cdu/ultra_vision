@@ -207,7 +207,10 @@ namespace auto_aim
                 "target_yaw_velocity,target_pitch_velocity,gimbal_time,handoff,in_fire\n");
             detections_recorder_ = std::make_unique<auto_aim::app::CsvSink>(
                 "ULTRA_VISION_DETECTIONS_CSV",
-                "time_us,idx,u_lt,v_lt,u_lb,v_lb,u_rt,v_rt,u_rb,v_rb,x,y,z\n");
+                // time_us = 本机到手时刻（主链路原来用的"观测时间"）；
+                // source_time_us = 仿真端曝光戳。两者之差就是网络+编码延迟，
+                // 用来离线判断"时间戳该用哪个"。
+                "time_us,source_time_us,idx,u_lt,v_lt,u_lb,v_lb,u_rt,v_rt,u_rb,v_rb,x,y,z\n");
 
             // 反"云台跑飞"守卫：瞄点相对当前下发角超过这个角度就不甩（见下发处的注释）。
             // ULTRA_VISION_AIM_JUMP_LIMIT_DEG 可调，0 = 关。
@@ -374,7 +377,8 @@ namespace auto_aim
                 for (const auto& a : source_result_.armors) {
                     const bool has_tvec = a.solve_result && a.tvec.rows == 3;
                     detections_recorder_->stream()
-                        << source_result_.timestamp_us << ',' << idx++ << ','
+                        << source_result_.timestamp_us << ','
+                        << frame_source_timestamp_us_ << ',' << idx++ << ','
                         << a.left.top.x << ',' << a.left.top.y << ','
                         << a.left.bottom.x << ',' << a.left.bottom.y << ','
                         << a.right.top.x << ',' << a.right.top.y << ','
