@@ -219,21 +219,25 @@ namespace auto_aim
                 fcfg.center_init = {{ 0.0, 0.0, 3.0 }};
                 local_fitter_ = std::make_unique<auto_aim::LocalTrajectoryFitter>(fcfg);
                 auto* fitter = local_fitter_.get();
+                // α 固定（仿真靶 α=0；真实裁判系统 15° 支架仿真里没建模），走环境变量。
+                const double alpha0 = [] {
+                    const char* v = std::getenv("ULTRA_VISION_LOCAL_FIT_ALPHA_DEG");
+                    return (v != nullptr ? std::atof(v) : 15.0) * M_PI / 180.0;
+                }();
+                // 慢层：R 在线估计（默认开）；ULTRA_VISION_LOCAL_FIT_R_FIXED=1 时退回写死 R 做 A/B。
+                const bool r_fixed = std::getenv("ULTRA_VISION_LOCAL_FIT_R_FIXED") != nullptr;
+                fitter->seedSlow(alpha0, fcfg.R_prior);
                 pipeline_->tracker().setLocalFitter(
-                    [fitter](const std::vector<auto_aim::LightBarObservation>& obs,
-                             auto_aim::LocalFitResult& out) {
-                        // 仿真靶 α=0（真实裁判系统 15° 支架在仿真里没建模）。慢层还没接
-                        // α 估计，所以这里用环境变量给（默认 15°，仿真应设 0）。
-                        const double alpha_deg = [] {
-                            const char* v = std::getenv("ULTRA_VISION_LOCAL_FIT_ALPHA_DEG");
-                            return v != nullptr ? std::atof(v) : 15.0;
-                        }();
-                        const bool ok = fitter->fit(obs, alpha_deg * M_PI / 180.0, 0.20, out);
+                    [fitter, alpha0, r_fixed](const std::vector<auto_aim::LightBarObservation>& obs,
+                                              auto_aim::LocalFitResult& out) {
+                        const bool ok = r_fixed ? fitter->fit(obs, alpha0, fitter->slowR(), out)
+                                                : fitter->fitWithSlow(obs, out);
                         static int dbg = 0;
                         if (std::getenv("ULTRA_VISION_LOCAL_FIT_DBG") && ++dbg % 40 == 0) {
                             std::cerr << "[local_fit] ok=" << ok << " rmse="
                                       << out.reprojection_rmse_px << " yaw="
                                       << out.yaw * 180.0 / M_PI << " w=" << out.omega
+                                      << " R=" << fitter->slowR()
                                       << " nbars=" << obs.size() << std::endl;
                         }
                         return ok;

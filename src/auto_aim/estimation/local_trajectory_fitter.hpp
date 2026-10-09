@@ -43,6 +43,12 @@ namespace auto_aim
         double alpha_prior = 15.0 * M_PI / 180.0;
         double alpha_lo = 8.0 * M_PI / 180.0, alpha_hi = 25.0 * M_PI / 180.0;
         double R_prior = 0.20, R_lo = 0.10, R_hi = 0.35;
+        // 慢层在线（估计 R）融合参数
+        double R_learn = 0.5;           // 学习率（对 refineSlow 的 GN 步）
+        double R_step_max = 0.01;       // 单次 R 变化上限（m）
+        double R_freeze_band = 0.05;    // |Cz−2R| 小于它就冻结 R（不可辨识）
+        double R_info_min = 1e-6;       // JᵀJ 对角信息量下限（低于则冻结）
+        double R_prior_gain = 0.05;     // 弱先验回拉系数（防 R–Cz 耦合漂移）
         // 有效性
         double max_rmse_px = 5.0;
         // 板 yaw 偏移（armor_id → 偏移角）。默认四板 90° 均布。
@@ -85,8 +91,18 @@ namespace auto_aim
                         const FastFit& fast, double& alpha, double& R,
                         double& info_alpha, double& info_R) const;
 
+        // ---- 慢层在线状态（α 固定、R 在线估计）--------------------------------------
+        // 每步：fitFast(α,R) → refineSlow 对 R 走一小步（确定性 GN + JᵀJ 信息量）→
+        // 门控融合（Cz≈2R / 信息量不足时冻结；步长上限；先验范围）。
+        void seedSlow(double alpha, double R) { slow_alpha_ = alpha; slow_R_ = R; }
+        double slowAlpha() const { return slow_alpha_; }
+        double slowR() const { return slow_R_; }
+        bool fitWithSlow(const std::vector<LightBarObservation>& observations, LocalFitResult& out);
+
     private:
         LocalTrajectoryFitConfig config_;
+        double slow_alpha_ = 0.0;
+        double slow_R_ = 0.20;
     };
 }  // namespace auto_aim
 

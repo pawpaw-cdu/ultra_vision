@@ -196,7 +196,8 @@ namespace auto_aim
             if (const char* p = std::getenv("ULTRA_VISION_LOCAL_FIT_LOG")) {
                 static std::ofstream log(p, std::ios::out);
                 log << result.timestamp << ',' << window.size() << ',' << result.omega << ','
-                    << result.reprojection_rmse_px << ',' << (ok ? 1 : 0) << ',' << dbg_k << '\n';
+                    << result.reprojection_rmse_px << ',' << (ok ? 1 : 0) << ',' << dbg_k << ','
+                    << result.R << '\n';
             }
         if (!ok) return false;
 
@@ -252,6 +253,10 @@ namespace auto_aim
         // 的那个值，消掉未知的 k·90°（只修正板偏移，不改 ω/中心）。
         const double ekf_yaw = ekf_.getYaw();
         conv.yaw = ekf_yaw + std::remainder(conv.yaw - ekf_yaw, 0.5 * M_PI);
+
+        // 默认只喂 ω（+中心），不喂 yaw——yaw 是最脆弱的量，容易把 EKF 拉坏（见 config.use_yaw）。
+        if (!cfg_.local_fit.use_yaw || std::getenv("ULTRA_VISION_LOCAL_FIT_NO_YAW") != nullptr)
+            conv.yaw = ekf_yaw;
 
         return ekf_.updateWithLocalFit(conv, cfg_.local_fit.yaw_noise, cfg_.local_fit.omega_noise,
                                        std::numeric_limits<double>::infinity());

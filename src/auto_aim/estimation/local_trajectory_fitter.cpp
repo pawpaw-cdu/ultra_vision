@@ -271,4 +271,45 @@ namespace auto_aim
         }
         alpha = a; R = r;
     }
+
+    bool LocalTrajectoryFitter::fitWithSlow(const std::vector<LightBarObservation>& observations,
+                                            LocalFitResult& out)
+    {
+        out = LocalFitResult{};
+        if (observations.size() < 4) return false;
+        FastFit fast;
+        if (!fitFast(observations, slow_alpha_, slow_R_, fast)) return false;
+
+        // 慢层一步：α 固定，只放开 R（确定性 Gauss-Newton）。
+        double a = slow_alpha_, r = slow_R_, info_a = 0.0, info_r = 0.0;
+        refineSlow(observations, fast, a, r, info_a, info_r);
+        const double Cz = fast.center[2];
+        const bool observable = std::isfinite(r) && fast.rmse_px <= config_.max_rmse_px &&
+                                std::abs(Cz - 2.0 * slow_R_) > config_.R_freeze_band &&
+                                info_r > config_.R_info_min;
+        if (observable)
+        {
+            const double step = std::clamp(r - slow_R_, -config_.R_step_max, config_.R_step_max);
+            // GN 步 + 弱先验回拉：R 只在"可观测且拟合可信"时小步走，并被先验轻轻拉住，
+            // 避免 R–Cz 耦合导致 R 慢漂（实测 6.5m 无回拉会漂到 0.28）。
+            slow_R_ += config_.R_learn * step;
+            slow_R_ += config_.R_prior_gain * (config_.R_prior - slow_R_);
+            slow_R_ = std::clamp(slow_R_, config_.R_lo, config_.R_hi);
+        }
+
+        // 用更新后的 (α,R) 重算快层，作为输出（外推到窗口末端时间）。
+        FastFit f;
+        if (!fitFast(observations, slow_alpha_, slow_R_, f)) return false;
+        out.valid = f.valid && f.rmse_px <= config_.max_rmse_px;
+        out.timestamp = observations.back().timestamp;
+        out.center[0] = f.center[0]; out.center[1] = f.center[1]; out.center[2] = f.center[2];
+        out.yaw = f.yawAt(observations.back().timestamp);
+        out.omega = f.omega;
+        out.alpha = slow_alpha_;
+        out.R = slow_R_;
+        out.reprojection_rmse_px = f.rmse_px;
+        out.quality = std::exp(-f.rmse_px / std::max(0.1, config_.huber_delta));
+        out.num_bars = static_cast<int>(observations.size());
+        return out.valid;
+    }
 }  // namespace auto_aim

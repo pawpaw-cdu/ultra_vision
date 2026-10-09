@@ -72,6 +72,10 @@ namespace auto_aim
         int joint_max_arcs = 4;         // 联合时最多用几条板弧
         double yaw_noise = 0.02;        // 拟合 yaw 的观测噪声（rad²，质量再缩放）
         double omega_noise = 0.05;      // 拟合 ω 的观测噪声
+        // 是否把拟合的 yaw 也当观测喂 EKF。实测 yaw 是最脆弱的量（板号/相位约定稍错就把
+        // EKF 拉坏，A/B 里 6.5m/5rad 误差从 0.67 炸到 13.9）；ω/中心才是稳健可用的输出。
+        // 默认只喂 ω（yaw 观测关）。
+        bool use_yaw = false;
         // 相机系→整车系符号（标定项）：拟合器的 θ 约定（相机 X-Z 平面，从 +Z 向 +X 量）
         // 与 EKF 的 ω/yaw 约定相反 → 仿真实测 -1（gyro5 A/B：+1 会让 EKF ω 更差，-1 明显更稳）。
         double yaw_rate_sign = -1.0;
