@@ -47,15 +47,19 @@ namespace auto_aim
 
     // Armor plates are flat and tangent to the chassis circle, so the plate
     // outline is built from the radial phase and a shared vertical axis.
-    inline std::vector<cv::Point2f> projectArmor(
-        const cv::Mat& center, int plate_id, double yaw,
-        const cv::Vec3d& vertical_axis, double half_width, double half_height,
-        const cv::Mat& camera_matrix, const cv::Mat& dist_coeffs)
+    //
+    // **坐标系必须统一**：`center` 是相机系的点，所以切向和竖直轴也必须是**相机系**的向量。
+    // 曾经这里用世界系的 yaw 直接造 tangent(-sin, 0, cos)、又用相机系的 vertical_axis 造竖直，
+    // 结果是"相机一有 pitch，画出来的板就被掰了一个≈相机-板 pitch 夹角的角度"（模型像在
+    // 斜坡上）；仿真里姿态≈0 所以看不出来。现在把世界系的切向/竖直显式传进来，或由调用方
+    // 用 tracker.worldToCameraVector() 转好再传。
+    inline std::vector<cv::Point2f> projectArmorCameraFrame(
+        const cv::Mat& center, const cv::Vec3d& tangent, const cv::Vec3d& vertical_axis,
+        double half_width, double half_height, const cv::Mat& camera_matrix,
+        const cv::Mat& dist_coeffs)
     {
         if (center.rows != 3 || center.cols != 1) return {};
 
-        const double total_angle = yaw + ArmorEKF::angleForPlate(plate_id);
-        const cv::Vec3d tangent(-std::sin(total_angle), 0.0, std::cos(total_angle));
         const double cx = center.at<double>(0);
         const double cy = center.at<double>(1);
         const double cz = center.at<double>(2);
@@ -80,6 +84,20 @@ namespace auto_aim
                           cv::Mat::zeros(3, 1, CV_64F),
                           camera_matrix, dist_coeffs, image_points);
         return image_points;
+    }
+
+    /// @brief 旧接口（按世界系 yaw 造切向）——**只在相机姿态接近 0 时正确**，
+    ///        相机有 pitch 时会把板画歪（≈相机-板 pitch 夹角）。新代码请用
+    ///        projectArmorCameraFrame() 并自己把切向/竖直转到相机系。
+    inline std::vector<cv::Point2f> projectArmor(
+        const cv::Mat& center, int plate_id, double yaw, const cv::Vec3d& vertical_axis,
+        double half_width, double half_height, const cv::Mat& camera_matrix,
+        const cv::Mat& dist_coeffs)
+    {
+        const double total_angle = yaw + ArmorEKF::angleForPlate(plate_id);
+        const cv::Vec3d tangent(-std::sin(total_angle), 0.0, std::cos(total_angle));
+        return projectArmorCameraFrame(center, tangent, vertical_axis, half_width, half_height,
+                                       camera_matrix, dist_coeffs);
     }
 } // namespace auto_aim
 

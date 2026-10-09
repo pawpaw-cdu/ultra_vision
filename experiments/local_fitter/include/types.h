@@ -22,6 +22,9 @@ namespace rm
         Vec2 top_px{0, 0}, bottom_px{0, 0};
         double confidence = 1.0;
         int armor_id = 0;
+        // 灯条在板面切向的偏移(m)：一块装甲板有两根灯条（左 a=+W/2、右 a=-W/2）。
+        // 单灯条模型（提示词原始设定）取 0。
+        double bar_offset = 0.0;
     };
 
     struct VehicleState
@@ -70,5 +73,40 @@ namespace rm
         const Mat3 rcv = rotationVehicleToCamera(gimbal_pitch);
         top = rcv * pv_top + C;
         bottom = rcv * pv_bot + C;
+    }
+
+    // 通用灯条端点：灯条在板面切向偏移 a（米）处，绕竖直轴 yaw=theta，
+    // 安装倾角 alpha。a=0 时退化为 barEndpointsCamera（保留原单灯条模型）。
+    //
+    // 板面局部：n=(cosθ,sinθ,0) 径向、t=(-sinθ,cosθ,0) 切向、ẑ 竖直。
+    // 角点(a,b) = ρ·n + a·t + z·ẑ，其中 ρ = R - b·sinα，z = h + b·cosα。
+    // b=+L/2 为顶端（半径更小、更高），b=-L/2 为底端——与提示词 4.2 一致。
+    inline void barEndpointsCameraOffset(const Vec3& C, double h, double theta, double alpha,
+                                         double R, double L, double a, double gimbal_pitch,
+                                         Vec3& top, Vec3& bottom)
+    {
+        auto corner = [&](double b) {
+            const double rho = R - b * std::sin(alpha);
+            const double z = h + b * std::cos(alpha);
+            return Vec3(rho * std::cos(theta) - a * std::sin(theta),
+                        rho * std::sin(theta) + a * std::cos(theta), z);
+        };
+        const Vec3 pv_top = corner(+0.5 * L);
+        const Vec3 pv_bot = corner(-0.5 * L);
+        const Mat3 rcv = rotationVehicleToCamera(gimbal_pitch);
+        top = rcv * pv_top + C;
+        bottom = rcv * pv_bot + C;
+    }
+
+    // 一块装甲板的 4 个角点（相机系）：[LT, LB, RT, RB]
+    // 左灯条 a=+W/2，右灯条 a=-W/2；L 为灯条长度（板高），W 为板宽。
+    inline void plateCornersCamera(const Vec3& C, double h, double theta, double alpha,
+                                   double R, double L, double W, double gimbal_pitch,
+                                   Vec3 corners[4])
+    {
+        barEndpointsCameraOffset(C, h, theta, alpha, R, L, +0.5 * W, gimbal_pitch,
+                                 corners[0], corners[1]);
+        barEndpointsCameraOffset(C, h, theta, alpha, R, L, -0.5 * W, gimbal_pitch,
+                                 corners[2], corners[3]);
     }
 }  // namespace rm

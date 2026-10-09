@@ -244,6 +244,7 @@ set(REPLAY_SOURCES
     src/auto_aim/Kalman/tracker_lifecycle.cpp
     src/auto_aim/Kalman/tracker_accessors.cpp
     src/auto_aim/Kalman/tracker_scale.cpp
+    src/auto_aim/Kalman/tracker_localfit.cpp
     src/auto_aim/control/aim_pipeline.cpp
     src/auto_aim/control/aim_signal_filter.cpp
     src/auto_aim/control/target_selector.cpp

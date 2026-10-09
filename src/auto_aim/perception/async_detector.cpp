@@ -160,7 +160,10 @@ namespace auto_aim
         std::lock_guard<std::mutex> lock(impl_->mutex);
         if (impl_->result_generation == impl_->consumed_generation) return false;
         impl_->consumed_generation = impl_->result_generation;
-        result = impl_->latest;
+        // Move: the generation guard above guarantees a moved-from `latest` is
+        // never read again, so the armors (and their vectors) are handed over
+        // instead of deep-copied on every consumed frame.
+        result = std::move(impl_->latest);
         return true;
     }
 

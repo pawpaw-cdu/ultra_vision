@@ -1,3 +1,9 @@
 build/
 data/*.csv
 data/*.png
+# 保留 README 引用的结果图
+!data/multiplate_identifiability.png
+!data/slow_recursive.png
+!data/model_switch.png
+!data/observability.png
+!data/pnp_vs_fit.png

@@ -31,6 +31,35 @@ namespace io
         int read_timeout_ms = 20;
         int reconnect_after_errors = 3000;    // 累计读错误到该值尝试重连
         bool require_connection = false;      // true = 打不开就退出（比赛模式）
+        // ---- 下发命令的坐标系（2026-09-29 实测量定）-------------------------
+        // 结论（`tools/gimbal_sign_probe --world` 两次 + 台阶测试）：
+        //   C 板 yaw/pitch 闭环比较的**不是**回传的电机角，而是**IMU 世界系角**：
+        //     cmd_yaw   = +az_x   （基轴 x 在世界系的方位角）
+        //     cmd_pitch = -el_x   （基轴 x 的俯仰角取反）
+        //   证据：把这两个"当前值"发回去 → 云台保持不动（0.2~0.9°）；发电机系当前值
+        //   → 一次跑 35.7°。台阶：cmd_yaw+10 → 电机 yaw+9.18（同号 1:1）、
+        //   cmd_pitch+10 → 电机 pitch−9.45（反号 1:1）。
+        //   这条也正是 sp_vision 的做法：它下发的就是世界系绝对角，不需要任何符号处理。
+        //
+        // 下发形式（**不需要标定任何零点常数**，因为增量加在实测基准上）：
+        //   cmd_yaw   = world_yaw_sign·az_x + gain_yaw_sign  / yaw_sign · Δ(内部 yaw)
+        //   cmd_pitch = world_pitch_sign·el_x + gain_pitch_sign      · Δ(内部 pitch)
+        // 其中 Δ(内部) = 本次要发的角 − 当前姿态角（同一时刻）。gain_* 是"命令帧相对
+        // 回传电机系"的增益符号，除以 yaw_sign 是因为内部 yaw = yaw_sign·回传 yaw。
+        enum class CommandFrame
+        {
+            Motor = 0,   // 直接发内部电机角（旧行为；这台车上会跑飞，仅留作对照）
+            World = 1,   // 用四元数算世界系角（实测正确）
+        };
+        CommandFrame command_frame = CommandFrame::World;
+        double command_world_yaw_sign = 1.0;    // yaw 通道符号（实测 +1）
+        double command_world_pitch_sign = -1.0; // pitch 通道符号（实测 -1）
+        /// @brief `command_frame: motor` 时用的换算符号：把"内部角"换算回下位机的回传角。
+        ///        本车内部 yaw = yaw_sign·回传 yaw、内部 pitch = 回传 pitch，所以
+        ///        command_yaw_sign = yaw_sign（= -1）、command_pitch_sign = +1。
+        double command_yaw_sign = -1.0;
+        double command_pitch_sign = 1.0;
+        double yaw_sign = 1.0;                  // 回传 yaw 符号（和 serial.yaml 的 yaw_sign 一致）
     };
 
     /// @brief 四元数样本（wxyz），用于按时间戳插值出"某一帧曝光时刻的 IMU 姿态"。

@@ -41,4 +41,20 @@ namespace rm
                           const CameraIntrinsics& K, double gimbal_pitch, double L,
                           const FitResult& fast, double& alpha, double& R,
                           double& info_alpha, double& info_R);
+
+    // ---- 多装甲板联合（提示词 §八 护栏 6：多板 Yaw 相差固定角，打破 R-Cz 耦合）----
+    // observations[i].armor_id 索引 plate_yaw_offsets；observations[i].bar_offset 为灯条切向偏移。
+    // 四板共享 C,h,θ0,ω,β,drift，每板 yaw = θ(t) + plate_yaw_offsets[armor_id]。
+    FitResult fitTrajectoryJoint(const std::vector<LightBarObservation>& observations,
+                                 const CameraIntrinsics& K, double gimbal_pitch,
+                                 double alpha_fixed, double R_fixed, double L,
+                                 const std::vector<double>& plate_yaw_offsets,
+                                 const FitConfig& cfg);
+
+    // 慢层一步（多板联合）：固定快层最优参数，只放开 α、R；输出增量与信息量。
+    void refineSlowParamsJoint(const std::vector<LightBarObservation>& observations,
+                               const CameraIntrinsics& K, double gimbal_pitch, double L,
+                               const std::vector<double>& plate_yaw_offsets,
+                               const FitResult& fast, double& alpha, double& R,
+                               double& info_alpha, double& info_R);
 }  // namespace rm

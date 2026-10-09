@@ -198,6 +198,32 @@ gimbal_probe/fast:
 .PHONY : gimbal_probe/fast
 
 #=============================================================================
+# Target rules for targets named gimbal_sign_probe
+
+# Build rule for target.
+gimbal_sign_probe: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 gimbal_sign_probe
+.PHONY : gimbal_sign_probe
+
+# fast build rule for target.
+gimbal_sign_probe/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_sign_probe.dir/build.make CMakeFiles/gimbal_sign_probe.dir/build
+.PHONY : gimbal_sign_probe/fast
+
+#=============================================================================
+# Target rules for targets named replay_dataset
+
+# Build rule for target.
+replay_dataset: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 replay_dataset
+.PHONY : replay_dataset
+
+# fast build rule for target.
+replay_dataset/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/build
+.PHONY : replay_dataset/fast
+
+#=============================================================================
 # Target rules for targets named calibrate_camera
 
 # Build rule for target.
@@ -276,6 +302,45 @@ nn_probe/fast:
 .PHONY : nn_probe/fast
 
 #=============================================================================
+# Target rules for targets named spin_video_demo
+
+# Build rule for target.
+spin_video_demo: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 spin_video_demo
+.PHONY : spin_video_demo
+
+# fast build rule for target.
+spin_video_demo/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_video_demo.dir/build.make CMakeFiles/spin_video_demo.dir/build
+.PHONY : spin_video_demo/fast
+
+#=============================================================================
+# Target rules for targets named spin_det_dump
+
+# Build rule for target.
+spin_det_dump: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 spin_det_dump
+.PHONY : spin_det_dump
+
+# fast build rule for target.
+spin_det_dump/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_det_dump.dir/build.make CMakeFiles/spin_det_dump.dir/build
+.PHONY : spin_det_dump/fast
+
+#=============================================================================
+# Target rules for targets named spin_fit_from_csv
+
+# Build rule for target.
+spin_fit_from_csv: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 spin_fit_from_csv
+.PHONY : spin_fit_from_csv
+
+# fast build rule for target.
+spin_fit_from_csv/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_fit_from_csv.dir/build.make CMakeFiles/spin_fit_from_csv.dir/build
+.PHONY : spin_fit_from_csv/fast
+
+#=============================================================================
 # Target rules for targets named sim_receiver
 
 # Build rule for target.
@@ -315,17 +380,82 @@ auto_buff_demo/fast:
 .PHONY : auto_buff_demo/fast
 
 #=============================================================================
-# Target rules for targets named auto_aim
+# Target rules for targets named auto_aim_core
 
 # Build rule for target.
-auto_aim: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 auto_aim
-.PHONY : auto_aim
+auto_aim_core: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 auto_aim_core
+.PHONY : auto_aim_core
 
 # fast build rule for target.
-auto_aim/fast:
-	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/build
-.PHONY : auto_aim/fast
+auto_aim_core/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/build
+.PHONY : auto_aim_core/fast
+
+#=============================================================================
+# Target rules for targets named auto_aim_sim
+
+# Build rule for target.
+auto_aim_sim: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 auto_aim_sim
+.PHONY : auto_aim_sim
+
+# fast build rule for target.
+auto_aim_sim/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/build
+.PHONY : auto_aim_sim/fast
+
+#=============================================================================
+# Target rules for targets named auto_aim_spin_geometry
+
+# Build rule for target.
+auto_aim_spin_geometry: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 auto_aim_spin_geometry
+.PHONY : auto_aim_spin_geometry
+
+# fast build rule for target.
+auto_aim_spin_geometry/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_spin_geometry.dir/build.make src/auto_aim/CMakeFiles/auto_aim_spin_geometry.dir/build
+.PHONY : auto_aim_spin_geometry/fast
+
+#=============================================================================
+# Target rules for targets named spin_geometry_estimator_test
+
+# Build rule for target.
+spin_geometry_estimator_test: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 spin_geometry_estimator_test
+.PHONY : spin_geometry_estimator_test
+
+# fast build rule for target.
+spin_geometry_estimator_test/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/spin_geometry_estimator_test.dir/build.make src/auto_aim/CMakeFiles/spin_geometry_estimator_test.dir/build
+.PHONY : spin_geometry_estimator_test/fast
+
+#=============================================================================
+# Target rules for targets named auto_aim_local_fit
+
+# Build rule for target.
+auto_aim_local_fit: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 auto_aim_local_fit
+.PHONY : auto_aim_local_fit
+
+# fast build rule for target.
+auto_aim_local_fit/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/build.make src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/build
+.PHONY : auto_aim_local_fit/fast
+
+#=============================================================================
+# Target rules for targets named local_trajectory_fitter_test
+
+# Build rule for target.
+local_trajectory_fitter_test: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 local_trajectory_fitter_test
+.PHONY : local_trajectory_fitter_test
+
+# fast build rule for target.
+local_trajectory_fitter_test/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/local_trajectory_fitter_test.dir/build.make src/auto_aim/CMakeFiles/local_trajectory_fitter_test.dir/build
+.PHONY : local_trajectory_fitter_test/fast
 
 #=============================================================================
 # Target rules for targets named standard_clock_test
@@ -354,17 +484,17 @@ shoot_evaluator_test/fast:
 .PHONY : shoot_evaluator_test/fast
 
 #=============================================================================
-# Target rules for targets named armor_ekf_uv_test
+# Target rules for targets named gimbal_command_frame_test
 
 # Build rule for target.
-armor_ekf_uv_test: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 armor_ekf_uv_test
-.PHONY : armor_ekf_uv_test
+gimbal_command_frame_test: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 gimbal_command_frame_test
+.PHONY : gimbal_command_frame_test
 
 # fast build rule for target.
-armor_ekf_uv_test/fast:
-	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_uv_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_uv_test.dir/build
-.PHONY : armor_ekf_uv_test/fast
+gimbal_command_frame_test/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/gimbal_command_frame_test.dir/build.make src/auto_aim/CMakeFiles/gimbal_command_frame_test.dir/build
+.PHONY : gimbal_command_frame_test/fast
 
 #=============================================================================
 # Target rules for targets named aim_signal_filter_test
@@ -458,6 +588,19 @@ armor_ekf_test/fast:
 .PHONY : armor_ekf_test/fast
 
 #=============================================================================
+# Target rules for targets named pnp_yaw_refine_test
+
+# Build rule for target.
+pnp_yaw_refine_test: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 pnp_yaw_refine_test
+.PHONY : pnp_yaw_refine_test
+
+# fast build rule for target.
+pnp_yaw_refine_test/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/pnp_yaw_refine_test.dir/build.make src/auto_aim/CMakeFiles/pnp_yaw_refine_test.dir/build
+.PHONY : pnp_yaw_refine_test/fast
+
+#=============================================================================
 # Target rules for targets named gimbal_protocol_test
 
 # Build rule for target.
@@ -497,6 +640,19 @@ detector_golden_test/fast:
 .PHONY : detector_golden_test/fast
 
 #=============================================================================
+# Target rules for targets named sim_receiver_pipeline_test
+
+# Build rule for target.
+sim_receiver_pipeline_test: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 sim_receiver_pipeline_test
+.PHONY : sim_receiver_pipeline_test
+
+# fast build rule for target.
+sim_receiver_pipeline_test/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/sim_receiver_pipeline_test.dir/build.make src/auto_aim/CMakeFiles/sim_receiver_pipeline_test.dir/build
+.PHONY : sim_receiver_pipeline_test/fast
+
+#=============================================================================
 # Target rules for targets named buff_target_test
 
 # Build rule for target.
@@ -528,6 +684,7 @@ io/gimbal/gimbal.o: io/gimbal/gimbal.cpp.o
 # target to build an object file
 io/gimbal/gimbal.cpp.o:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/io/gimbal/gimbal.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_sign_probe.dir/build.make CMakeFiles/gimbal_sign_probe.dir/io/gimbal/gimbal.cpp.o
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/io/gimbal/gimbal.cpp.o
 .PHONY : io/gimbal/gimbal.cpp.o
 
@@ -537,6 +694,7 @@ io/gimbal/gimbal.i: io/gimbal/gimbal.cpp.i
 # target to preprocess a source file
 io/gimbal/gimbal.cpp.i:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/io/gimbal/gimbal.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_sign_probe.dir/build.make CMakeFiles/gimbal_sign_probe.dir/io/gimbal/gimbal.cpp.i
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/io/gimbal/gimbal.cpp.i
 .PHONY : io/gimbal/gimbal.cpp.i
 
@@ -546,6 +704,7 @@ io/gimbal/gimbal.s: io/gimbal/gimbal.cpp.s
 # target to generate assembly for a file
 io/gimbal/gimbal.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/io/gimbal/gimbal.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_sign_probe.dir/build.make CMakeFiles/gimbal_sign_probe.dir/io/gimbal/gimbal.cpp.s
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/io/gimbal/gimbal.cpp.s
 .PHONY : io/gimbal/gimbal.cpp.s
 
@@ -555,6 +714,7 @@ io/gimbal/protocol.o: io/gimbal/protocol.cpp.o
 # target to build an object file
 io/gimbal/protocol.cpp.o:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/io/gimbal/protocol.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_sign_probe.dir/build.make CMakeFiles/gimbal_sign_probe.dir/io/gimbal/protocol.cpp.o
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/io/gimbal/protocol.cpp.o
 .PHONY : io/gimbal/protocol.cpp.o
 
@@ -564,6 +724,7 @@ io/gimbal/protocol.i: io/gimbal/protocol.cpp.i
 # target to preprocess a source file
 io/gimbal/protocol.cpp.i:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/io/gimbal/protocol.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_sign_probe.dir/build.make CMakeFiles/gimbal_sign_probe.dir/io/gimbal/protocol.cpp.i
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/io/gimbal/protocol.cpp.i
 .PHONY : io/gimbal/protocol.cpp.i
 
@@ -573,6 +734,7 @@ io/gimbal/protocol.s: io/gimbal/protocol.cpp.s
 # target to generate assembly for a file
 io/gimbal/protocol.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/io/gimbal/protocol.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_sign_probe.dir/build.make CMakeFiles/gimbal_sign_probe.dir/io/gimbal/protocol.cpp.s
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/io/gimbal/protocol.cpp.s
 .PHONY : io/gimbal/protocol.cpp.s
 
@@ -582,6 +744,7 @@ io/serial/crc16.o: io/serial/crc16.cpp.o
 # target to build an object file
 io/serial/crc16.cpp.o:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/io/serial/crc16.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_sign_probe.dir/build.make CMakeFiles/gimbal_sign_probe.dir/io/serial/crc16.cpp.o
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/io/serial/crc16.cpp.o
 .PHONY : io/serial/crc16.cpp.o
 
@@ -591,6 +754,7 @@ io/serial/crc16.i: io/serial/crc16.cpp.i
 # target to preprocess a source file
 io/serial/crc16.cpp.i:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/io/serial/crc16.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_sign_probe.dir/build.make CMakeFiles/gimbal_sign_probe.dir/io/serial/crc16.cpp.i
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/io/serial/crc16.cpp.i
 .PHONY : io/serial/crc16.cpp.i
 
@@ -600,6 +764,7 @@ io/serial/crc16.s: io/serial/crc16.cpp.s
 # target to generate assembly for a file
 io/serial/crc16.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/io/serial/crc16.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_sign_probe.dir/build.make CMakeFiles/gimbal_sign_probe.dir/io/serial/crc16.cpp.s
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/io/serial/crc16.cpp.s
 .PHONY : io/serial/crc16.cpp.s
 
@@ -609,6 +774,7 @@ io/serial/serial_port.o: io/serial/serial_port.cpp.o
 # target to build an object file
 io/serial/serial_port.cpp.o:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/io/serial/serial_port.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_sign_probe.dir/build.make CMakeFiles/gimbal_sign_probe.dir/io/serial/serial_port.cpp.o
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/io/serial/serial_port.cpp.o
 .PHONY : io/serial/serial_port.cpp.o
 
@@ -618,6 +784,7 @@ io/serial/serial_port.i: io/serial/serial_port.cpp.i
 # target to preprocess a source file
 io/serial/serial_port.cpp.i:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/io/serial/serial_port.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_sign_probe.dir/build.make CMakeFiles/gimbal_sign_probe.dir/io/serial/serial_port.cpp.i
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/io/serial/serial_port.cpp.i
 .PHONY : io/serial/serial_port.cpp.i
 
@@ -627,14 +794,379 @@ io/serial/serial_port.s: io/serial/serial_port.cpp.s
 # target to generate assembly for a file
 io/serial/serial_port.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/io/serial/serial_port.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_sign_probe.dir/build.make CMakeFiles/gimbal_sign_probe.dir/io/serial/serial_port.cpp.s
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/io/serial/serial_port.cpp.s
 .PHONY : io/serial/serial_port.cpp.s
+
+src/auto_aim/Kalman/tracker.o: src/auto_aim/Kalman/tracker.cpp.o
+.PHONY : src/auto_aim/Kalman/tracker.o
+
+# target to build an object file
+src/auto_aim/Kalman/tracker.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/Kalman/tracker.cpp.o
+.PHONY : src/auto_aim/Kalman/tracker.cpp.o
+
+src/auto_aim/Kalman/tracker.i: src/auto_aim/Kalman/tracker.cpp.i
+.PHONY : src/auto_aim/Kalman/tracker.i
+
+# target to preprocess a source file
+src/auto_aim/Kalman/tracker.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/Kalman/tracker.cpp.i
+.PHONY : src/auto_aim/Kalman/tracker.cpp.i
+
+src/auto_aim/Kalman/tracker.s: src/auto_aim/Kalman/tracker.cpp.s
+.PHONY : src/auto_aim/Kalman/tracker.s
+
+# target to generate assembly for a file
+src/auto_aim/Kalman/tracker.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/Kalman/tracker.cpp.s
+.PHONY : src/auto_aim/Kalman/tracker.cpp.s
+
+src/auto_aim/Kalman/tracker_accessors.o: src/auto_aim/Kalman/tracker_accessors.cpp.o
+.PHONY : src/auto_aim/Kalman/tracker_accessors.o
+
+# target to build an object file
+src/auto_aim/Kalman/tracker_accessors.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/Kalman/tracker_accessors.cpp.o
+.PHONY : src/auto_aim/Kalman/tracker_accessors.cpp.o
+
+src/auto_aim/Kalman/tracker_accessors.i: src/auto_aim/Kalman/tracker_accessors.cpp.i
+.PHONY : src/auto_aim/Kalman/tracker_accessors.i
+
+# target to preprocess a source file
+src/auto_aim/Kalman/tracker_accessors.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/Kalman/tracker_accessors.cpp.i
+.PHONY : src/auto_aim/Kalman/tracker_accessors.cpp.i
+
+src/auto_aim/Kalman/tracker_accessors.s: src/auto_aim/Kalman/tracker_accessors.cpp.s
+.PHONY : src/auto_aim/Kalman/tracker_accessors.s
+
+# target to generate assembly for a file
+src/auto_aim/Kalman/tracker_accessors.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/Kalman/tracker_accessors.cpp.s
+.PHONY : src/auto_aim/Kalman/tracker_accessors.cpp.s
+
+src/auto_aim/Kalman/tracker_association.o: src/auto_aim/Kalman/tracker_association.cpp.o
+.PHONY : src/auto_aim/Kalman/tracker_association.o
+
+# target to build an object file
+src/auto_aim/Kalman/tracker_association.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/Kalman/tracker_association.cpp.o
+.PHONY : src/auto_aim/Kalman/tracker_association.cpp.o
+
+src/auto_aim/Kalman/tracker_association.i: src/auto_aim/Kalman/tracker_association.cpp.i
+.PHONY : src/auto_aim/Kalman/tracker_association.i
+
+# target to preprocess a source file
+src/auto_aim/Kalman/tracker_association.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/Kalman/tracker_association.cpp.i
+.PHONY : src/auto_aim/Kalman/tracker_association.cpp.i
+
+src/auto_aim/Kalman/tracker_association.s: src/auto_aim/Kalman/tracker_association.cpp.s
+.PHONY : src/auto_aim/Kalman/tracker_association.s
+
+# target to generate assembly for a file
+src/auto_aim/Kalman/tracker_association.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/Kalman/tracker_association.cpp.s
+.PHONY : src/auto_aim/Kalman/tracker_association.cpp.s
+
+src/auto_aim/Kalman/tracker_lifecycle.o: src/auto_aim/Kalman/tracker_lifecycle.cpp.o
+.PHONY : src/auto_aim/Kalman/tracker_lifecycle.o
+
+# target to build an object file
+src/auto_aim/Kalman/tracker_lifecycle.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/Kalman/tracker_lifecycle.cpp.o
+.PHONY : src/auto_aim/Kalman/tracker_lifecycle.cpp.o
+
+src/auto_aim/Kalman/tracker_lifecycle.i: src/auto_aim/Kalman/tracker_lifecycle.cpp.i
+.PHONY : src/auto_aim/Kalman/tracker_lifecycle.i
+
+# target to preprocess a source file
+src/auto_aim/Kalman/tracker_lifecycle.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/Kalman/tracker_lifecycle.cpp.i
+.PHONY : src/auto_aim/Kalman/tracker_lifecycle.cpp.i
+
+src/auto_aim/Kalman/tracker_lifecycle.s: src/auto_aim/Kalman/tracker_lifecycle.cpp.s
+.PHONY : src/auto_aim/Kalman/tracker_lifecycle.s
+
+# target to generate assembly for a file
+src/auto_aim/Kalman/tracker_lifecycle.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/Kalman/tracker_lifecycle.cpp.s
+.PHONY : src/auto_aim/Kalman/tracker_lifecycle.cpp.s
+
+src/auto_aim/Kalman/tracker_localfit.o: src/auto_aim/Kalman/tracker_localfit.cpp.o
+.PHONY : src/auto_aim/Kalman/tracker_localfit.o
+
+# target to build an object file
+src/auto_aim/Kalman/tracker_localfit.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/Kalman/tracker_localfit.cpp.o
+.PHONY : src/auto_aim/Kalman/tracker_localfit.cpp.o
+
+src/auto_aim/Kalman/tracker_localfit.i: src/auto_aim/Kalman/tracker_localfit.cpp.i
+.PHONY : src/auto_aim/Kalman/tracker_localfit.i
+
+# target to preprocess a source file
+src/auto_aim/Kalman/tracker_localfit.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/Kalman/tracker_localfit.cpp.i
+.PHONY : src/auto_aim/Kalman/tracker_localfit.cpp.i
+
+src/auto_aim/Kalman/tracker_localfit.s: src/auto_aim/Kalman/tracker_localfit.cpp.s
+.PHONY : src/auto_aim/Kalman/tracker_localfit.s
+
+# target to generate assembly for a file
+src/auto_aim/Kalman/tracker_localfit.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/Kalman/tracker_localfit.cpp.s
+.PHONY : src/auto_aim/Kalman/tracker_localfit.cpp.s
+
+src/auto_aim/Kalman/tracker_scale.o: src/auto_aim/Kalman/tracker_scale.cpp.o
+.PHONY : src/auto_aim/Kalman/tracker_scale.o
+
+# target to build an object file
+src/auto_aim/Kalman/tracker_scale.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/Kalman/tracker_scale.cpp.o
+.PHONY : src/auto_aim/Kalman/tracker_scale.cpp.o
+
+src/auto_aim/Kalman/tracker_scale.i: src/auto_aim/Kalman/tracker_scale.cpp.i
+.PHONY : src/auto_aim/Kalman/tracker_scale.i
+
+# target to preprocess a source file
+src/auto_aim/Kalman/tracker_scale.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/Kalman/tracker_scale.cpp.i
+.PHONY : src/auto_aim/Kalman/tracker_scale.cpp.i
+
+src/auto_aim/Kalman/tracker_scale.s: src/auto_aim/Kalman/tracker_scale.cpp.s
+.PHONY : src/auto_aim/Kalman/tracker_scale.s
+
+# target to generate assembly for a file
+src/auto_aim/Kalman/tracker_scale.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/Kalman/tracker_scale.cpp.s
+.PHONY : src/auto_aim/Kalman/tracker_scale.cpp.s
+
+src/auto_aim/Kalman/tracker_watchdog.o: src/auto_aim/Kalman/tracker_watchdog.cpp.o
+.PHONY : src/auto_aim/Kalman/tracker_watchdog.o
+
+# target to build an object file
+src/auto_aim/Kalman/tracker_watchdog.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/Kalman/tracker_watchdog.cpp.o
+.PHONY : src/auto_aim/Kalman/tracker_watchdog.cpp.o
+
+src/auto_aim/Kalman/tracker_watchdog.i: src/auto_aim/Kalman/tracker_watchdog.cpp.i
+.PHONY : src/auto_aim/Kalman/tracker_watchdog.i
+
+# target to preprocess a source file
+src/auto_aim/Kalman/tracker_watchdog.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/Kalman/tracker_watchdog.cpp.i
+.PHONY : src/auto_aim/Kalman/tracker_watchdog.cpp.i
+
+src/auto_aim/Kalman/tracker_watchdog.s: src/auto_aim/Kalman/tracker_watchdog.cpp.s
+.PHONY : src/auto_aim/Kalman/tracker_watchdog.s
+
+# target to generate assembly for a file
+src/auto_aim/Kalman/tracker_watchdog.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/Kalman/tracker_watchdog.cpp.s
+.PHONY : src/auto_aim/Kalman/tracker_watchdog.cpp.s
+
+src/auto_aim/control/aim_pipeline.o: src/auto_aim/control/aim_pipeline.cpp.o
+.PHONY : src/auto_aim/control/aim_pipeline.o
+
+# target to build an object file
+src/auto_aim/control/aim_pipeline.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/control/aim_pipeline.cpp.o
+.PHONY : src/auto_aim/control/aim_pipeline.cpp.o
+
+src/auto_aim/control/aim_pipeline.i: src/auto_aim/control/aim_pipeline.cpp.i
+.PHONY : src/auto_aim/control/aim_pipeline.i
+
+# target to preprocess a source file
+src/auto_aim/control/aim_pipeline.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/control/aim_pipeline.cpp.i
+.PHONY : src/auto_aim/control/aim_pipeline.cpp.i
+
+src/auto_aim/control/aim_pipeline.s: src/auto_aim/control/aim_pipeline.cpp.s
+.PHONY : src/auto_aim/control/aim_pipeline.s
+
+# target to generate assembly for a file
+src/auto_aim/control/aim_pipeline.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/control/aim_pipeline.cpp.s
+.PHONY : src/auto_aim/control/aim_pipeline.cpp.s
+
+src/auto_aim/control/aim_signal_filter.o: src/auto_aim/control/aim_signal_filter.cpp.o
+.PHONY : src/auto_aim/control/aim_signal_filter.o
+
+# target to build an object file
+src/auto_aim/control/aim_signal_filter.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/control/aim_signal_filter.cpp.o
+.PHONY : src/auto_aim/control/aim_signal_filter.cpp.o
+
+src/auto_aim/control/aim_signal_filter.i: src/auto_aim/control/aim_signal_filter.cpp.i
+.PHONY : src/auto_aim/control/aim_signal_filter.i
+
+# target to preprocess a source file
+src/auto_aim/control/aim_signal_filter.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/control/aim_signal_filter.cpp.i
+.PHONY : src/auto_aim/control/aim_signal_filter.cpp.i
+
+src/auto_aim/control/aim_signal_filter.s: src/auto_aim/control/aim_signal_filter.cpp.s
+.PHONY : src/auto_aim/control/aim_signal_filter.s
+
+# target to generate assembly for a file
+src/auto_aim/control/aim_signal_filter.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/control/aim_signal_filter.cpp.s
+.PHONY : src/auto_aim/control/aim_signal_filter.cpp.s
+
+src/auto_aim/control/gimbal_aimer.o: src/auto_aim/control/gimbal_aimer.cpp.o
+.PHONY : src/auto_aim/control/gimbal_aimer.o
+
+# target to build an object file
+src/auto_aim/control/gimbal_aimer.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/control/gimbal_aimer.cpp.o
+.PHONY : src/auto_aim/control/gimbal_aimer.cpp.o
+
+src/auto_aim/control/gimbal_aimer.i: src/auto_aim/control/gimbal_aimer.cpp.i
+.PHONY : src/auto_aim/control/gimbal_aimer.i
+
+# target to preprocess a source file
+src/auto_aim/control/gimbal_aimer.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/control/gimbal_aimer.cpp.i
+.PHONY : src/auto_aim/control/gimbal_aimer.cpp.i
+
+src/auto_aim/control/gimbal_aimer.s: src/auto_aim/control/gimbal_aimer.cpp.s
+.PHONY : src/auto_aim/control/gimbal_aimer.s
+
+# target to generate assembly for a file
+src/auto_aim/control/gimbal_aimer.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/control/gimbal_aimer.cpp.s
+.PHONY : src/auto_aim/control/gimbal_aimer.cpp.s
+
+src/auto_aim/control/gimbal_controller.o: src/auto_aim/control/gimbal_controller.cpp.o
+.PHONY : src/auto_aim/control/gimbal_controller.o
+
+# target to build an object file
+src/auto_aim/control/gimbal_controller.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/control/gimbal_controller.cpp.o
+.PHONY : src/auto_aim/control/gimbal_controller.cpp.o
+
+src/auto_aim/control/gimbal_controller.i: src/auto_aim/control/gimbal_controller.cpp.i
+.PHONY : src/auto_aim/control/gimbal_controller.i
+
+# target to preprocess a source file
+src/auto_aim/control/gimbal_controller.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/control/gimbal_controller.cpp.i
+.PHONY : src/auto_aim/control/gimbal_controller.cpp.i
+
+src/auto_aim/control/gimbal_controller.s: src/auto_aim/control/gimbal_controller.cpp.s
+.PHONY : src/auto_aim/control/gimbal_controller.s
+
+# target to generate assembly for a file
+src/auto_aim/control/gimbal_controller.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/control/gimbal_controller.cpp.s
+.PHONY : src/auto_aim/control/gimbal_controller.cpp.s
+
+src/auto_aim/control/shooter.o: src/auto_aim/control/shooter.cpp.o
+.PHONY : src/auto_aim/control/shooter.o
+
+# target to build an object file
+src/auto_aim/control/shooter.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/control/shooter.cpp.o
+.PHONY : src/auto_aim/control/shooter.cpp.o
+
+src/auto_aim/control/shooter.i: src/auto_aim/control/shooter.cpp.i
+.PHONY : src/auto_aim/control/shooter.i
+
+# target to preprocess a source file
+src/auto_aim/control/shooter.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/control/shooter.cpp.i
+.PHONY : src/auto_aim/control/shooter.cpp.i
+
+src/auto_aim/control/shooter.s: src/auto_aim/control/shooter.cpp.s
+.PHONY : src/auto_aim/control/shooter.s
+
+# target to generate assembly for a file
+src/auto_aim/control/shooter.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/control/shooter.cpp.s
+.PHONY : src/auto_aim/control/shooter.cpp.s
+
+src/auto_aim/control/target_selector.o: src/auto_aim/control/target_selector.cpp.o
+.PHONY : src/auto_aim/control/target_selector.o
+
+# target to build an object file
+src/auto_aim/control/target_selector.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/control/target_selector.cpp.o
+.PHONY : src/auto_aim/control/target_selector.cpp.o
+
+src/auto_aim/control/target_selector.i: src/auto_aim/control/target_selector.cpp.i
+.PHONY : src/auto_aim/control/target_selector.i
+
+# target to preprocess a source file
+src/auto_aim/control/target_selector.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/control/target_selector.cpp.i
+.PHONY : src/auto_aim/control/target_selector.cpp.i
+
+src/auto_aim/control/target_selector.s: src/auto_aim/control/target_selector.cpp.s
+.PHONY : src/auto_aim/control/target_selector.s
+
+# target to generate assembly for a file
+src/auto_aim/control/target_selector.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/control/target_selector.cpp.s
+.PHONY : src/auto_aim/control/target_selector.cpp.s
+
+src/auto_aim/estimation/rotation_rate_estimator.o: src/auto_aim/estimation/rotation_rate_estimator.cpp.o
+.PHONY : src/auto_aim/estimation/rotation_rate_estimator.o
+
+# target to build an object file
+src/auto_aim/estimation/rotation_rate_estimator.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/estimation/rotation_rate_estimator.cpp.o
+.PHONY : src/auto_aim/estimation/rotation_rate_estimator.cpp.o
+
+src/auto_aim/estimation/rotation_rate_estimator.i: src/auto_aim/estimation/rotation_rate_estimator.cpp.i
+.PHONY : src/auto_aim/estimation/rotation_rate_estimator.i
+
+# target to preprocess a source file
+src/auto_aim/estimation/rotation_rate_estimator.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/estimation/rotation_rate_estimator.cpp.i
+.PHONY : src/auto_aim/estimation/rotation_rate_estimator.cpp.i
+
+src/auto_aim/estimation/rotation_rate_estimator.s: src/auto_aim/estimation/rotation_rate_estimator.cpp.s
+.PHONY : src/auto_aim/estimation/rotation_rate_estimator.s
+
+# target to generate assembly for a file
+src/auto_aim/estimation/rotation_rate_estimator.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/estimation/rotation_rate_estimator.cpp.s
+.PHONY : src/auto_aim/estimation/rotation_rate_estimator.cpp.s
+
+src/auto_aim/estimation/spin_geometry_estimator.o: src/auto_aim/estimation/spin_geometry_estimator.cpp.o
+.PHONY : src/auto_aim/estimation/spin_geometry_estimator.o
+
+# target to build an object file
+src/auto_aim/estimation/spin_geometry_estimator.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_video_demo.dir/build.make CMakeFiles/spin_video_demo.dir/src/auto_aim/estimation/spin_geometry_estimator.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_fit_from_csv.dir/build.make CMakeFiles/spin_fit_from_csv.dir/src/auto_aim/estimation/spin_geometry_estimator.cpp.o
+.PHONY : src/auto_aim/estimation/spin_geometry_estimator.cpp.o
+
+src/auto_aim/estimation/spin_geometry_estimator.i: src/auto_aim/estimation/spin_geometry_estimator.cpp.i
+.PHONY : src/auto_aim/estimation/spin_geometry_estimator.i
+
+# target to preprocess a source file
+src/auto_aim/estimation/spin_geometry_estimator.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_video_demo.dir/build.make CMakeFiles/spin_video_demo.dir/src/auto_aim/estimation/spin_geometry_estimator.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_fit_from_csv.dir/build.make CMakeFiles/spin_fit_from_csv.dir/src/auto_aim/estimation/spin_geometry_estimator.cpp.i
+.PHONY : src/auto_aim/estimation/spin_geometry_estimator.cpp.i
+
+src/auto_aim/estimation/spin_geometry_estimator.s: src/auto_aim/estimation/spin_geometry_estimator.cpp.s
+.PHONY : src/auto_aim/estimation/spin_geometry_estimator.s
+
+# target to generate assembly for a file
+src/auto_aim/estimation/spin_geometry_estimator.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_video_demo.dir/build.make CMakeFiles/spin_video_demo.dir/src/auto_aim/estimation/spin_geometry_estimator.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_fit_from_csv.dir/build.make CMakeFiles/spin_fit_from_csv.dir/src/auto_aim/estimation/spin_geometry_estimator.cpp.s
+.PHONY : src/auto_aim/estimation/spin_geometry_estimator.cpp.s
 
 src/auto_aim/perception/armor_source.o: src/auto_aim/perception/armor_source.cpp.o
 .PHONY : src/auto_aim/perception/armor_source.o
 
 # target to build an object file
 src/auto_aim/perception/armor_source.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/perception/armor_source.cpp.o
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/armor_source.cpp.o
 .PHONY : src/auto_aim/perception/armor_source.cpp.o
 
@@ -643,6 +1175,7 @@ src/auto_aim/perception/armor_source.i: src/auto_aim/perception/armor_source.cpp
 
 # target to preprocess a source file
 src/auto_aim/perception/armor_source.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/perception/armor_source.cpp.i
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/armor_source.cpp.i
 .PHONY : src/auto_aim/perception/armor_source.cpp.i
 
@@ -651,6 +1184,7 @@ src/auto_aim/perception/armor_source.s: src/auto_aim/perception/armor_source.cpp
 
 # target to generate assembly for a file
 src/auto_aim/perception/armor_source.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/perception/armor_source.cpp.s
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/armor_source.cpp.s
 .PHONY : src/auto_aim/perception/armor_source.cpp.s
 
@@ -659,6 +1193,7 @@ src/auto_aim/perception/async_detector.o: src/auto_aim/perception/async_detector
 
 # target to build an object file
 src/auto_aim/perception/async_detector.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/perception/async_detector.cpp.o
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/async_detector.cpp.o
 .PHONY : src/auto_aim/perception/async_detector.cpp.o
 
@@ -667,6 +1202,7 @@ src/auto_aim/perception/async_detector.i: src/auto_aim/perception/async_detector
 
 # target to preprocess a source file
 src/auto_aim/perception/async_detector.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/perception/async_detector.cpp.i
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/async_detector.cpp.i
 .PHONY : src/auto_aim/perception/async_detector.cpp.i
 
@@ -675,6 +1211,7 @@ src/auto_aim/perception/async_detector.s: src/auto_aim/perception/async_detector
 
 # target to generate assembly for a file
 src/auto_aim/perception/async_detector.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/perception/async_detector.cpp.s
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/async_detector.cpp.s
 .PHONY : src/auto_aim/perception/async_detector.cpp.s
 
@@ -683,6 +1220,7 @@ src/auto_aim/perception/detector.o: src/auto_aim/perception/detector.cpp.o
 
 # target to build an object file
 src/auto_aim/perception/detector.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/perception/detector.cpp.o
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/detector.cpp.o
 .PHONY : src/auto_aim/perception/detector.cpp.o
 
@@ -691,6 +1229,7 @@ src/auto_aim/perception/detector.i: src/auto_aim/perception/detector.cpp.i
 
 # target to preprocess a source file
 src/auto_aim/perception/detector.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/perception/detector.cpp.i
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/detector.cpp.i
 .PHONY : src/auto_aim/perception/detector.cpp.i
 
@@ -699,6 +1238,7 @@ src/auto_aim/perception/detector.s: src/auto_aim/perception/detector.cpp.s
 
 # target to generate assembly for a file
 src/auto_aim/perception/detector.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/perception/detector.cpp.s
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/detector.cpp.s
 .PHONY : src/auto_aim/perception/detector.cpp.s
 
@@ -707,8 +1247,11 @@ src/auto_aim/perception/keypoint_refiner.o: src/auto_aim/perception/keypoint_ref
 
 # target to build an object file
 src/auto_aim/perception/keypoint_refiner.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/perception/keypoint_refiner.cpp.o
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/keypoint_refiner.cpp.o
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/nn_probe.dir/build.make CMakeFiles/nn_probe.dir/src/auto_aim/perception/keypoint_refiner.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_video_demo.dir/build.make CMakeFiles/spin_video_demo.dir/src/auto_aim/perception/keypoint_refiner.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_det_dump.dir/build.make CMakeFiles/spin_det_dump.dir/src/auto_aim/perception/keypoint_refiner.cpp.o
 .PHONY : src/auto_aim/perception/keypoint_refiner.cpp.o
 
 src/auto_aim/perception/keypoint_refiner.i: src/auto_aim/perception/keypoint_refiner.cpp.i
@@ -716,8 +1259,11 @@ src/auto_aim/perception/keypoint_refiner.i: src/auto_aim/perception/keypoint_ref
 
 # target to preprocess a source file
 src/auto_aim/perception/keypoint_refiner.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/perception/keypoint_refiner.cpp.i
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/keypoint_refiner.cpp.i
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/nn_probe.dir/build.make CMakeFiles/nn_probe.dir/src/auto_aim/perception/keypoint_refiner.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_video_demo.dir/build.make CMakeFiles/spin_video_demo.dir/src/auto_aim/perception/keypoint_refiner.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_det_dump.dir/build.make CMakeFiles/spin_det_dump.dir/src/auto_aim/perception/keypoint_refiner.cpp.i
 .PHONY : src/auto_aim/perception/keypoint_refiner.cpp.i
 
 src/auto_aim/perception/keypoint_refiner.s: src/auto_aim/perception/keypoint_refiner.cpp.s
@@ -725,8 +1271,11 @@ src/auto_aim/perception/keypoint_refiner.s: src/auto_aim/perception/keypoint_ref
 
 # target to generate assembly for a file
 src/auto_aim/perception/keypoint_refiner.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/perception/keypoint_refiner.cpp.s
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/keypoint_refiner.cpp.s
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/nn_probe.dir/build.make CMakeFiles/nn_probe.dir/src/auto_aim/perception/keypoint_refiner.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_video_demo.dir/build.make CMakeFiles/spin_video_demo.dir/src/auto_aim/perception/keypoint_refiner.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_det_dump.dir/build.make CMakeFiles/spin_det_dump.dir/src/auto_aim/perception/keypoint_refiner.cpp.s
 .PHONY : src/auto_aim/perception/keypoint_refiner.cpp.s
 
 src/auto_aim/perception/nn_detector.o: src/auto_aim/perception/nn_detector.cpp.o
@@ -734,8 +1283,11 @@ src/auto_aim/perception/nn_detector.o: src/auto_aim/perception/nn_detector.cpp.o
 
 # target to build an object file
 src/auto_aim/perception/nn_detector.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/perception/nn_detector.cpp.o
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/nn_detector.cpp.o
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/nn_probe.dir/build.make CMakeFiles/nn_probe.dir/src/auto_aim/perception/nn_detector.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_video_demo.dir/build.make CMakeFiles/spin_video_demo.dir/src/auto_aim/perception/nn_detector.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_det_dump.dir/build.make CMakeFiles/spin_det_dump.dir/src/auto_aim/perception/nn_detector.cpp.o
 .PHONY : src/auto_aim/perception/nn_detector.cpp.o
 
 src/auto_aim/perception/nn_detector.i: src/auto_aim/perception/nn_detector.cpp.i
@@ -743,8 +1295,11 @@ src/auto_aim/perception/nn_detector.i: src/auto_aim/perception/nn_detector.cpp.i
 
 # target to preprocess a source file
 src/auto_aim/perception/nn_detector.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/perception/nn_detector.cpp.i
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/nn_detector.cpp.i
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/nn_probe.dir/build.make CMakeFiles/nn_probe.dir/src/auto_aim/perception/nn_detector.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_video_demo.dir/build.make CMakeFiles/spin_video_demo.dir/src/auto_aim/perception/nn_detector.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_det_dump.dir/build.make CMakeFiles/spin_det_dump.dir/src/auto_aim/perception/nn_detector.cpp.i
 .PHONY : src/auto_aim/perception/nn_detector.cpp.i
 
 src/auto_aim/perception/nn_detector.s: src/auto_aim/perception/nn_detector.cpp.s
@@ -752,8 +1307,11 @@ src/auto_aim/perception/nn_detector.s: src/auto_aim/perception/nn_detector.cpp.s
 
 # target to generate assembly for a file
 src/auto_aim/perception/nn_detector.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/perception/nn_detector.cpp.s
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/nn_detector.cpp.s
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/nn_probe.dir/build.make CMakeFiles/nn_probe.dir/src/auto_aim/perception/nn_detector.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_video_demo.dir/build.make CMakeFiles/spin_video_demo.dir/src/auto_aim/perception/nn_detector.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_det_dump.dir/build.make CMakeFiles/spin_det_dump.dir/src/auto_aim/perception/nn_detector.cpp.s
 .PHONY : src/auto_aim/perception/nn_detector.cpp.s
 
 src/auto_aim/perception/pnp_solver.o: src/auto_aim/perception/pnp_solver.cpp.o
@@ -761,6 +1319,7 @@ src/auto_aim/perception/pnp_solver.o: src/auto_aim/perception/pnp_solver.cpp.o
 
 # target to build an object file
 src/auto_aim/perception/pnp_solver.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/perception/pnp_solver.cpp.o
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/pnp_solver.cpp.o
 .PHONY : src/auto_aim/perception/pnp_solver.cpp.o
 
@@ -769,6 +1328,7 @@ src/auto_aim/perception/pnp_solver.i: src/auto_aim/perception/pnp_solver.cpp.i
 
 # target to preprocess a source file
 src/auto_aim/perception/pnp_solver.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/perception/pnp_solver.cpp.i
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/pnp_solver.cpp.i
 .PHONY : src/auto_aim/perception/pnp_solver.cpp.i
 
@@ -777,6 +1337,7 @@ src/auto_aim/perception/pnp_solver.s: src/auto_aim/perception/pnp_solver.cpp.s
 
 # target to generate assembly for a file
 src/auto_aim/perception/pnp_solver.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/src/auto_aim/perception/pnp_solver.cpp.s
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/hand_eye_calibrate.dir/build.make CMakeFiles/hand_eye_calibrate.dir/src/auto_aim/perception/pnp_solver.cpp.s
 .PHONY : src/auto_aim/perception/pnp_solver.cpp.s
 
@@ -924,6 +1485,30 @@ tools/gimbal_probe.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_probe.dir/build.make CMakeFiles/gimbal_probe.dir/tools/gimbal_probe.cpp.s
 .PHONY : tools/gimbal_probe.cpp.s
 
+tools/gimbal_sign_probe.o: tools/gimbal_sign_probe.cpp.o
+.PHONY : tools/gimbal_sign_probe.o
+
+# target to build an object file
+tools/gimbal_sign_probe.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_sign_probe.dir/build.make CMakeFiles/gimbal_sign_probe.dir/tools/gimbal_sign_probe.cpp.o
+.PHONY : tools/gimbal_sign_probe.cpp.o
+
+tools/gimbal_sign_probe.i: tools/gimbal_sign_probe.cpp.i
+.PHONY : tools/gimbal_sign_probe.i
+
+# target to preprocess a source file
+tools/gimbal_sign_probe.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_sign_probe.dir/build.make CMakeFiles/gimbal_sign_probe.dir/tools/gimbal_sign_probe.cpp.i
+.PHONY : tools/gimbal_sign_probe.cpp.i
+
+tools/gimbal_sign_probe.s: tools/gimbal_sign_probe.cpp.s
+.PHONY : tools/gimbal_sign_probe.s
+
+# target to generate assembly for a file
+tools/gimbal_sign_probe.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gimbal_sign_probe.dir/build.make CMakeFiles/gimbal_sign_probe.dir/tools/gimbal_sign_probe.cpp.s
+.PHONY : tools/gimbal_sign_probe.cpp.s
+
 tools/hand_eye_calibrate.o: tools/hand_eye_calibrate.cpp.o
 .PHONY : tools/hand_eye_calibrate.o
 
@@ -996,6 +1581,102 @@ tools/nn_probe.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/nn_probe.dir/build.make CMakeFiles/nn_probe.dir/tools/nn_probe.cpp.s
 .PHONY : tools/nn_probe.cpp.s
 
+tools/replay_dataset.o: tools/replay_dataset.cpp.o
+.PHONY : tools/replay_dataset.o
+
+# target to build an object file
+tools/replay_dataset.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/tools/replay_dataset.cpp.o
+.PHONY : tools/replay_dataset.cpp.o
+
+tools/replay_dataset.i: tools/replay_dataset.cpp.i
+.PHONY : tools/replay_dataset.i
+
+# target to preprocess a source file
+tools/replay_dataset.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/tools/replay_dataset.cpp.i
+.PHONY : tools/replay_dataset.cpp.i
+
+tools/replay_dataset.s: tools/replay_dataset.cpp.s
+.PHONY : tools/replay_dataset.s
+
+# target to generate assembly for a file
+tools/replay_dataset.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/replay_dataset.dir/build.make CMakeFiles/replay_dataset.dir/tools/replay_dataset.cpp.s
+.PHONY : tools/replay_dataset.cpp.s
+
+tools/spin_det_dump.o: tools/spin_det_dump.cpp.o
+.PHONY : tools/spin_det_dump.o
+
+# target to build an object file
+tools/spin_det_dump.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_det_dump.dir/build.make CMakeFiles/spin_det_dump.dir/tools/spin_det_dump.cpp.o
+.PHONY : tools/spin_det_dump.cpp.o
+
+tools/spin_det_dump.i: tools/spin_det_dump.cpp.i
+.PHONY : tools/spin_det_dump.i
+
+# target to preprocess a source file
+tools/spin_det_dump.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_det_dump.dir/build.make CMakeFiles/spin_det_dump.dir/tools/spin_det_dump.cpp.i
+.PHONY : tools/spin_det_dump.cpp.i
+
+tools/spin_det_dump.s: tools/spin_det_dump.cpp.s
+.PHONY : tools/spin_det_dump.s
+
+# target to generate assembly for a file
+tools/spin_det_dump.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_det_dump.dir/build.make CMakeFiles/spin_det_dump.dir/tools/spin_det_dump.cpp.s
+.PHONY : tools/spin_det_dump.cpp.s
+
+tools/spin_fit_from_csv.o: tools/spin_fit_from_csv.cpp.o
+.PHONY : tools/spin_fit_from_csv.o
+
+# target to build an object file
+tools/spin_fit_from_csv.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_fit_from_csv.dir/build.make CMakeFiles/spin_fit_from_csv.dir/tools/spin_fit_from_csv.cpp.o
+.PHONY : tools/spin_fit_from_csv.cpp.o
+
+tools/spin_fit_from_csv.i: tools/spin_fit_from_csv.cpp.i
+.PHONY : tools/spin_fit_from_csv.i
+
+# target to preprocess a source file
+tools/spin_fit_from_csv.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_fit_from_csv.dir/build.make CMakeFiles/spin_fit_from_csv.dir/tools/spin_fit_from_csv.cpp.i
+.PHONY : tools/spin_fit_from_csv.cpp.i
+
+tools/spin_fit_from_csv.s: tools/spin_fit_from_csv.cpp.s
+.PHONY : tools/spin_fit_from_csv.s
+
+# target to generate assembly for a file
+tools/spin_fit_from_csv.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_fit_from_csv.dir/build.make CMakeFiles/spin_fit_from_csv.dir/tools/spin_fit_from_csv.cpp.s
+.PHONY : tools/spin_fit_from_csv.cpp.s
+
+tools/spin_video_demo.o: tools/spin_video_demo.cpp.o
+.PHONY : tools/spin_video_demo.o
+
+# target to build an object file
+tools/spin_video_demo.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_video_demo.dir/build.make CMakeFiles/spin_video_demo.dir/tools/spin_video_demo.cpp.o
+.PHONY : tools/spin_video_demo.cpp.o
+
+tools/spin_video_demo.i: tools/spin_video_demo.cpp.i
+.PHONY : tools/spin_video_demo.i
+
+# target to preprocess a source file
+tools/spin_video_demo.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_video_demo.dir/build.make CMakeFiles/spin_video_demo.dir/tools/spin_video_demo.cpp.i
+.PHONY : tools/spin_video_demo.cpp.i
+
+tools/spin_video_demo.s: tools/spin_video_demo.cpp.s
+.PHONY : tools/spin_video_demo.s
+
+# target to generate assembly for a file
+tools/spin_video_demo.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/spin_video_demo.dir/build.make CMakeFiles/spin_video_demo.dir/tools/spin_video_demo.cpp.s
+.PHONY : tools/spin_video_demo.cpp.s
+
 # Help Target
 help:
 	@echo "The following are some of the valid targets for this Makefile:"
@@ -1011,8 +1692,10 @@ help:
 	@echo "... test"
 	@echo "... aim_signal_filter_test"
 	@echo "... armor_ekf_test"
-	@echo "... armor_ekf_uv_test"
-	@echo "... auto_aim"
+	@echo "... auto_aim_core"
+	@echo "... auto_aim_local_fit"
+	@echo "... auto_aim_sim"
+	@echo "... auto_aim_spin_geometry"
 	@echo "... auto_buff"
 	@echo "... auto_buff_demo"
 	@echo "... buff_model_bench"
@@ -1023,17 +1706,27 @@ help:
 	@echo "... config_dump"
 	@echo "... detector_golden_test"
 	@echo "... gimbal_aimer_test"
+	@echo "... gimbal_command_frame_test"
 	@echo "... gimbal_controller_test"
 	@echo "... gimbal_link_test"
 	@echo "... gimbal_probe"
 	@echo "... gimbal_protocol_test"
+	@echo "... gimbal_sign_probe"
 	@echo "... hand_eye_calibrate"
 	@echo "... hsv_tuner"
+	@echo "... local_trajectory_fitter_test"
 	@echo "... nn_probe"
+	@echo "... pnp_yaw_refine_test"
+	@echo "... replay_dataset"
 	@echo "... rotation_rate_estimator_test"
 	@echo "... shoot_evaluator_test"
 	@echo "... shooter_test"
 	@echo "... sim_receiver"
+	@echo "... sim_receiver_pipeline_test"
+	@echo "... spin_det_dump"
+	@echo "... spin_fit_from_csv"
+	@echo "... spin_geometry_estimator_test"
+	@echo "... spin_video_demo"
 	@echo "... standard_clock_test"
 	@echo "... target_selector_test"
 	@echo "... io/gimbal/gimbal.o"
@@ -1048,6 +1741,51 @@ help:
 	@echo "... io/serial/serial_port.o"
 	@echo "... io/serial/serial_port.i"
 	@echo "... io/serial/serial_port.s"
+	@echo "... src/auto_aim/Kalman/tracker.o"
+	@echo "... src/auto_aim/Kalman/tracker.i"
+	@echo "... src/auto_aim/Kalman/tracker.s"
+	@echo "... src/auto_aim/Kalman/tracker_accessors.o"
+	@echo "... src/auto_aim/Kalman/tracker_accessors.i"
+	@echo "... src/auto_aim/Kalman/tracker_accessors.s"
+	@echo "... src/auto_aim/Kalman/tracker_association.o"
+	@echo "... src/auto_aim/Kalman/tracker_association.i"
+	@echo "... src/auto_aim/Kalman/tracker_association.s"
+	@echo "... src/auto_aim/Kalman/tracker_lifecycle.o"
+	@echo "... src/auto_aim/Kalman/tracker_lifecycle.i"
+	@echo "... src/auto_aim/Kalman/tracker_lifecycle.s"
+	@echo "... src/auto_aim/Kalman/tracker_localfit.o"
+	@echo "... src/auto_aim/Kalman/tracker_localfit.i"
+	@echo "... src/auto_aim/Kalman/tracker_localfit.s"
+	@echo "... src/auto_aim/Kalman/tracker_scale.o"
+	@echo "... src/auto_aim/Kalman/tracker_scale.i"
+	@echo "... src/auto_aim/Kalman/tracker_scale.s"
+	@echo "... src/auto_aim/Kalman/tracker_watchdog.o"
+	@echo "... src/auto_aim/Kalman/tracker_watchdog.i"
+	@echo "... src/auto_aim/Kalman/tracker_watchdog.s"
+	@echo "... src/auto_aim/control/aim_pipeline.o"
+	@echo "... src/auto_aim/control/aim_pipeline.i"
+	@echo "... src/auto_aim/control/aim_pipeline.s"
+	@echo "... src/auto_aim/control/aim_signal_filter.o"
+	@echo "... src/auto_aim/control/aim_signal_filter.i"
+	@echo "... src/auto_aim/control/aim_signal_filter.s"
+	@echo "... src/auto_aim/control/gimbal_aimer.o"
+	@echo "... src/auto_aim/control/gimbal_aimer.i"
+	@echo "... src/auto_aim/control/gimbal_aimer.s"
+	@echo "... src/auto_aim/control/gimbal_controller.o"
+	@echo "... src/auto_aim/control/gimbal_controller.i"
+	@echo "... src/auto_aim/control/gimbal_controller.s"
+	@echo "... src/auto_aim/control/shooter.o"
+	@echo "... src/auto_aim/control/shooter.i"
+	@echo "... src/auto_aim/control/shooter.s"
+	@echo "... src/auto_aim/control/target_selector.o"
+	@echo "... src/auto_aim/control/target_selector.i"
+	@echo "... src/auto_aim/control/target_selector.s"
+	@echo "... src/auto_aim/estimation/rotation_rate_estimator.o"
+	@echo "... src/auto_aim/estimation/rotation_rate_estimator.i"
+	@echo "... src/auto_aim/estimation/rotation_rate_estimator.s"
+	@echo "... src/auto_aim/estimation/spin_geometry_estimator.o"
+	@echo "... src/auto_aim/estimation/spin_geometry_estimator.i"
+	@echo "... src/auto_aim/estimation/spin_geometry_estimator.s"
 	@echo "... src/auto_aim/perception/armor_source.o"
 	@echo "... src/auto_aim/perception/armor_source.i"
 	@echo "... src/auto_aim/perception/armor_source.s"
@@ -1084,6 +1822,9 @@ help:
 	@echo "... tools/gimbal_probe.o"
 	@echo "... tools/gimbal_probe.i"
 	@echo "... tools/gimbal_probe.s"
+	@echo "... tools/gimbal_sign_probe.o"
+	@echo "... tools/gimbal_sign_probe.i"
+	@echo "... tools/gimbal_sign_probe.s"
 	@echo "... tools/hand_eye_calibrate.o"
 	@echo "... tools/hand_eye_calibrate.i"
 	@echo "... tools/hand_eye_calibrate.s"
@@ -1093,6 +1834,18 @@ help:
 	@echo "... tools/nn_probe.o"
 	@echo "... tools/nn_probe.i"
 	@echo "... tools/nn_probe.s"
+	@echo "... tools/replay_dataset.o"
+	@echo "... tools/replay_dataset.i"
+	@echo "... tools/replay_dataset.s"
+	@echo "... tools/spin_det_dump.o"
+	@echo "... tools/spin_det_dump.i"
+	@echo "... tools/spin_det_dump.s"
+	@echo "... tools/spin_fit_from_csv.o"
+	@echo "... tools/spin_fit_from_csv.i"
+	@echo "... tools/spin_fit_from_csv.s"
+	@echo "... tools/spin_video_demo.o"
+	@echo "... tools/spin_video_demo.i"
+	@echo "... tools/spin_video_demo.s"
 .PHONY : help
 
 

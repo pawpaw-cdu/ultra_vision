@@ -94,6 +94,39 @@ namespace auto_aim
         }
         Armor() = default;
     };
+
+    // ---------------------------------------------------------------------
+    // 局部拟合器（小陀螺 θ/ω + 慢变量 α/R）的数据契约。
+    // 见 docs/local_trajectory_fitter.md 与 experiments/local_fitter。
+    // ---------------------------------------------------------------------
+
+    /// @brief 一根灯条的上/下端点像素观测（相机系）。
+    ///        armor_id 用于多板联合（同一帧可给多块板）；bar_offset 是灯条在板面
+    ///        切向的偏移（米，左=+W/2、右=-W/2；提示词单灯条模型取 0）。
+    struct LightBarObservation
+    {
+        double timestamp = 0.0;
+        double u_top = 0.0, v_top = 0.0;
+        double u_bot = 0.0, v_bot = 0.0;
+        int armor_id = 0;
+        double bar_offset = 0.0;
+        double confidence = 1.0;
+    };
+
+    /// @brief 局部拟合器一窗输出。**相机系**（yaw 为绕竖直轴的底盘偏航）。
+    struct LocalFitResult
+    {
+        bool valid = false;
+        double timestamp = 0.0;         // 窗口末端时间（拟合历经的时间）
+        double center[3] = {0, 0, 0};   // 旋转中心（相机系，米）
+        double yaw = 0.0;               // 该时刻的 chassis yaw（rad）
+        double omega = 0.0;             // 角速度（rad/s）
+        double alpha = 0.0;             // 灯条安装倾角（rad，慢层）
+        double R = 0.20;                // 回转半径（m，慢层）
+        double reprojection_rmse_px = 0.0;  // 诊断用，不作为唯一有效性判据
+        double quality = 0.0;           // 0~1，越大越可信（用于缩放观测协方差）
+        int num_bars = 0;               // 参与拟合的灯条数
+    };
 }
 
 #endif

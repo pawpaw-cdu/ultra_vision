@@ -172,18 +172,88 @@ depend:
 .PHONY : depend
 
 # Convenience name for target.
-src/auto_aim/CMakeFiles/auto_aim.dir/rule:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/auto_aim/CMakeFiles/auto_aim.dir/rule
-.PHONY : src/auto_aim/CMakeFiles/auto_aim.dir/rule
+src/auto_aim/CMakeFiles/auto_aim_core.dir/rule:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/auto_aim/CMakeFiles/auto_aim_core.dir/rule
+.PHONY : src/auto_aim/CMakeFiles/auto_aim_core.dir/rule
 
 # Convenience name for target.
-auto_aim: src/auto_aim/CMakeFiles/auto_aim.dir/rule
-.PHONY : auto_aim
+auto_aim_core: src/auto_aim/CMakeFiles/auto_aim_core.dir/rule
+.PHONY : auto_aim_core
 
 # fast build rule for target.
-auto_aim/fast:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/build
-.PHONY : auto_aim/fast
+auto_aim_core/fast:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/build
+.PHONY : auto_aim_core/fast
+
+# Convenience name for target.
+src/auto_aim/CMakeFiles/auto_aim_sim.dir/rule:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/auto_aim/CMakeFiles/auto_aim_sim.dir/rule
+.PHONY : src/auto_aim/CMakeFiles/auto_aim_sim.dir/rule
+
+# Convenience name for target.
+auto_aim_sim: src/auto_aim/CMakeFiles/auto_aim_sim.dir/rule
+.PHONY : auto_aim_sim
+
+# fast build rule for target.
+auto_aim_sim/fast:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/build
+.PHONY : auto_aim_sim/fast
+
+# Convenience name for target.
+src/auto_aim/CMakeFiles/auto_aim_spin_geometry.dir/rule:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/auto_aim/CMakeFiles/auto_aim_spin_geometry.dir/rule
+.PHONY : src/auto_aim/CMakeFiles/auto_aim_spin_geometry.dir/rule
+
+# Convenience name for target.
+auto_aim_spin_geometry: src/auto_aim/CMakeFiles/auto_aim_spin_geometry.dir/rule
+.PHONY : auto_aim_spin_geometry
+
+# fast build rule for target.
+auto_aim_spin_geometry/fast:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_spin_geometry.dir/build.make src/auto_aim/CMakeFiles/auto_aim_spin_geometry.dir/build
+.PHONY : auto_aim_spin_geometry/fast
+
+# Convenience name for target.
+src/auto_aim/CMakeFiles/spin_geometry_estimator_test.dir/rule:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/auto_aim/CMakeFiles/spin_geometry_estimator_test.dir/rule
+.PHONY : src/auto_aim/CMakeFiles/spin_geometry_estimator_test.dir/rule
+
+# Convenience name for target.
+spin_geometry_estimator_test: src/auto_aim/CMakeFiles/spin_geometry_estimator_test.dir/rule
+.PHONY : spin_geometry_estimator_test
+
+# fast build rule for target.
+spin_geometry_estimator_test/fast:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/spin_geometry_estimator_test.dir/build.make src/auto_aim/CMakeFiles/spin_geometry_estimator_test.dir/build
+.PHONY : spin_geometry_estimator_test/fast
+
+# Convenience name for target.
+src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/rule:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/rule
+.PHONY : src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/rule
+
+# Convenience name for target.
+auto_aim_local_fit: src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/rule
+.PHONY : auto_aim_local_fit
+
+# fast build rule for target.
+auto_aim_local_fit/fast:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/build.make src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/build
+.PHONY : auto_aim_local_fit/fast
+
+# Convenience name for target.
+src/auto_aim/CMakeFiles/local_trajectory_fitter_test.dir/rule:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/auto_aim/CMakeFiles/local_trajectory_fitter_test.dir/rule
+.PHONY : src/auto_aim/CMakeFiles/local_trajectory_fitter_test.dir/rule
+
+# Convenience name for target.
+local_trajectory_fitter_test: src/auto_aim/CMakeFiles/local_trajectory_fitter_test.dir/rule
+.PHONY : local_trajectory_fitter_test
+
+# fast build rule for target.
+local_trajectory_fitter_test/fast:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/local_trajectory_fitter_test.dir/build.make src/auto_aim/CMakeFiles/local_trajectory_fitter_test.dir/build
+.PHONY : local_trajectory_fitter_test/fast
 
 # Convenience name for target.
 src/auto_aim/CMakeFiles/standard_clock_test.dir/rule:
@@ -214,18 +284,18 @@ shoot_evaluator_test/fast:
 .PHONY : shoot_evaluator_test/fast
 
 # Convenience name for target.
-src/auto_aim/CMakeFiles/armor_ekf_uv_test.dir/rule:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/auto_aim/CMakeFiles/armor_ekf_uv_test.dir/rule
-.PHONY : src/auto_aim/CMakeFiles/armor_ekf_uv_test.dir/rule
+src/auto_aim/CMakeFiles/gimbal_command_frame_test.dir/rule:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/auto_aim/CMakeFiles/gimbal_command_frame_test.dir/rule
+.PHONY : src/auto_aim/CMakeFiles/gimbal_command_frame_test.dir/rule
 
 # Convenience name for target.
-armor_ekf_uv_test: src/auto_aim/CMakeFiles/armor_ekf_uv_test.dir/rule
-.PHONY : armor_ekf_uv_test
+gimbal_command_frame_test: src/auto_aim/CMakeFiles/gimbal_command_frame_test.dir/rule
+.PHONY : gimbal_command_frame_test
 
 # fast build rule for target.
-armor_ekf_uv_test/fast:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_uv_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_uv_test.dir/build
-.PHONY : armor_ekf_uv_test/fast
+gimbal_command_frame_test/fast:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/gimbal_command_frame_test.dir/build.make src/auto_aim/CMakeFiles/gimbal_command_frame_test.dir/build
+.PHONY : gimbal_command_frame_test/fast
 
 # Convenience name for target.
 src/auto_aim/CMakeFiles/aim_signal_filter_test.dir/rule:
@@ -326,6 +396,20 @@ armor_ekf_test/fast:
 .PHONY : armor_ekf_test/fast
 
 # Convenience name for target.
+src/auto_aim/CMakeFiles/pnp_yaw_refine_test.dir/rule:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/auto_aim/CMakeFiles/pnp_yaw_refine_test.dir/rule
+.PHONY : src/auto_aim/CMakeFiles/pnp_yaw_refine_test.dir/rule
+
+# Convenience name for target.
+pnp_yaw_refine_test: src/auto_aim/CMakeFiles/pnp_yaw_refine_test.dir/rule
+.PHONY : pnp_yaw_refine_test
+
+# fast build rule for target.
+pnp_yaw_refine_test/fast:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/pnp_yaw_refine_test.dir/build.make src/auto_aim/CMakeFiles/pnp_yaw_refine_test.dir/build
+.PHONY : pnp_yaw_refine_test/fast
+
+# Convenience name for target.
 src/auto_aim/CMakeFiles/gimbal_protocol_test.dir/rule:
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/auto_aim/CMakeFiles/gimbal_protocol_test.dir/rule
 .PHONY : src/auto_aim/CMakeFiles/gimbal_protocol_test.dir/rule
@@ -367,12 +451,27 @@ detector_golden_test/fast:
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/detector_golden_test.dir/build.make src/auto_aim/CMakeFiles/detector_golden_test.dir/build
 .PHONY : detector_golden_test/fast
 
+# Convenience name for target.
+src/auto_aim/CMakeFiles/sim_receiver_pipeline_test.dir/rule:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/auto_aim/CMakeFiles/sim_receiver_pipeline_test.dir/rule
+.PHONY : src/auto_aim/CMakeFiles/sim_receiver_pipeline_test.dir/rule
+
+# Convenience name for target.
+sim_receiver_pipeline_test: src/auto_aim/CMakeFiles/sim_receiver_pipeline_test.dir/rule
+.PHONY : sim_receiver_pipeline_test
+
+# fast build rule for target.
+sim_receiver_pipeline_test/fast:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/sim_receiver_pipeline_test.dir/build.make src/auto_aim/CMakeFiles/sim_receiver_pipeline_test.dir/build
+.PHONY : sim_receiver_pipeline_test/fast
+
 Kalman/tracker.o: Kalman/tracker.cpp.o
 .PHONY : Kalman/tracker.o
 
 # target to build an object file
 Kalman/tracker.cpp.o:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/Kalman/tracker.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/Kalman/tracker.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/Kalman/tracker.cpp.o
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/Kalman/tracker.cpp.o
 .PHONY : Kalman/tracker.cpp.o
 
@@ -381,7 +480,8 @@ Kalman/tracker.i: Kalman/tracker.cpp.i
 
 # target to preprocess a source file
 Kalman/tracker.cpp.i:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/Kalman/tracker.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/Kalman/tracker.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/Kalman/tracker.cpp.i
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/Kalman/tracker.cpp.i
 .PHONY : Kalman/tracker.cpp.i
 
@@ -390,9 +490,190 @@ Kalman/tracker.s: Kalman/tracker.cpp.s
 
 # target to generate assembly for a file
 Kalman/tracker.cpp.s:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/Kalman/tracker.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/Kalman/tracker.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/Kalman/tracker.cpp.s
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/Kalman/tracker.cpp.s
 .PHONY : Kalman/tracker.cpp.s
+
+Kalman/tracker_accessors.o: Kalman/tracker_accessors.cpp.o
+.PHONY : Kalman/tracker_accessors.o
+
+# target to build an object file
+Kalman/tracker_accessors.cpp.o:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/Kalman/tracker_accessors.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/Kalman/tracker_accessors.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/Kalman/tracker_accessors.cpp.o
+.PHONY : Kalman/tracker_accessors.cpp.o
+
+Kalman/tracker_accessors.i: Kalman/tracker_accessors.cpp.i
+.PHONY : Kalman/tracker_accessors.i
+
+# target to preprocess a source file
+Kalman/tracker_accessors.cpp.i:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/Kalman/tracker_accessors.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/Kalman/tracker_accessors.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/Kalman/tracker_accessors.cpp.i
+.PHONY : Kalman/tracker_accessors.cpp.i
+
+Kalman/tracker_accessors.s: Kalman/tracker_accessors.cpp.s
+.PHONY : Kalman/tracker_accessors.s
+
+# target to generate assembly for a file
+Kalman/tracker_accessors.cpp.s:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/Kalman/tracker_accessors.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/Kalman/tracker_accessors.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/Kalman/tracker_accessors.cpp.s
+.PHONY : Kalman/tracker_accessors.cpp.s
+
+Kalman/tracker_association.o: Kalman/tracker_association.cpp.o
+.PHONY : Kalman/tracker_association.o
+
+# target to build an object file
+Kalman/tracker_association.cpp.o:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/Kalman/tracker_association.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/Kalman/tracker_association.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/Kalman/tracker_association.cpp.o
+.PHONY : Kalman/tracker_association.cpp.o
+
+Kalman/tracker_association.i: Kalman/tracker_association.cpp.i
+.PHONY : Kalman/tracker_association.i
+
+# target to preprocess a source file
+Kalman/tracker_association.cpp.i:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/Kalman/tracker_association.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/Kalman/tracker_association.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/Kalman/tracker_association.cpp.i
+.PHONY : Kalman/tracker_association.cpp.i
+
+Kalman/tracker_association.s: Kalman/tracker_association.cpp.s
+.PHONY : Kalman/tracker_association.s
+
+# target to generate assembly for a file
+Kalman/tracker_association.cpp.s:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/Kalman/tracker_association.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/Kalman/tracker_association.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/Kalman/tracker_association.cpp.s
+.PHONY : Kalman/tracker_association.cpp.s
+
+Kalman/tracker_lifecycle.o: Kalman/tracker_lifecycle.cpp.o
+.PHONY : Kalman/tracker_lifecycle.o
+
+# target to build an object file
+Kalman/tracker_lifecycle.cpp.o:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/Kalman/tracker_lifecycle.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/Kalman/tracker_lifecycle.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/Kalman/tracker_lifecycle.cpp.o
+.PHONY : Kalman/tracker_lifecycle.cpp.o
+
+Kalman/tracker_lifecycle.i: Kalman/tracker_lifecycle.cpp.i
+.PHONY : Kalman/tracker_lifecycle.i
+
+# target to preprocess a source file
+Kalman/tracker_lifecycle.cpp.i:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/Kalman/tracker_lifecycle.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/Kalman/tracker_lifecycle.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/Kalman/tracker_lifecycle.cpp.i
+.PHONY : Kalman/tracker_lifecycle.cpp.i
+
+Kalman/tracker_lifecycle.s: Kalman/tracker_lifecycle.cpp.s
+.PHONY : Kalman/tracker_lifecycle.s
+
+# target to generate assembly for a file
+Kalman/tracker_lifecycle.cpp.s:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/Kalman/tracker_lifecycle.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/Kalman/tracker_lifecycle.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/Kalman/tracker_lifecycle.cpp.s
+.PHONY : Kalman/tracker_lifecycle.cpp.s
+
+Kalman/tracker_localfit.o: Kalman/tracker_localfit.cpp.o
+.PHONY : Kalman/tracker_localfit.o
+
+# target to build an object file
+Kalman/tracker_localfit.cpp.o:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/Kalman/tracker_localfit.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/Kalman/tracker_localfit.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/Kalman/tracker_localfit.cpp.o
+.PHONY : Kalman/tracker_localfit.cpp.o
+
+Kalman/tracker_localfit.i: Kalman/tracker_localfit.cpp.i
+.PHONY : Kalman/tracker_localfit.i
+
+# target to preprocess a source file
+Kalman/tracker_localfit.cpp.i:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/Kalman/tracker_localfit.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/Kalman/tracker_localfit.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/Kalman/tracker_localfit.cpp.i
+.PHONY : Kalman/tracker_localfit.cpp.i
+
+Kalman/tracker_localfit.s: Kalman/tracker_localfit.cpp.s
+.PHONY : Kalman/tracker_localfit.s
+
+# target to generate assembly for a file
+Kalman/tracker_localfit.cpp.s:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/Kalman/tracker_localfit.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/Kalman/tracker_localfit.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/Kalman/tracker_localfit.cpp.s
+.PHONY : Kalman/tracker_localfit.cpp.s
+
+Kalman/tracker_scale.o: Kalman/tracker_scale.cpp.o
+.PHONY : Kalman/tracker_scale.o
+
+# target to build an object file
+Kalman/tracker_scale.cpp.o:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/Kalman/tracker_scale.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/Kalman/tracker_scale.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/Kalman/tracker_scale.cpp.o
+.PHONY : Kalman/tracker_scale.cpp.o
+
+Kalman/tracker_scale.i: Kalman/tracker_scale.cpp.i
+.PHONY : Kalman/tracker_scale.i
+
+# target to preprocess a source file
+Kalman/tracker_scale.cpp.i:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/Kalman/tracker_scale.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/Kalman/tracker_scale.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/Kalman/tracker_scale.cpp.i
+.PHONY : Kalman/tracker_scale.cpp.i
+
+Kalman/tracker_scale.s: Kalman/tracker_scale.cpp.s
+.PHONY : Kalman/tracker_scale.s
+
+# target to generate assembly for a file
+Kalman/tracker_scale.cpp.s:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/Kalman/tracker_scale.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/Kalman/tracker_scale.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/Kalman/tracker_scale.cpp.s
+.PHONY : Kalman/tracker_scale.cpp.s
+
+Kalman/tracker_watchdog.o: Kalman/tracker_watchdog.cpp.o
+.PHONY : Kalman/tracker_watchdog.o
+
+# target to build an object file
+Kalman/tracker_watchdog.cpp.o:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/Kalman/tracker_watchdog.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/Kalman/tracker_watchdog.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/Kalman/tracker_watchdog.cpp.o
+.PHONY : Kalman/tracker_watchdog.cpp.o
+
+Kalman/tracker_watchdog.i: Kalman/tracker_watchdog.cpp.i
+.PHONY : Kalman/tracker_watchdog.i
+
+# target to preprocess a source file
+Kalman/tracker_watchdog.cpp.i:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/Kalman/tracker_watchdog.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/Kalman/tracker_watchdog.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/Kalman/tracker_watchdog.cpp.i
+.PHONY : Kalman/tracker_watchdog.cpp.i
+
+Kalman/tracker_watchdog.s: Kalman/tracker_watchdog.cpp.s
+.PHONY : Kalman/tracker_watchdog.s
+
+# target to generate assembly for a file
+Kalman/tracker_watchdog.cpp.s:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/Kalman/tracker_watchdog.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/Kalman/tracker_watchdog.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/Kalman/tracker_watchdog.cpp.s
+.PHONY : Kalman/tracker_watchdog.cpp.s
 
 __/__/io/gimbal/gimbal.o: __/__/io/gimbal/gimbal.cpp.o
 .PHONY : __/__/io/gimbal/gimbal.o
@@ -496,12 +777,37 @@ __/__/io/serial/serial_port.cpp.s:
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/gimbal_link_test.dir/build.make src/auto_aim/CMakeFiles/gimbal_link_test.dir/__/__/io/serial/serial_port.cpp.s
 .PHONY : __/__/io/serial/serial_port.cpp.s
 
+app/sim_runner.o: app/sim_runner.cpp.o
+.PHONY : app/sim_runner.o
+
+# target to build an object file
+app/sim_runner.cpp.o:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/app/sim_runner.cpp.o
+.PHONY : app/sim_runner.cpp.o
+
+app/sim_runner.i: app/sim_runner.cpp.i
+.PHONY : app/sim_runner.i
+
+# target to preprocess a source file
+app/sim_runner.cpp.i:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/app/sim_runner.cpp.i
+.PHONY : app/sim_runner.cpp.i
+
+app/sim_runner.s: app/sim_runner.cpp.s
+.PHONY : app/sim_runner.s
+
+# target to generate assembly for a file
+app/sim_runner.cpp.s:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/app/sim_runner.cpp.s
+.PHONY : app/sim_runner.cpp.s
+
 control/aim_pipeline.o: control/aim_pipeline.cpp.o
 .PHONY : control/aim_pipeline.o
 
 # target to build an object file
 control/aim_pipeline.cpp.o:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/control/aim_pipeline.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/control/aim_pipeline.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/control/aim_pipeline.cpp.o
 .PHONY : control/aim_pipeline.cpp.o
 
 control/aim_pipeline.i: control/aim_pipeline.cpp.i
@@ -509,7 +815,8 @@ control/aim_pipeline.i: control/aim_pipeline.cpp.i
 
 # target to preprocess a source file
 control/aim_pipeline.cpp.i:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/control/aim_pipeline.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/control/aim_pipeline.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/control/aim_pipeline.cpp.i
 .PHONY : control/aim_pipeline.cpp.i
 
 control/aim_pipeline.s: control/aim_pipeline.cpp.s
@@ -517,7 +824,8 @@ control/aim_pipeline.s: control/aim_pipeline.cpp.s
 
 # target to generate assembly for a file
 control/aim_pipeline.cpp.s:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/control/aim_pipeline.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/control/aim_pipeline.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/control/aim_pipeline.cpp.s
 .PHONY : control/aim_pipeline.cpp.s
 
 control/aim_signal_filter.o: control/aim_signal_filter.cpp.o
@@ -525,7 +833,8 @@ control/aim_signal_filter.o: control/aim_signal_filter.cpp.o
 
 # target to build an object file
 control/aim_signal_filter.cpp.o:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/control/aim_signal_filter.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/control/aim_signal_filter.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/control/aim_signal_filter.cpp.o
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/aim_signal_filter_test.dir/build.make src/auto_aim/CMakeFiles/aim_signal_filter_test.dir/control/aim_signal_filter.cpp.o
 .PHONY : control/aim_signal_filter.cpp.o
 
@@ -534,7 +843,8 @@ control/aim_signal_filter.i: control/aim_signal_filter.cpp.i
 
 # target to preprocess a source file
 control/aim_signal_filter.cpp.i:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/control/aim_signal_filter.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/control/aim_signal_filter.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/control/aim_signal_filter.cpp.i
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/aim_signal_filter_test.dir/build.make src/auto_aim/CMakeFiles/aim_signal_filter_test.dir/control/aim_signal_filter.cpp.i
 .PHONY : control/aim_signal_filter.cpp.i
 
@@ -543,7 +853,8 @@ control/aim_signal_filter.s: control/aim_signal_filter.cpp.s
 
 # target to generate assembly for a file
 control/aim_signal_filter.cpp.s:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/control/aim_signal_filter.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/control/aim_signal_filter.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/control/aim_signal_filter.cpp.s
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/aim_signal_filter_test.dir/build.make src/auto_aim/CMakeFiles/aim_signal_filter_test.dir/control/aim_signal_filter.cpp.s
 .PHONY : control/aim_signal_filter.cpp.s
 
@@ -552,7 +863,8 @@ control/gimbal_aimer.o: control/gimbal_aimer.cpp.o
 
 # target to build an object file
 control/gimbal_aimer.cpp.o:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/control/gimbal_aimer.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/control/gimbal_aimer.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/control/gimbal_aimer.cpp.o
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/gimbal_aimer_test.dir/build.make src/auto_aim/CMakeFiles/gimbal_aimer_test.dir/control/gimbal_aimer.cpp.o
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/gimbal_controller_test.dir/build.make src/auto_aim/CMakeFiles/gimbal_controller_test.dir/control/gimbal_aimer.cpp.o
 .PHONY : control/gimbal_aimer.cpp.o
@@ -562,7 +874,8 @@ control/gimbal_aimer.i: control/gimbal_aimer.cpp.i
 
 # target to preprocess a source file
 control/gimbal_aimer.cpp.i:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/control/gimbal_aimer.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/control/gimbal_aimer.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/control/gimbal_aimer.cpp.i
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/gimbal_aimer_test.dir/build.make src/auto_aim/CMakeFiles/gimbal_aimer_test.dir/control/gimbal_aimer.cpp.i
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/gimbal_controller_test.dir/build.make src/auto_aim/CMakeFiles/gimbal_controller_test.dir/control/gimbal_aimer.cpp.i
 .PHONY : control/gimbal_aimer.cpp.i
@@ -572,7 +885,8 @@ control/gimbal_aimer.s: control/gimbal_aimer.cpp.s
 
 # target to generate assembly for a file
 control/gimbal_aimer.cpp.s:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/control/gimbal_aimer.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/control/gimbal_aimer.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/control/gimbal_aimer.cpp.s
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/gimbal_aimer_test.dir/build.make src/auto_aim/CMakeFiles/gimbal_aimer_test.dir/control/gimbal_aimer.cpp.s
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/gimbal_controller_test.dir/build.make src/auto_aim/CMakeFiles/gimbal_controller_test.dir/control/gimbal_aimer.cpp.s
 .PHONY : control/gimbal_aimer.cpp.s
@@ -582,7 +896,8 @@ control/gimbal_controller.o: control/gimbal_controller.cpp.o
 
 # target to build an object file
 control/gimbal_controller.cpp.o:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/control/gimbal_controller.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/control/gimbal_controller.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/control/gimbal_controller.cpp.o
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/gimbal_controller_test.dir/build.make src/auto_aim/CMakeFiles/gimbal_controller_test.dir/control/gimbal_controller.cpp.o
 .PHONY : control/gimbal_controller.cpp.o
 
@@ -591,7 +906,8 @@ control/gimbal_controller.i: control/gimbal_controller.cpp.i
 
 # target to preprocess a source file
 control/gimbal_controller.cpp.i:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/control/gimbal_controller.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/control/gimbal_controller.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/control/gimbal_controller.cpp.i
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/gimbal_controller_test.dir/build.make src/auto_aim/CMakeFiles/gimbal_controller_test.dir/control/gimbal_controller.cpp.i
 .PHONY : control/gimbal_controller.cpp.i
 
@@ -600,7 +916,8 @@ control/gimbal_controller.s: control/gimbal_controller.cpp.s
 
 # target to generate assembly for a file
 control/gimbal_controller.cpp.s:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/control/gimbal_controller.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/control/gimbal_controller.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/control/gimbal_controller.cpp.s
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/gimbal_controller_test.dir/build.make src/auto_aim/CMakeFiles/gimbal_controller_test.dir/control/gimbal_controller.cpp.s
 .PHONY : control/gimbal_controller.cpp.s
 
@@ -609,7 +926,8 @@ control/shooter.o: control/shooter.cpp.o
 
 # target to build an object file
 control/shooter.cpp.o:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/control/shooter.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/control/shooter.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/control/shooter.cpp.o
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/shooter_test.dir/build.make src/auto_aim/CMakeFiles/shooter_test.dir/control/shooter.cpp.o
 .PHONY : control/shooter.cpp.o
 
@@ -618,7 +936,8 @@ control/shooter.i: control/shooter.cpp.i
 
 # target to preprocess a source file
 control/shooter.cpp.i:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/control/shooter.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/control/shooter.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/control/shooter.cpp.i
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/shooter_test.dir/build.make src/auto_aim/CMakeFiles/shooter_test.dir/control/shooter.cpp.i
 .PHONY : control/shooter.cpp.i
 
@@ -627,7 +946,8 @@ control/shooter.s: control/shooter.cpp.s
 
 # target to generate assembly for a file
 control/shooter.cpp.s:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/control/shooter.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/control/shooter.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/control/shooter.cpp.s
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/shooter_test.dir/build.make src/auto_aim/CMakeFiles/shooter_test.dir/control/shooter.cpp.s
 .PHONY : control/shooter.cpp.s
 
@@ -636,7 +956,8 @@ control/target_selector.o: control/target_selector.cpp.o
 
 # target to build an object file
 control/target_selector.cpp.o:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/control/target_selector.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/control/target_selector.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/control/target_selector.cpp.o
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/target_selector_test.dir/build.make src/auto_aim/CMakeFiles/target_selector_test.dir/control/target_selector.cpp.o
 .PHONY : control/target_selector.cpp.o
 
@@ -645,7 +966,8 @@ control/target_selector.i: control/target_selector.cpp.i
 
 # target to preprocess a source file
 control/target_selector.cpp.i:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/control/target_selector.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/control/target_selector.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/control/target_selector.cpp.i
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/target_selector_test.dir/build.make src/auto_aim/CMakeFiles/target_selector_test.dir/control/target_selector.cpp.i
 .PHONY : control/target_selector.cpp.i
 
@@ -654,16 +976,42 @@ control/target_selector.s: control/target_selector.cpp.s
 
 # target to generate assembly for a file
 control/target_selector.cpp.s:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/control/target_selector.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/control/target_selector.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/control/target_selector.cpp.s
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/target_selector_test.dir/build.make src/auto_aim/CMakeFiles/target_selector_test.dir/control/target_selector.cpp.s
 .PHONY : control/target_selector.cpp.s
+
+estimation/local_trajectory_fitter.o: estimation/local_trajectory_fitter.cpp.o
+.PHONY : estimation/local_trajectory_fitter.o
+
+# target to build an object file
+estimation/local_trajectory_fitter.cpp.o:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/build.make src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/estimation/local_trajectory_fitter.cpp.o
+.PHONY : estimation/local_trajectory_fitter.cpp.o
+
+estimation/local_trajectory_fitter.i: estimation/local_trajectory_fitter.cpp.i
+.PHONY : estimation/local_trajectory_fitter.i
+
+# target to preprocess a source file
+estimation/local_trajectory_fitter.cpp.i:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/build.make src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/estimation/local_trajectory_fitter.cpp.i
+.PHONY : estimation/local_trajectory_fitter.cpp.i
+
+estimation/local_trajectory_fitter.s: estimation/local_trajectory_fitter.cpp.s
+.PHONY : estimation/local_trajectory_fitter.s
+
+# target to generate assembly for a file
+estimation/local_trajectory_fitter.cpp.s:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/build.make src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/estimation/local_trajectory_fitter.cpp.s
+.PHONY : estimation/local_trajectory_fitter.cpp.s
 
 estimation/rotation_rate_estimator.o: estimation/rotation_rate_estimator.cpp.o
 .PHONY : estimation/rotation_rate_estimator.o
 
 # target to build an object file
 estimation/rotation_rate_estimator.cpp.o:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/estimation/rotation_rate_estimator.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/estimation/rotation_rate_estimator.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/estimation/rotation_rate_estimator.cpp.o
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/rotation_rate_estimator_test.dir/build.make src/auto_aim/CMakeFiles/rotation_rate_estimator_test.dir/estimation/rotation_rate_estimator.cpp.o
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/estimation/rotation_rate_estimator.cpp.o
 .PHONY : estimation/rotation_rate_estimator.cpp.o
@@ -673,7 +1021,8 @@ estimation/rotation_rate_estimator.i: estimation/rotation_rate_estimator.cpp.i
 
 # target to preprocess a source file
 estimation/rotation_rate_estimator.cpp.i:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/estimation/rotation_rate_estimator.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/estimation/rotation_rate_estimator.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/estimation/rotation_rate_estimator.cpp.i
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/rotation_rate_estimator_test.dir/build.make src/auto_aim/CMakeFiles/rotation_rate_estimator_test.dir/estimation/rotation_rate_estimator.cpp.i
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/estimation/rotation_rate_estimator.cpp.i
 .PHONY : estimation/rotation_rate_estimator.cpp.i
@@ -683,17 +1032,42 @@ estimation/rotation_rate_estimator.s: estimation/rotation_rate_estimator.cpp.s
 
 # target to generate assembly for a file
 estimation/rotation_rate_estimator.cpp.s:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/estimation/rotation_rate_estimator.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/estimation/rotation_rate_estimator.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/estimation/rotation_rate_estimator.cpp.s
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/rotation_rate_estimator_test.dir/build.make src/auto_aim/CMakeFiles/rotation_rate_estimator_test.dir/estimation/rotation_rate_estimator.cpp.s
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/estimation/rotation_rate_estimator.cpp.s
 .PHONY : estimation/rotation_rate_estimator.cpp.s
+
+estimation/spin_geometry_estimator.o: estimation/spin_geometry_estimator.cpp.o
+.PHONY : estimation/spin_geometry_estimator.o
+
+# target to build an object file
+estimation/spin_geometry_estimator.cpp.o:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_spin_geometry.dir/build.make src/auto_aim/CMakeFiles/auto_aim_spin_geometry.dir/estimation/spin_geometry_estimator.cpp.o
+.PHONY : estimation/spin_geometry_estimator.cpp.o
+
+estimation/spin_geometry_estimator.i: estimation/spin_geometry_estimator.cpp.i
+.PHONY : estimation/spin_geometry_estimator.i
+
+# target to preprocess a source file
+estimation/spin_geometry_estimator.cpp.i:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_spin_geometry.dir/build.make src/auto_aim/CMakeFiles/auto_aim_spin_geometry.dir/estimation/spin_geometry_estimator.cpp.i
+.PHONY : estimation/spin_geometry_estimator.cpp.i
+
+estimation/spin_geometry_estimator.s: estimation/spin_geometry_estimator.cpp.s
+.PHONY : estimation/spin_geometry_estimator.s
+
+# target to generate assembly for a file
+estimation/spin_geometry_estimator.cpp.s:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_spin_geometry.dir/build.make src/auto_aim/CMakeFiles/auto_aim_spin_geometry.dir/estimation/spin_geometry_estimator.cpp.s
+.PHONY : estimation/spin_geometry_estimator.cpp.s
 
 node_sim.o: node_sim.cpp.o
 .PHONY : node_sim.o
 
 # target to build an object file
 node_sim.cpp.o:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/node_sim.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/node_sim.cpp.o
 .PHONY : node_sim.cpp.o
 
 node_sim.i: node_sim.cpp.i
@@ -701,7 +1075,7 @@ node_sim.i: node_sim.cpp.i
 
 # target to preprocess a source file
 node_sim.cpp.i:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/node_sim.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/node_sim.cpp.i
 .PHONY : node_sim.cpp.i
 
 node_sim.s: node_sim.cpp.s
@@ -709,7 +1083,7 @@ node_sim.s: node_sim.cpp.s
 
 # target to generate assembly for a file
 node_sim.cpp.s:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/node_sim.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/node_sim.cpp.s
 .PHONY : node_sim.cpp.s
 
 perception/armor_source.o: perception/armor_source.cpp.o
@@ -717,7 +1091,8 @@ perception/armor_source.o: perception/armor_source.cpp.o
 
 # target to build an object file
 perception/armor_source.cpp.o:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/perception/armor_source.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/perception/armor_source.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/perception/armor_source.cpp.o
 .PHONY : perception/armor_source.cpp.o
 
 perception/armor_source.i: perception/armor_source.cpp.i
@@ -725,7 +1100,8 @@ perception/armor_source.i: perception/armor_source.cpp.i
 
 # target to preprocess a source file
 perception/armor_source.cpp.i:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/perception/armor_source.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/perception/armor_source.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/perception/armor_source.cpp.i
 .PHONY : perception/armor_source.cpp.i
 
 perception/armor_source.s: perception/armor_source.cpp.s
@@ -733,7 +1109,8 @@ perception/armor_source.s: perception/armor_source.cpp.s
 
 # target to generate assembly for a file
 perception/armor_source.cpp.s:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/perception/armor_source.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/perception/armor_source.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/perception/armor_source.cpp.s
 .PHONY : perception/armor_source.cpp.s
 
 perception/async_detector.o: perception/async_detector.cpp.o
@@ -741,7 +1118,7 @@ perception/async_detector.o: perception/async_detector.cpp.o
 
 # target to build an object file
 perception/async_detector.cpp.o:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/perception/async_detector.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/perception/async_detector.cpp.o
 .PHONY : perception/async_detector.cpp.o
 
 perception/async_detector.i: perception/async_detector.cpp.i
@@ -749,7 +1126,7 @@ perception/async_detector.i: perception/async_detector.cpp.i
 
 # target to preprocess a source file
 perception/async_detector.cpp.i:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/perception/async_detector.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/perception/async_detector.cpp.i
 .PHONY : perception/async_detector.cpp.i
 
 perception/async_detector.s: perception/async_detector.cpp.s
@@ -757,7 +1134,7 @@ perception/async_detector.s: perception/async_detector.cpp.s
 
 # target to generate assembly for a file
 perception/async_detector.cpp.s:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/perception/async_detector.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/perception/async_detector.cpp.s
 .PHONY : perception/async_detector.cpp.s
 
 perception/detector.o: perception/detector.cpp.o
@@ -765,7 +1142,8 @@ perception/detector.o: perception/detector.cpp.o
 
 # target to build an object file
 perception/detector.cpp.o:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/perception/detector.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/perception/detector.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/perception/detector.cpp.o
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/detector_golden_test.dir/build.make src/auto_aim/CMakeFiles/detector_golden_test.dir/perception/detector.cpp.o
 .PHONY : perception/detector.cpp.o
 
@@ -774,7 +1152,8 @@ perception/detector.i: perception/detector.cpp.i
 
 # target to preprocess a source file
 perception/detector.cpp.i:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/perception/detector.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/perception/detector.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/perception/detector.cpp.i
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/detector_golden_test.dir/build.make src/auto_aim/CMakeFiles/detector_golden_test.dir/perception/detector.cpp.i
 .PHONY : perception/detector.cpp.i
 
@@ -783,7 +1162,8 @@ perception/detector.s: perception/detector.cpp.s
 
 # target to generate assembly for a file
 perception/detector.cpp.s:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/perception/detector.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/perception/detector.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/perception/detector.cpp.s
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/detector_golden_test.dir/build.make src/auto_aim/CMakeFiles/detector_golden_test.dir/perception/detector.cpp.s
 .PHONY : perception/detector.cpp.s
 
@@ -792,7 +1172,7 @@ perception/keypoint_refiner.o: perception/keypoint_refiner.cpp.o
 
 # target to build an object file
 perception/keypoint_refiner.cpp.o:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/perception/keypoint_refiner.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/perception/keypoint_refiner.cpp.o
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/detector_golden_test.dir/build.make src/auto_aim/CMakeFiles/detector_golden_test.dir/perception/keypoint_refiner.cpp.o
 .PHONY : perception/keypoint_refiner.cpp.o
 
@@ -801,7 +1181,7 @@ perception/keypoint_refiner.i: perception/keypoint_refiner.cpp.i
 
 # target to preprocess a source file
 perception/keypoint_refiner.cpp.i:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/perception/keypoint_refiner.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/perception/keypoint_refiner.cpp.i
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/detector_golden_test.dir/build.make src/auto_aim/CMakeFiles/detector_golden_test.dir/perception/keypoint_refiner.cpp.i
 .PHONY : perception/keypoint_refiner.cpp.i
 
@@ -810,7 +1190,7 @@ perception/keypoint_refiner.s: perception/keypoint_refiner.cpp.s
 
 # target to generate assembly for a file
 perception/keypoint_refiner.cpp.s:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/perception/keypoint_refiner.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/perception/keypoint_refiner.cpp.s
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/detector_golden_test.dir/build.make src/auto_aim/CMakeFiles/detector_golden_test.dir/perception/keypoint_refiner.cpp.s
 .PHONY : perception/keypoint_refiner.cpp.s
 
@@ -819,7 +1199,7 @@ perception/nn_detector.o: perception/nn_detector.cpp.o
 
 # target to build an object file
 perception/nn_detector.cpp.o:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/perception/nn_detector.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/perception/nn_detector.cpp.o
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/detector_golden_test.dir/build.make src/auto_aim/CMakeFiles/detector_golden_test.dir/perception/nn_detector.cpp.o
 .PHONY : perception/nn_detector.cpp.o
 
@@ -828,7 +1208,7 @@ perception/nn_detector.i: perception/nn_detector.cpp.i
 
 # target to preprocess a source file
 perception/nn_detector.cpp.i:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/perception/nn_detector.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/perception/nn_detector.cpp.i
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/detector_golden_test.dir/build.make src/auto_aim/CMakeFiles/detector_golden_test.dir/perception/nn_detector.cpp.i
 .PHONY : perception/nn_detector.cpp.i
 
@@ -837,7 +1217,7 @@ perception/nn_detector.s: perception/nn_detector.cpp.s
 
 # target to generate assembly for a file
 perception/nn_detector.cpp.s:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/perception/nn_detector.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/perception/nn_detector.cpp.s
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/detector_golden_test.dir/build.make src/auto_aim/CMakeFiles/detector_golden_test.dir/perception/nn_detector.cpp.s
 .PHONY : perception/nn_detector.cpp.s
 
@@ -846,8 +1226,10 @@ perception/pnp_solver.o: perception/pnp_solver.cpp.o
 
 # target to build an object file
 perception/pnp_solver.cpp.o:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/perception/pnp_solver.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/perception/pnp_solver.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/perception/pnp_solver.cpp.o
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/perception/pnp_solver.cpp.o
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/pnp_yaw_refine_test.dir/build.make src/auto_aim/CMakeFiles/pnp_yaw_refine_test.dir/perception/pnp_solver.cpp.o
 .PHONY : perception/pnp_solver.cpp.o
 
 perception/pnp_solver.i: perception/pnp_solver.cpp.i
@@ -855,8 +1237,10 @@ perception/pnp_solver.i: perception/pnp_solver.cpp.i
 
 # target to preprocess a source file
 perception/pnp_solver.cpp.i:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/perception/pnp_solver.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/perception/pnp_solver.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/perception/pnp_solver.cpp.i
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/perception/pnp_solver.cpp.i
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/pnp_yaw_refine_test.dir/build.make src/auto_aim/CMakeFiles/pnp_yaw_refine_test.dir/perception/pnp_solver.cpp.i
 .PHONY : perception/pnp_solver.cpp.i
 
 perception/pnp_solver.s: perception/pnp_solver.cpp.s
@@ -864,8 +1248,10 @@ perception/pnp_solver.s: perception/pnp_solver.cpp.s
 
 # target to generate assembly for a file
 perception/pnp_solver.cpp.s:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim.dir/build.make src/auto_aim/CMakeFiles/auto_aim.dir/perception/pnp_solver.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_core.dir/build.make src/auto_aim/CMakeFiles/auto_aim_core.dir/perception/pnp_solver.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_sim.dir/build.make src/auto_aim/CMakeFiles/auto_aim_sim.dir/perception/pnp_solver.cpp.s
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/perception/pnp_solver.cpp.s
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/pnp_yaw_refine_test.dir/build.make src/auto_aim/CMakeFiles/pnp_yaw_refine_test.dir/perception/pnp_solver.cpp.s
 .PHONY : perception/pnp_solver.cpp.s
 
 test/aim_signal_filter_test.o: test/aim_signal_filter_test.cpp.o
@@ -916,30 +1302,6 @@ test/armor_ekf_test.cpp.s:
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_test.dir/test/armor_ekf_test.cpp.s
 .PHONY : test/armor_ekf_test.cpp.s
 
-test/armor_ekf_uv_test.o: test/armor_ekf_uv_test.cpp.o
-.PHONY : test/armor_ekf_uv_test.o
-
-# target to build an object file
-test/armor_ekf_uv_test.cpp.o:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_uv_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_uv_test.dir/test/armor_ekf_uv_test.cpp.o
-.PHONY : test/armor_ekf_uv_test.cpp.o
-
-test/armor_ekf_uv_test.i: test/armor_ekf_uv_test.cpp.i
-.PHONY : test/armor_ekf_uv_test.i
-
-# target to preprocess a source file
-test/armor_ekf_uv_test.cpp.i:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_uv_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_uv_test.dir/test/armor_ekf_uv_test.cpp.i
-.PHONY : test/armor_ekf_uv_test.cpp.i
-
-test/armor_ekf_uv_test.s: test/armor_ekf_uv_test.cpp.s
-.PHONY : test/armor_ekf_uv_test.s
-
-# target to generate assembly for a file
-test/armor_ekf_uv_test.cpp.s:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/armor_ekf_uv_test.dir/build.make src/auto_aim/CMakeFiles/armor_ekf_uv_test.dir/test/armor_ekf_uv_test.cpp.s
-.PHONY : test/armor_ekf_uv_test.cpp.s
-
 test/detector_golden_test.o: test/detector_golden_test.cpp.o
 .PHONY : test/detector_golden_test.o
 
@@ -987,6 +1349,30 @@ test/gimbal_aimer_test.s: test/gimbal_aimer_test.cpp.s
 test/gimbal_aimer_test.cpp.s:
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/gimbal_aimer_test.dir/build.make src/auto_aim/CMakeFiles/gimbal_aimer_test.dir/test/gimbal_aimer_test.cpp.s
 .PHONY : test/gimbal_aimer_test.cpp.s
+
+test/gimbal_command_frame_test.o: test/gimbal_command_frame_test.cpp.o
+.PHONY : test/gimbal_command_frame_test.o
+
+# target to build an object file
+test/gimbal_command_frame_test.cpp.o:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/gimbal_command_frame_test.dir/build.make src/auto_aim/CMakeFiles/gimbal_command_frame_test.dir/test/gimbal_command_frame_test.cpp.o
+.PHONY : test/gimbal_command_frame_test.cpp.o
+
+test/gimbal_command_frame_test.i: test/gimbal_command_frame_test.cpp.i
+.PHONY : test/gimbal_command_frame_test.i
+
+# target to preprocess a source file
+test/gimbal_command_frame_test.cpp.i:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/gimbal_command_frame_test.dir/build.make src/auto_aim/CMakeFiles/gimbal_command_frame_test.dir/test/gimbal_command_frame_test.cpp.i
+.PHONY : test/gimbal_command_frame_test.cpp.i
+
+test/gimbal_command_frame_test.s: test/gimbal_command_frame_test.cpp.s
+.PHONY : test/gimbal_command_frame_test.s
+
+# target to generate assembly for a file
+test/gimbal_command_frame_test.cpp.s:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/gimbal_command_frame_test.dir/build.make src/auto_aim/CMakeFiles/gimbal_command_frame_test.dir/test/gimbal_command_frame_test.cpp.s
+.PHONY : test/gimbal_command_frame_test.cpp.s
 
 test/gimbal_controller_test.o: test/gimbal_controller_test.cpp.o
 .PHONY : test/gimbal_controller_test.o
@@ -1060,6 +1446,54 @@ test/gimbal_protocol_test.cpp.s:
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/gimbal_protocol_test.dir/build.make src/auto_aim/CMakeFiles/gimbal_protocol_test.dir/test/gimbal_protocol_test.cpp.s
 .PHONY : test/gimbal_protocol_test.cpp.s
 
+test/local_trajectory_fitter_test.o: test/local_trajectory_fitter_test.cpp.o
+.PHONY : test/local_trajectory_fitter_test.o
+
+# target to build an object file
+test/local_trajectory_fitter_test.cpp.o:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/local_trajectory_fitter_test.dir/build.make src/auto_aim/CMakeFiles/local_trajectory_fitter_test.dir/test/local_trajectory_fitter_test.cpp.o
+.PHONY : test/local_trajectory_fitter_test.cpp.o
+
+test/local_trajectory_fitter_test.i: test/local_trajectory_fitter_test.cpp.i
+.PHONY : test/local_trajectory_fitter_test.i
+
+# target to preprocess a source file
+test/local_trajectory_fitter_test.cpp.i:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/local_trajectory_fitter_test.dir/build.make src/auto_aim/CMakeFiles/local_trajectory_fitter_test.dir/test/local_trajectory_fitter_test.cpp.i
+.PHONY : test/local_trajectory_fitter_test.cpp.i
+
+test/local_trajectory_fitter_test.s: test/local_trajectory_fitter_test.cpp.s
+.PHONY : test/local_trajectory_fitter_test.s
+
+# target to generate assembly for a file
+test/local_trajectory_fitter_test.cpp.s:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/local_trajectory_fitter_test.dir/build.make src/auto_aim/CMakeFiles/local_trajectory_fitter_test.dir/test/local_trajectory_fitter_test.cpp.s
+.PHONY : test/local_trajectory_fitter_test.cpp.s
+
+test/pnp_yaw_refine_test.o: test/pnp_yaw_refine_test.cpp.o
+.PHONY : test/pnp_yaw_refine_test.o
+
+# target to build an object file
+test/pnp_yaw_refine_test.cpp.o:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/pnp_yaw_refine_test.dir/build.make src/auto_aim/CMakeFiles/pnp_yaw_refine_test.dir/test/pnp_yaw_refine_test.cpp.o
+.PHONY : test/pnp_yaw_refine_test.cpp.o
+
+test/pnp_yaw_refine_test.i: test/pnp_yaw_refine_test.cpp.i
+.PHONY : test/pnp_yaw_refine_test.i
+
+# target to preprocess a source file
+test/pnp_yaw_refine_test.cpp.i:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/pnp_yaw_refine_test.dir/build.make src/auto_aim/CMakeFiles/pnp_yaw_refine_test.dir/test/pnp_yaw_refine_test.cpp.i
+.PHONY : test/pnp_yaw_refine_test.cpp.i
+
+test/pnp_yaw_refine_test.s: test/pnp_yaw_refine_test.cpp.s
+.PHONY : test/pnp_yaw_refine_test.s
+
+# target to generate assembly for a file
+test/pnp_yaw_refine_test.cpp.s:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/pnp_yaw_refine_test.dir/build.make src/auto_aim/CMakeFiles/pnp_yaw_refine_test.dir/test/pnp_yaw_refine_test.cpp.s
+.PHONY : test/pnp_yaw_refine_test.cpp.s
+
 test/rotation_rate_estimator_test.o: test/rotation_rate_estimator_test.cpp.o
 .PHONY : test/rotation_rate_estimator_test.o
 
@@ -1132,6 +1566,54 @@ test/shooter_test.cpp.s:
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/shooter_test.dir/build.make src/auto_aim/CMakeFiles/shooter_test.dir/test/shooter_test.cpp.s
 .PHONY : test/shooter_test.cpp.s
 
+test/sim_receiver_pipeline_test.o: test/sim_receiver_pipeline_test.cpp.o
+.PHONY : test/sim_receiver_pipeline_test.o
+
+# target to build an object file
+test/sim_receiver_pipeline_test.cpp.o:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/sim_receiver_pipeline_test.dir/build.make src/auto_aim/CMakeFiles/sim_receiver_pipeline_test.dir/test/sim_receiver_pipeline_test.cpp.o
+.PHONY : test/sim_receiver_pipeline_test.cpp.o
+
+test/sim_receiver_pipeline_test.i: test/sim_receiver_pipeline_test.cpp.i
+.PHONY : test/sim_receiver_pipeline_test.i
+
+# target to preprocess a source file
+test/sim_receiver_pipeline_test.cpp.i:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/sim_receiver_pipeline_test.dir/build.make src/auto_aim/CMakeFiles/sim_receiver_pipeline_test.dir/test/sim_receiver_pipeline_test.cpp.i
+.PHONY : test/sim_receiver_pipeline_test.cpp.i
+
+test/sim_receiver_pipeline_test.s: test/sim_receiver_pipeline_test.cpp.s
+.PHONY : test/sim_receiver_pipeline_test.s
+
+# target to generate assembly for a file
+test/sim_receiver_pipeline_test.cpp.s:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/sim_receiver_pipeline_test.dir/build.make src/auto_aim/CMakeFiles/sim_receiver_pipeline_test.dir/test/sim_receiver_pipeline_test.cpp.s
+.PHONY : test/sim_receiver_pipeline_test.cpp.s
+
+test/spin_geometry_estimator_test.o: test/spin_geometry_estimator_test.cpp.o
+.PHONY : test/spin_geometry_estimator_test.o
+
+# target to build an object file
+test/spin_geometry_estimator_test.cpp.o:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/spin_geometry_estimator_test.dir/build.make src/auto_aim/CMakeFiles/spin_geometry_estimator_test.dir/test/spin_geometry_estimator_test.cpp.o
+.PHONY : test/spin_geometry_estimator_test.cpp.o
+
+test/spin_geometry_estimator_test.i: test/spin_geometry_estimator_test.cpp.i
+.PHONY : test/spin_geometry_estimator_test.i
+
+# target to preprocess a source file
+test/spin_geometry_estimator_test.cpp.i:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/spin_geometry_estimator_test.dir/build.make src/auto_aim/CMakeFiles/spin_geometry_estimator_test.dir/test/spin_geometry_estimator_test.cpp.i
+.PHONY : test/spin_geometry_estimator_test.cpp.i
+
+test/spin_geometry_estimator_test.s: test/spin_geometry_estimator_test.cpp.s
+.PHONY : test/spin_geometry_estimator_test.s
+
+# target to generate assembly for a file
+test/spin_geometry_estimator_test.cpp.s:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/spin_geometry_estimator_test.dir/build.make src/auto_aim/CMakeFiles/spin_geometry_estimator_test.dir/test/spin_geometry_estimator_test.cpp.s
+.PHONY : test/spin_geometry_estimator_test.cpp.s
+
 test/standard_clock_test.o: test/standard_clock_test.cpp.o
 .PHONY : test/standard_clock_test.o
 
@@ -1195,21 +1677,46 @@ help:
 	@echo "... test"
 	@echo "... aim_signal_filter_test"
 	@echo "... armor_ekf_test"
-	@echo "... armor_ekf_uv_test"
-	@echo "... auto_aim"
+	@echo "... auto_aim_core"
+	@echo "... auto_aim_local_fit"
+	@echo "... auto_aim_sim"
+	@echo "... auto_aim_spin_geometry"
 	@echo "... detector_golden_test"
 	@echo "... gimbal_aimer_test"
+	@echo "... gimbal_command_frame_test"
 	@echo "... gimbal_controller_test"
 	@echo "... gimbal_link_test"
 	@echo "... gimbal_protocol_test"
+	@echo "... local_trajectory_fitter_test"
+	@echo "... pnp_yaw_refine_test"
 	@echo "... rotation_rate_estimator_test"
 	@echo "... shoot_evaluator_test"
 	@echo "... shooter_test"
+	@echo "... sim_receiver_pipeline_test"
+	@echo "... spin_geometry_estimator_test"
 	@echo "... standard_clock_test"
 	@echo "... target_selector_test"
 	@echo "... Kalman/tracker.o"
 	@echo "... Kalman/tracker.i"
 	@echo "... Kalman/tracker.s"
+	@echo "... Kalman/tracker_accessors.o"
+	@echo "... Kalman/tracker_accessors.i"
+	@echo "... Kalman/tracker_accessors.s"
+	@echo "... Kalman/tracker_association.o"
+	@echo "... Kalman/tracker_association.i"
+	@echo "... Kalman/tracker_association.s"
+	@echo "... Kalman/tracker_lifecycle.o"
+	@echo "... Kalman/tracker_lifecycle.i"
+	@echo "... Kalman/tracker_lifecycle.s"
+	@echo "... Kalman/tracker_localfit.o"
+	@echo "... Kalman/tracker_localfit.i"
+	@echo "... Kalman/tracker_localfit.s"
+	@echo "... Kalman/tracker_scale.o"
+	@echo "... Kalman/tracker_scale.i"
+	@echo "... Kalman/tracker_scale.s"
+	@echo "... Kalman/tracker_watchdog.o"
+	@echo "... Kalman/tracker_watchdog.i"
+	@echo "... Kalman/tracker_watchdog.s"
 	@echo "... __/__/io/gimbal/gimbal.o"
 	@echo "... __/__/io/gimbal/gimbal.i"
 	@echo "... __/__/io/gimbal/gimbal.s"
@@ -1222,6 +1729,9 @@ help:
 	@echo "... __/__/io/serial/serial_port.o"
 	@echo "... __/__/io/serial/serial_port.i"
 	@echo "... __/__/io/serial/serial_port.s"
+	@echo "... app/sim_runner.o"
+	@echo "... app/sim_runner.i"
+	@echo "... app/sim_runner.s"
 	@echo "... control/aim_pipeline.o"
 	@echo "... control/aim_pipeline.i"
 	@echo "... control/aim_pipeline.s"
@@ -1240,9 +1750,15 @@ help:
 	@echo "... control/target_selector.o"
 	@echo "... control/target_selector.i"
 	@echo "... control/target_selector.s"
+	@echo "... estimation/local_trajectory_fitter.o"
+	@echo "... estimation/local_trajectory_fitter.i"
+	@echo "... estimation/local_trajectory_fitter.s"
 	@echo "... estimation/rotation_rate_estimator.o"
 	@echo "... estimation/rotation_rate_estimator.i"
 	@echo "... estimation/rotation_rate_estimator.s"
+	@echo "... estimation/spin_geometry_estimator.o"
+	@echo "... estimation/spin_geometry_estimator.i"
+	@echo "... estimation/spin_geometry_estimator.s"
 	@echo "... node_sim.o"
 	@echo "... node_sim.i"
 	@echo "... node_sim.s"
@@ -1270,15 +1786,15 @@ help:
 	@echo "... test/armor_ekf_test.o"
 	@echo "... test/armor_ekf_test.i"
 	@echo "... test/armor_ekf_test.s"
-	@echo "... test/armor_ekf_uv_test.o"
-	@echo "... test/armor_ekf_uv_test.i"
-	@echo "... test/armor_ekf_uv_test.s"
 	@echo "... test/detector_golden_test.o"
 	@echo "... test/detector_golden_test.i"
 	@echo "... test/detector_golden_test.s"
 	@echo "... test/gimbal_aimer_test.o"
 	@echo "... test/gimbal_aimer_test.i"
 	@echo "... test/gimbal_aimer_test.s"
+	@echo "... test/gimbal_command_frame_test.o"
+	@echo "... test/gimbal_command_frame_test.i"
+	@echo "... test/gimbal_command_frame_test.s"
 	@echo "... test/gimbal_controller_test.o"
 	@echo "... test/gimbal_controller_test.i"
 	@echo "... test/gimbal_controller_test.s"
@@ -1288,6 +1804,12 @@ help:
 	@echo "... test/gimbal_protocol_test.o"
 	@echo "... test/gimbal_protocol_test.i"
 	@echo "... test/gimbal_protocol_test.s"
+	@echo "... test/local_trajectory_fitter_test.o"
+	@echo "... test/local_trajectory_fitter_test.i"
+	@echo "... test/local_trajectory_fitter_test.s"
+	@echo "... test/pnp_yaw_refine_test.o"
+	@echo "... test/pnp_yaw_refine_test.i"
+	@echo "... test/pnp_yaw_refine_test.s"
 	@echo "... test/rotation_rate_estimator_test.o"
 	@echo "... test/rotation_rate_estimator_test.i"
 	@echo "... test/rotation_rate_estimator_test.s"
@@ -1297,6 +1819,12 @@ help:
 	@echo "... test/shooter_test.o"
 	@echo "... test/shooter_test.i"
 	@echo "... test/shooter_test.s"
+	@echo "... test/sim_receiver_pipeline_test.o"
+	@echo "... test/sim_receiver_pipeline_test.i"
+	@echo "... test/sim_receiver_pipeline_test.s"
+	@echo "... test/spin_geometry_estimator_test.o"
+	@echo "... test/spin_geometry_estimator_test.i"
+	@echo "... test/spin_geometry_estimator_test.s"
 	@echo "... test/standard_clock_test.o"
 	@echo "... test/standard_clock_test.i"
 	@echo "... test/standard_clock_test.s"

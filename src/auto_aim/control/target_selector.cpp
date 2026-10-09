@@ -1,4 +1,7 @@
 #include "target_selector.hpp"
+#include "control/selector_utils.hpp"
+
+using namespace auto_aim::selector_detail;
 
 #include <algorithm>
 #include <cmath>
@@ -6,85 +9,6 @@
 
 namespace auto_aim
 {
-    namespace
-    {
-        constexpr double kPi = 3.14159265358979323846;
-
-        bool isFinite(double value)
-        {
-            return std::isfinite(value);
-        }
-
-        int wrapPlateId(int plate_id)
-        {
-            return (plate_id % 4 + 4) % 4;
-        }
-
-        double angleForPlate(int plate_id)
-        {
-            return (1 - plate_id) * kPi / 2.0;
-        }
-
-        std::array<double, 3> predictPlatePosition(
-            const TargetEstimate& estimate,
-            int plate_id,
-            double time)
-        {
-            const double phase = estimate.yaw + estimate.omega * time + angleForPlate(plate_id);
-            return {
-                estimate.center[0] + estimate.velocity[0] * time +
-                    estimate.armor_radius * std::cos(phase),
-                estimate.center[1] + estimate.velocity[1] * time,
-                estimate.center[2] + estimate.velocity[2] * time +
-                    estimate.armor_radius * std::sin(phase)
-            };
-        }
-
-        std::array<double, 3> predictCenterPosition(
-            const TargetEstimate& estimate,
-            double time)
-        {
-            return {
-                estimate.center[0] + estimate.velocity[0] * time,
-                estimate.center[1] + estimate.velocity[1] * time,
-                estimate.center[2] + estimate.velocity[2] * time
-            };
-        }
-
-        double normalizeAngle(double angle)
-        {
-            return std::atan2(std::sin(angle), std::cos(angle));
-        }
-
-        double axisTravelTime(double error, double max_velocity, double max_acceleration)
-        {
-            error = std::abs(error);
-            if (error <= 1e-9 || max_velocity <= 1e-9 || max_acceleration <= 1e-9) {
-                return 0.0;
-            }
-
-            const double acceleration_time = max_velocity / max_acceleration;
-            const double acceleration_distance =
-                0.5 * max_acceleration * acceleration_time * acceleration_time;
-            if (error <= 2.0 * acceleration_distance) {
-                return 2.0 * std::sqrt(error / max_acceleration);
-            }
-            return error / max_velocity + acceleration_time;
-        }
-
-        double gimbalTravelTime(const TargetSelectorConfig& config,
-                                double current_yaw, double current_pitch,
-                                double target_yaw, double target_pitch)
-        {
-            const double yaw_time = axisTravelTime(
-                normalizeAngle(target_yaw - current_yaw),
-                config.yaw_velocity, config.yaw_acceleration);
-            const double pitch_time = axisTravelTime(
-                target_pitch - current_pitch,
-                config.pitch_velocity, config.pitch_acceleration);
-            return std::max(yaw_time, pitch_time);
-        }
-    }
 
     TargetSelector::TargetSelector(const TargetSelectorConfig& config)
         : config_(config)
@@ -166,28 +90,55 @@ namespace auto_aim
     }
 
     TargetDecision TargetSelector::select(
-        const TargetEstimate& estimate,
+        const TargetEstimate& estimate_in,
         double current_yaw,
         double current_pitch)
     {
         TargetDecision result;
         if (!config_.enabled) return result;
-        if (!isFinite(estimate.center[0]) || !isFinite(estimate.center[1]) ||
-            !isFinite(estimate.center[2]) || !isFinite(estimate.velocity[0]) ||
-            !isFinite(estimate.velocity[1]) || !isFinite(estimate.velocity[2]) ||
-            !isFinite(estimate.yaw) || !isFinite(estimate.omega) ||
-            !isFinite(estimate.armor_radius) || estimate.armor_radius <= 1e-6 ||
+        if (!isFinite(estimate_in.center[0]) || !isFinite(estimate_in.center[1]) ||
+            !isFinite(estimate_in.center[2]) || !isFinite(estimate_in.velocity[0]) ||
+            !isFinite(estimate_in.velocity[1]) || !isFinite(estimate_in.velocity[2]) ||
+            !isFinite(estimate_in.yaw) || !isFinite(estimate_in.omega) ||
+            !isFinite(estimate_in.armor_radius) || estimate_in.armor_radius <= 1e-6 ||
             !isFinite(current_yaw) || !isFinite(current_pitch)) {
             return result;
         }
 
         const double center_distance = std::sqrt(
-            estimate.center[0] * estimate.center[0] +
-            estimate.center[1] * estimate.center[1] +
-            estimate.center[2] * estimate.center[2]);
+            estimate_in.center[0] * estimate_in.center[0] +
+            estimate_in.center[1] * estimate_in.center[1] +
+            estimate_in.center[2] * estimate_in.center[2]);
         if (!isFinite(center_distance) || center_distance <= 1e-6) {
             return result;
         }
+
+        // ---- 静止靶闸门：静止时把速度/角速度按 0 处理 ----
+        // 见 TargetSelectorConfig::motion_gate_* 的实测数据：阈值按"噪声够不到、
+        // 真实运动够得着"取，进/出各一个阈值（滞回）避免在边界抖动。
+        TargetEstimate estimate_used = estimate_in;
+        if (config_.motion_gate_enabled) {
+            const double speed_h =
+                std::hypot(estimate_in.velocity[0], estimate_in.velocity[2]);
+            const double omega_abs = std::abs(estimate_in.omega);
+            if (!estimate_in.converged) {
+                // 还没收敛（刚入靶/刚重捕）：一律按静止处理，不给 ω 提前量。
+                still_ = true;
+            } else if (speed_h > config_.motion_gate_enter_speed ||
+                       omega_abs > config_.motion_gate_enter_omega) {
+                still_ = false;
+            } else if (speed_h < config_.motion_gate_exit_speed &&
+                       omega_abs < config_.motion_gate_exit_omega) {
+                still_ = true;
+            }   // 其余情况保持上一次判定（滞回带）
+            if (still_) {
+                estimate_used.velocity = {0.0, 0.0, 0.0};
+                estimate_used.omega = 0.0;
+            }
+        } else {
+            still_ = false;
+        }
+        const TargetEstimate& estimate = estimate_used;
 
         // The estimate is expressed at the time of the last detection, not now.
         // Carry its age into the lead so a slow asynchronous detector is
@@ -201,6 +152,56 @@ namespace auto_aim
             : config_.low_speed_latency;
         const double seed_time = latency + estimate_age +
             center_distance / config_.projectile_speed;
+
+        // ---- 守角档：|ω| 超过云台可达上限，追板必然失败 -----------------------
+        // 瞄"预测的底盘中心方位"：正对相机的近侧板与中心方位只差 asin(R/d)≈2~3°，
+        // 云台停住不动就能让每块板周期性扫过视轴，不再被板换甩飞。开火窗 = 预测
+        // 弹丸到达时刻，最近的板与守角的夹角在 spin_fire_tolerance 内。
+        if (config_.spin_hold_enabled &&
+            std::abs(estimate.omega) > config_.chase_omega_threshold) {
+            const std::array<double, 3> center_pred{{
+                estimate.center[0] + estimate.velocity[0] * seed_time,
+                estimate.center[1] + estimate.velocity[1] * seed_time,
+                estimate.center[2] + estimate.velocity[2] * seed_time}};
+            const double horizontal = std::hypot(center_pred[0], center_pred[2]);
+            if (horizontal > 1e-6 && center_pred[2] > 0.0) {
+                result.valid = true;
+                result.armor_id = -1;
+                result.aim_point = center_pred;
+                result.target_yaw = std::atan2(center_pred[0], center_pred[2]);
+                result.target_pitch = std::atan2(-center_pred[1], horizontal);
+                result.predicted_yaw = result.target_yaw;
+                result.distance = center_distance;
+                result.flight_time = center_distance / config_.projectile_speed;
+                result.lead_time = seed_time;
+                result.target_yaw_velocity = 0.0;
+                result.target_pitch_velocity = 0.0;
+
+                // 预测弹丸到达时刻，哪块板离守角最近（也就正对相机的那块）。
+                int nearest_plate = -1;
+                double nearest_delta = std::numeric_limits<double>::max();
+                for (int armor_id = 0; armor_id < 4; ++armor_id) {
+                    const std::array<double, 3> plate =
+                        predictPlatePosition(estimate, armor_id, seed_time);
+                    if (!isFinite(plate[0]) || !isFinite(plate[2]) || plate[2] <= 0.0) {
+                        continue;
+                    }
+                    const double bearing = std::atan2(plate[0], plate[2]);
+                    const double delta = std::abs(
+                        normalizeAngle(bearing - result.target_yaw));
+                    if (delta < nearest_delta) {
+                        nearest_delta = delta;
+                        nearest_plate = armor_id;
+                        result.armor_position = plate;
+                    }
+                }
+                result.armor_id = nearest_plate;
+                result.in_fire_window = nearest_plate >= 0 &&
+                    nearest_delta <= config_.spin_fire_tolerance;
+                lock_id_ = nearest_plate;
+                return result;
+            }
+        }
 
         struct Evaluated {
             TargetDecision decision;

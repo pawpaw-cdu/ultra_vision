@@ -10,7 +10,8 @@ find_package(Ceres REQUIRED)
 find_package(OpenCV QUIET)
 add_executable(rm_demo
   src/main.cpp src/simulator.cpp src/trajectory_fitter.cpp
-  src/slow_calib.cpp src/state_solver.cpp src/visualizer.cpp)
+  src/slow_calib.cpp src/state_solver.cpp src/visualizer.cpp
+  src/experiments_multi.cpp)
 target_include_directories(rm_demo PRIVATE include)
 target_link_libraries(rm_demo PRIVATE Eigen3::Eigen Ceres::ceres)
 if(OpenCV_FOUND)

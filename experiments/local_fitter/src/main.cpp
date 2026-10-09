@@ -1,4 +1,5 @@
 #include "simulator.h"
+#include "experiments.h"
 #include "trajectory_fitter.h"
 #include "slow_calib.h"
 #include "state_solver.h"
@@ -210,5 +211,7 @@ int main()
     }
 
     std::cout << "wrote data/summary.csv + data/sim.csv + data/results.png\n";
+
+    runMultiPlateExperiments();
     return 0;
 }

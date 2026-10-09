@@ -23,6 +23,10 @@ public:
     void overrideCommandEndpoint(uint16_t port);
     bool connect();
     bool connected() const;
+    // Frames the reader had to throw away because every decoder was still busy.
+    // Non-zero means the vision side is the limiter; the simulator is no longer
+    // being throttled by our decode (that was the old failure mode).
+    std::uint64_t droppedPackets() const;
     bool sendFireCommand();
     // Puts the simulator scene back into its startup state (camera pose, chassis
     // position and yaw, gimbal, small gyro). Used to make back-to-back test runs
@@ -33,7 +37,9 @@ public:
     // Returns an empty Mat when the stream is closed or a frame is invalid.
     cv::Mat getFrame(std::uint64_t* sequence = nullptr,
                      std::uint64_t* source_timestamp_us = nullptr,
-                     std::uint64_t* local_timestamp_us = nullptr);
+                     std::uint64_t* local_timestamp_us = nullptr,
+                     float* gimbal_yaw = nullptr,
+                     float* gimbal_pitch = nullptr);
 
 private:
     class Impl;

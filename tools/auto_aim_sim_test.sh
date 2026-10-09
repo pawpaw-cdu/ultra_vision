@@ -36,7 +36,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SIM_DIR="${SIM_DIR:-$REPO_ROOT/../simulator_system/simulator}"
 SIM_BIN="$SIM_DIR/target/release/daedalus"
-AIM_BIN="${AIM_BIN:-$REPO_ROOT/build_sim/auto_aim}"
+AIM_BIN="${AIM_BIN:-$REPO_ROOT/build_sim/auto_aim_sim}"
 
 seconds=30
 uv=0
@@ -51,6 +51,8 @@ pan_lead="6.0"
 gyro=0
 qpos=""
 sigma=""
+gyro_speed=""
+gimbal_mode="vision"
 out="/tmp/auto_aim_sim"
 build=1
 truth_override=""
@@ -68,6 +70,12 @@ while [[ $# -gt 0 ]]; do
     # `--gyro 1`：让靶车开小陀螺（仿真里 3 rad/s ≈ 172 deg/s，和实车小陀螺同量级）。
     # 这是"旋转靶"回归工况；改滤波器 Q 的时候必须跑它，别把旋转档调坏。
     --gyro) gyro="$2"; shift 2 ;;
+    # --gyro-speed 3.0：靶车小陀螺转速（rad/s）。默认 5.0（仿真器原值，≈286°/s）；
+    # 实车常态 1.5~3 rad/s，用它做"到底多快才开始不收敛"的受控对比。
+    --gyro-speed) gyro_speed="$2"; shift 2 ;;
+    # --gimbal-mode direct：仿真云台瞬时到位（保留真实姿态回传）。用于隔离
+    # "抖动来自云台模型"还是"来自决策层"：direct 不抖=模型问题；仍抖=决策层问题。
+    --gimbal-mode) gimbal_mode="$2"; shift 2 ;;
     --qpos) qpos="$2"; shift 2 ;;
     --compact) compact="$2"; shift 2 ;;
     --uv-height) uv_height="$2"; shift 2 ;;
@@ -160,8 +168,17 @@ else
     cd "$SIM_DIR"
     # 用仓库自带的 run_host.sh 启动（它先 cargo build 再 exec daedalus）；
     # 场景/相机位姿由 DAEDALUS_CAMERA_CONFIG 指向**本仓的相机预置**决定。
+    # 云台模型与实车对齐（2026-10-05）：限速跟随而不是瞬时到位。
+    # 速度 3.0 rad/s = 172°/s（= 下位机固定步长 0.003 rad/1ms）；pitch 软限位 [-0.49,+0.27]。
     DAEDALUS_RUNE_ONLY=0 \
     DAEDALUS_SMALL_GYRO="$gyro" \
+    DAEDALUS_SMALL_GYRO_SPEED="$gyro_speed" \
+    DAEDALUS_GIMBAL_MODE="$gimbal_mode" \
+    DAEDALUS_GIMBAL_YAW_FINE_RATE=3.0 \
+    DAEDALUS_GIMBAL_YAW_COARSE_RATE=3.0 \
+    DAEDALUS_GIMBAL_PITCH_RATE=3.0 \
+    DAEDALUS_GIMBAL_PITCH_MIN=-0.49 \
+    DAEDALUS_GIMBAL_PITCH_MAX=0.27 \
     DAEDALUS_CAMERA_CONFIG="$camera_config" \
     DAEDALUS_CSV_PATH="$run_dir/truth.csv" \
     DAEDALUS_CAPTURE_WIDTH=${capture%x*} \
@@ -210,6 +227,11 @@ PY
 
 (
   cd "$REPO_ROOT"
+  EXTRA_ENV=()
+  [[ -n "${ULTRA_VISION_DETECTIONS_CSV:-}" ]] && \
+    EXTRA_ENV+=("ULTRA_VISION_DETECTIONS_CSV=$ULTRA_VISION_DETECTIONS_CSV")
+  [[ -n "${ULTRA_VISION_DISABLE_CONTROL:-}" ]] && \
+    EXTRA_ENV+=("ULTRA_VISION_DISABLE_CONTROL=1")
   env \
     ULTRA_VISION_CONFIG_DIR="$run_dir/configs" \
     ULTRA_VISION_NO_DISPLAY=1 \
@@ -218,6 +240,7 @@ PY
     ULTRA_VISION_ESTIMATE_CSV="$run_dir/estimate.csv" \
     ULTRA_VISION_OBSERVATION_CSV="$run_dir/observation.csv" \
     ULTRA_VISION_SELECTOR_CSV="$run_dir/selector.csv" \
+    ${EXTRA_ENV[@]+"${EXTRA_ENV[@]}"} \
     "$AIM_BIN" > "$run_dir/vision.log" 2>&1 || true
 )
 
@@ -242,11 +265,21 @@ sleep 1
   echo "输出目录       : $run_dir"
   echo
   echo "--- 真值对比（truth_regression.py）"
+  # 板半径的期望值从**本次跑的配置**里读（configs/tracker.yaml 的 armor_radius）——
+  # 把它写死成 0.21 会在换机器人/改半径之后一直报假失败。
+  expected_radius="$(python3 - "$run_dir/configs/tracker.yaml" <<'PY'
+import re, sys
+text = open(sys.argv[1]).read()
+match = re.search(r"(?m)^\s*armor_radius:\s*([0-9.]+)", text)
+print(match.group(1) if match else "0.21")
+PY
+)"
   python3 "$REPO_ROOT/tools/truth_regression.py" \
       --truth "$run_dir/truth.csv" \
       --observation "$run_dir/observation.csv" \
       --estimate "$run_dir/estimate.csv" \
-      --selector "$run_dir/selector.csv" 2>&1 || true
+      --selector "$run_dir/selector.csv" \
+      --expected-radius "$expected_radius" 2>&1 || true
   echo
   echo "--- 发火/跟踪摘要（vision.log 尾部）"
   tail -n 12 "$run_dir/vision.log" || true
