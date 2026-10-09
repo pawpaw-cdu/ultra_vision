@@ -21,6 +21,13 @@ namespace rm
         double dt = 0.01;
         double pixel_noise_std = 0.5;
         bool enable_noise = true;
+        // 贴近实战的坏条件
+        double outlier_frac = 0.0;      // 外点帧比例
+        double outlier_px = 0.0;        // 外点幅值
+        double box_jitter_px = 0.0;     // 整块板共享的框抖动（相关误差）
+        double dropout_frac = 0.0;      // 随机丢帧
+        double timeline_jitter_std = 0.0; // 时间戳抖动（秒）
+        double gimbal_pitch_rate = 0.0; // 俯仰随时间变化率（rad/s，模拟时变）
         unsigned seed = 7;
     };
 

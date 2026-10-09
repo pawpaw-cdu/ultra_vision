@@ -58,6 +58,26 @@ namespace
         out << name << ',' << m.yaw_deg << ',' << m.omega_err << ',' << m.center_cm << ','
             << m.rmse_px << '\n';
     }
+
+    // 压测：真值(用 cfg) 与 拟合假设(alpha_fit/R_fit/L_fit/K_fit) 可以不一致。
+    void runStress(const char* name, const rm::SimulationConfig& cfg, const rm::FitConfig& fc,
+                   double alpha_fit, double R_fit, double L_fit, const rm::CameraIntrinsics& K_fit,
+                   std::ofstream& out)
+    {
+        const auto fr = rm::runSimulation(cfg, "");
+        if (fr.size() < 6) { std::cout << std::left << std::setw(30) << name << " (too few frames)\n"; return; }
+        std::vector<rm::LightBarObservation> obs = asObs(fr);
+        const rm::FitResult fit = rm::fitTrajectory(obs, K_fit, cfg.gimbal_pitch, alpha_fit, R_fit,
+                                                    L_fit, fc);
+        const Metrics m = evaluate(fr, fit);
+        std::cout << std::left << std::setw(30) << name
+                  << " yaw=" << std::setw(8) << m.yaw_deg
+                  << " omega_err=" << std::setw(8) << m.omega_err
+                  << " center_cm=" << std::setw(8) << m.center_cm
+                  << " rmse_px=" << std::setw(8) << m.rmse_px << "\n";
+        out << name << ',' << m.yaw_deg << ',' << m.omega_err << ',' << m.center_cm << ','
+            << m.rmse_px << '\n';
+    }
 }
 
 int main()
@@ -157,6 +177,38 @@ int main()
     }
 
     out.close();
+    // ---- 极端 / 模型失配压测 ----
+    {
+        std::ofstream s("data/stress.csv");
+        s << "case,yaw_deg,omega_err,center_cm,rmse_px\n";
+        std::cout << "\n=== stress / model-mismatch ===\n";
+        SimulationConfig c = base; c.num_frames = 40;
+        const CameraIntrinsics K0 = c.K;
+        runStress("sigma=2.0", [&]{ auto x=c; x.pixel_noise_std=2.0; return x; }(), fc, a15, 0.20, 0.10, K0, s);
+        runStress("sigma=4.0", [&]{ auto x=c; x.pixel_noise_std=4.0; return x; }(), fc, a15, 0.20, 0.10, K0, s);
+        runStress("sigma=8.0", [&]{ auto x=c; x.pixel_noise_std=8.0; return x; }(), fc, a15, 0.20, 0.10, K0, s);
+        runStress("outliers 10%@20px", [&]{ auto x=c; x.pixel_noise_std=1.0; x.outlier_frac=0.10; x.outlier_px=20; return x; }(), fc, a15, 0.20, 0.10, K0, s);
+        runStress("box_jitter 5px", [&]{ auto x=c; x.pixel_noise_std=1.0; x.box_jitter_px=5.0; return x; }(), fc, a15, 0.20, 0.10, K0, s);
+        runStress("dropout 40%", [&]{ auto x=c; x.pixel_noise_std=1.0; x.dropout_frac=0.40; return x; }(), fc, a15, 0.20, 0.10, K0, s);
+        runStress("timeline jitter 5ms", [&]{ auto x=c; x.pixel_noise_std=1.0; x.timeline_jitter_std=0.005; return x; }(), fc, a15, 0.20, 0.10, K0, s);
+        runStress("pitch rate 0.5rad/s", [&]{ auto x=c; x.pixel_noise_std=1.0; x.gimbal_pitch_rate=0.5; return x; }(), fc, a15, 0.20, 0.10, K0, s);
+        runStress("MISMATCH true_a=20 fit15", [&]{ auto x=c; x.pitch_install=20*M_PI/180; x.pixel_noise_std=1.0; return x; }(), fc, a15, 0.20, 0.10, K0, s);
+        runStress("MISMATCH true_R=0.26 fit.20", [&]{ auto x=c; x.radius=0.26; x.pixel_noise_std=1.0; return x; }(), fc, a15, 0.20, 0.10, K0, s);
+        runStress("MISMATCH true_L=0.14 fit.10", [&]{ auto x=c; x.lightbar_len=0.14; x.pixel_noise_std=1.0; return x; }(), fc, a15, 0.20, 0.10, K0, s);
+        runStress("MISMATCH fx 760 vs 800", [&]{ auto x=c; x.K.fx=760; x.K.fy=760; x.pixel_noise_std=1.0; return x; }(), fc, a15, 0.20, 0.10, K0, s);
+        runStress("extreme Cz=1.0", [&]{ auto x=c; x.center_cam=Vec3(0,0,1.0); x.pixel_noise_std=1.0; return x; }(), fc, a15, 0.20, 0.10, K0, s);
+        runStress("extreme Cz=8.0", [&]{ auto x=c; x.center_cam=Vec3(0,0,8.0); x.pixel_noise_std=1.0; return x; }(), fc, a15, 0.20, 0.10, K0, s);
+        runStress("extreme w=0.5", [&]{ auto x=c; x.omega0=0.5; x.pixel_noise_std=1.0; return x; }(), fc, a15, 0.20, 0.10, K0, s);
+        runStress("extreme w=10", [&]{ auto x=c; x.omega0=10.0; x.pixel_noise_std=1.0; return x; }(), fc, a15, 0.20, 0.10, K0, s);
+        // 组合最坏：高噪 + 外点 + 框抖动 + 丢帧 + α/R 失配
+        runStress("WORST (combined)", [&]{ auto x=c;
+            x.pixel_noise_std=3.0; x.outlier_frac=0.08; x.outlier_px=15.0;
+            x.box_jitter_px=4.0; x.dropout_frac=0.30;
+            x.pitch_install=18*M_PI/180; x.radius=0.23; return x; }(),
+            fc, a15, 0.20, 0.10, K0, s);
+        s.close();
+    }
+
     std::cout << "wrote data/summary.csv + data/sim.csv + data/results.png\n";
     return 0;
 }
