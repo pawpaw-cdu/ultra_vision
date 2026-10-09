@@ -52,11 +52,12 @@ int main(int argc, char** argv)
         const int plate = (int)v[i_plate];
         auto_aim::SpinBarObservation a, b;
         a.t = time_s; a.plate = plate; a.side = +1;
-        a.u_top = v[i_u0]; a.v_top = v[i_v0];
-        a.u_bot = v[i_u1]; a.v_bot = v[i_v1];
+        // observation.csv 的顺序 = Armor::Points_2D = {left.bottom, left.top, right.top, right.bottom}
+        a.u_bot = v[i_u0]; a.v_bot = v[i_v0];   // left.bottom
+        a.u_top = v[i_u1]; a.v_top = v[i_v1];   // left.top
         b.t = time_s; b.plate = plate; b.side = -1;
-        b.u_top = v[i_u2]; b.v_top = v[i_v2];
-        b.u_bot = v[i_u3]; b.v_bot = v[i_v3];
+        b.u_top = v[i_u2]; b.v_top = v[i_v2];   // right.top
+        b.u_bot = v[i_u3]; b.v_bot = v[i_v3];   // right.bottom
         obs.push_back(a); obs.push_back(b);
     }
     std::cout << "bars=" << obs.size() << "\n";
