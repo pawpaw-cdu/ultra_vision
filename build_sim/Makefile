@@ -432,6 +432,19 @@ spin_geometry_estimator_test/fast:
 .PHONY : spin_geometry_estimator_test/fast
 
 #=============================================================================
+# Target rules for targets named spin_geom_check
+
+# Build rule for target.
+spin_geom_check: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 spin_geom_check
+.PHONY : spin_geom_check
+
+# fast build rule for target.
+spin_geom_check/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/spin_geom_check.dir/build.make src/auto_aim/CMakeFiles/spin_geom_check.dir/build
+.PHONY : spin_geom_check/fast
+
+#=============================================================================
 # Target rules for targets named auto_aim_local_fit
 
 # Build rule for target.
@@ -1725,6 +1738,7 @@ help:
 	@echo "... sim_receiver_pipeline_test"
 	@echo "... spin_det_dump"
 	@echo "... spin_fit_from_csv"
+	@echo "... spin_geom_check"
 	@echo "... spin_geometry_estimator_test"
 	@echo "... spin_video_demo"
 	@echo "... standard_clock_test"

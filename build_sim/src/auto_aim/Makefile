@@ -228,6 +228,20 @@ spin_geometry_estimator_test/fast:
 .PHONY : spin_geometry_estimator_test/fast
 
 # Convenience name for target.
+src/auto_aim/CMakeFiles/spin_geom_check.dir/rule:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/auto_aim/CMakeFiles/spin_geom_check.dir/rule
+.PHONY : src/auto_aim/CMakeFiles/spin_geom_check.dir/rule
+
+# Convenience name for target.
+spin_geom_check: src/auto_aim/CMakeFiles/spin_geom_check.dir/rule
+.PHONY : spin_geom_check
+
+# fast build rule for target.
+spin_geom_check/fast:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/spin_geom_check.dir/build.make src/auto_aim/CMakeFiles/spin_geom_check.dir/build
+.PHONY : spin_geom_check/fast
+
+# Convenience name for target.
 src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/rule:
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/rule
 .PHONY : src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/rule
@@ -776,6 +790,30 @@ __/__/io/serial/serial_port.s: __/__/io/serial/serial_port.cpp.s
 __/__/io/serial/serial_port.cpp.s:
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/gimbal_link_test.dir/build.make src/auto_aim/CMakeFiles/gimbal_link_test.dir/__/__/io/serial/serial_port.cpp.s
 .PHONY : __/__/io/serial/serial_port.cpp.s
+
+__/__/tools/spin_geom_check.o: __/__/tools/spin_geom_check.cpp.o
+.PHONY : __/__/tools/spin_geom_check.o
+
+# target to build an object file
+__/__/tools/spin_geom_check.cpp.o:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/spin_geom_check.dir/build.make src/auto_aim/CMakeFiles/spin_geom_check.dir/__/__/tools/spin_geom_check.cpp.o
+.PHONY : __/__/tools/spin_geom_check.cpp.o
+
+__/__/tools/spin_geom_check.i: __/__/tools/spin_geom_check.cpp.i
+.PHONY : __/__/tools/spin_geom_check.i
+
+# target to preprocess a source file
+__/__/tools/spin_geom_check.cpp.i:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/spin_geom_check.dir/build.make src/auto_aim/CMakeFiles/spin_geom_check.dir/__/__/tools/spin_geom_check.cpp.i
+.PHONY : __/__/tools/spin_geom_check.cpp.i
+
+__/__/tools/spin_geom_check.s: __/__/tools/spin_geom_check.cpp.s
+.PHONY : __/__/tools/spin_geom_check.s
+
+# target to generate assembly for a file
+__/__/tools/spin_geom_check.cpp.s:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/spin_geom_check.dir/build.make src/auto_aim/CMakeFiles/spin_geom_check.dir/__/__/tools/spin_geom_check.cpp.s
+.PHONY : __/__/tools/spin_geom_check.cpp.s
 
 app/sim_runner.o: app/sim_runner.cpp.o
 .PHONY : app/sim_runner.o
@@ -1693,6 +1731,7 @@ help:
 	@echo "... shoot_evaluator_test"
 	@echo "... shooter_test"
 	@echo "... sim_receiver_pipeline_test"
+	@echo "... spin_geom_check"
 	@echo "... spin_geometry_estimator_test"
 	@echo "... standard_clock_test"
 	@echo "... target_selector_test"
@@ -1729,6 +1768,9 @@ help:
 	@echo "... __/__/io/serial/serial_port.o"
 	@echo "... __/__/io/serial/serial_port.i"
 	@echo "... __/__/io/serial/serial_port.s"
+	@echo "... __/__/tools/spin_geom_check.o"
+	@echo "... __/__/tools/spin_geom_check.i"
+	@echo "... __/__/tools/spin_geom_check.s"
 	@echo "... app/sim_runner.o"
 	@echo "... app/sim_runner.i"
 	@echo "... app/sim_runner.s"
