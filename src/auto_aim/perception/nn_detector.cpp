@@ -12,6 +12,8 @@ using namespace auto_aim::nn_detail;
 #include <vector>
 
 #include <openvino/openvino.hpp>
+#include <cstdlib>
+#include <random>
 
 namespace auto_aim
 {
@@ -378,6 +380,19 @@ namespace auto_aim
     std::vector<Armor> NnArmorDetector::toArmors(
         const std::vector<NnDetection>& detections)
     {
+        // 角点噪声注入（诊断 / A-B 用）：模拟真机的检测器角点精度。
+        // ULTRA_VISION_CORNER_NOISE_PX=<px> 时对四角加高斯噪声（默认 0 = 关）。
+        static const double noise_px = [] {
+            const char* v = std::getenv("ULTRA_VISION_CORNER_NOISE_PX");
+            return v ? std::atof(v) : 0.0;
+        }();
+        static thread_local std::mt19937 noise_rng{1234567};
+        auto jitter = [](const cv::Point2f& p) {
+            if (noise_px <= 0.0) return p;
+            std::normal_distribution<double> nd(0.0, noise_px);
+            return cv::Point2f(p.x + static_cast<float>(nd(noise_rng)),
+                               p.y + static_cast<float>(nd(noise_rng)));
+        };
         std::vector<Armor> armors;
         for (const NnDetection& detection : detections) {
             Armor armor;
@@ -386,10 +401,10 @@ namespace auto_aim
             armor.solve_result = false;
             // Reuse the classical corner slots so solveArmorPnP() is unchanged:
             // it reads left.bottom, left.top, right.top, right.bottom.
-            armor.left.top = detection.keypoints[0];
-            armor.right.top = detection.keypoints[1];
-            armor.right.bottom = detection.keypoints[2];
-            armor.left.bottom = detection.keypoints[3];
+            armor.left.top = jitter(detection.keypoints[0]);
+            armor.right.top = jitter(detection.keypoints[1]);
+            armor.right.bottom = jitter(detection.keypoints[2]);
+            armor.left.bottom = jitter(detection.keypoints[3]);
             armor.left.center = 0.5f * (armor.left.top + armor.left.bottom);
             armor.right.center = 0.5f * (armor.right.top + armor.right.bottom);
             armor.left.color = detection.color == NnColor::red ? 1 : 0;

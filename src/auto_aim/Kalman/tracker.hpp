@@ -322,7 +322,10 @@ namespace auto_aim
         void setLocalFitter(LocalFitterCallback fn);
         /// @brief 把一块装甲板的两根灯条端点推入拟合缓冲（每帧调用）。
         ///        timestamp 用**曝光时刻**（观测时间），保证 θ(t) 的时间基正确。
-        void pushArmorLightBars(const Armor& armor, double timestamp);
+        ///        armor_id 必须是**板号 0..3**（不是网络类别 id）——用 plateIdFor() 取。
+        void pushArmorLightBars(const Armor& armor, double timestamp, int armor_id);
+        /// @brief 由几何把一块观测装甲板映射到板号 0..3（-1 = 不确定）。
+        int plateIdFor(const Armor& armor) const { return selectPlateId(armor); }
         /// @brief 同步跑一次拟合（把当前缓冲喂给回调）；返回是否产出有效结果。
         bool runLocalFitNow();
         /// @brief 启动/停止内部异步拟合线程（低频）。

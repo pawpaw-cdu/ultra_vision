@@ -32,9 +32,10 @@ namespace auto_aim
         stopLocalFitWorker();
     }
 
-    void Tracker::pushArmorLightBars(const Armor& armor, double timestamp)
+    void Tracker::pushArmorLightBars(const Armor& armor, double timestamp, int armor_id)
     {
         if (!cfg_.local_fit.enabled) return;
+        if (armor_id < 0 || armor_id > 3) return;
 
         std::lock_guard<std::mutex> lock(local_fit_mutex_);
         const double t = timestamp;
@@ -44,7 +45,7 @@ namespace auto_aim
             o.timestamp = t;
             o.u_top = bar.top.x;    o.v_top = bar.top.y;
             o.u_bot = bar.bottom.x; o.v_bot = bar.bottom.y;
-            o.armor_id = armor.number;
+            o.armor_id = armor_id;
             o.bar_offset = offset;
             o.confidence = 1.0;
             local_fit_buffer_.push_back(o);

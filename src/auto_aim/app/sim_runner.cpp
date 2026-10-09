@@ -214,7 +214,15 @@ namespace auto_aim
                 pipeline_->tracker().setLocalFitter(
                     [fitter](const std::vector<auto_aim::LightBarObservation>& obs,
                              auto_aim::LocalFitResult& out) {
-                        return fitter->fit(obs, 15.0 * M_PI / 180.0, 0.20, out);
+                        const bool ok = fitter->fit(obs, 15.0 * M_PI / 180.0, 0.20, out);
+                        static int dbg = 0;
+                        if (std::getenv("ULTRA_VISION_LOCAL_FIT_DBG") && ++dbg % 40 == 0) {
+                            std::cerr << "[local_fit] ok=" << ok << " rmse="
+                                      << out.reprojection_rmse_px << " yaw="
+                                      << out.yaw * 180.0 / M_PI << " w=" << out.omega
+                                      << " nbars=" << obs.size() << std::endl;
+                        }
+                        return ok;
                     });
                 pipeline_->tracker().startLocalFitWorker();
                 std::cout << "[local_fit] enabled (P2 A/B)" << std::endl;
@@ -540,7 +548,20 @@ namespace auto_aim
             //（每帧省掉一次 Armor 列表（含嵌套 vector/cv::Mat 头）的深拷贝）。
             // 局部拟合器：把本帧灯条端点推入缓冲（内部按 cfg.local_fit.enabled 早退）。
             for (const auto& a : source_result_.armors) {
-                tracker.pushArmorLightBars(a, observation_time);
+                tracker.pushArmorLightBars(a, observation_time, tracker.plateIdFor(a));
+            }
+            if (std::getenv("ULTRA_VISION_LOCAL_FIT_DBG") && tracker.getState() != auto_aim::TrackerState::LOST) {
+                static int dbg2 = 0;
+                if (++dbg2 % 20 == 0 && !source_result_.armors.empty()) {
+                    const auto& a = source_result_.armors.front();
+                    std::cerr << "[gimbal] yaw=" << frame_gimbal_yaw_ * 180.0 / CV_PI
+                              << " pitch=" << frame_gimbal_pitch_ * 180.0 / CV_PI
+                              << " | armor#" << a.number
+                              << " Lt(" << a.left.top.x << "," << a.left.top.y << ") Lb("
+                              << a.left.bottom.x << "," << a.left.bottom.y << ") Rt("
+                              << a.right.top.x << "," << a.right.top.y << ") Rb("
+                              << a.right.bottom.x << "," << a.right.bottom.y << ")" << std::endl;
+                }
             }
             frame.armors = std::move(source_result_.armors);
             const auto outcome = pipeline_->update(frame);

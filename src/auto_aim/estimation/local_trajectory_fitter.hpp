@@ -63,7 +63,8 @@ namespace auto_aim
             double drift[3] = {0, 0, 0};
             double t0 = 0.0;
             double rmse_px = 0.0;
-            double yawAt(double t) const { return theta0 + omega * t + 0.5 * beta * t * t; }
+            // 相位用**相对时间** (t - t0)：绝对时间戳（仿真/真机的 µs 纪元）会让 ω·t 溢出精度。
+            double yawAt(double t) const { const double dt = t - t0; return theta0 + omega * dt + 0.5 * beta * dt * dt; }
         };
 
         explicit LocalTrajectoryFitter(LocalTrajectoryFitConfig config = {}) : config_(std::move(config)) {}

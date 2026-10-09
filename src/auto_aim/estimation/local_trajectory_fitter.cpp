@@ -46,9 +46,9 @@ namespace auto_aim
             bool operator()(const T* const center, const T* const h_ptr, const T* const phase,
                             const T* const beta, const T* const vel, T* residual) const
             {
-                const T theta = phase[0] + phase[1] * T(t_) +
-                    (use_beta_ ? T(0.5) * beta[0] * T(t_) * T(t_) : T(0.0)) + T(yaw_off_);
                 const T dt = T(t_ - t0_);
+                const T theta = phase[0] + phase[1] * dt +
+                    (use_beta_ ? T(0.5) * beta[0] * dt * dt : T(0.0)) + T(yaw_off_);
                 T pv[3], pc[3];
                 barEndpointV<T>(h_ptr[0], theta, T(alpha_), T(R_), T(L_), T(a_), T(0.5) * T(L_),
                                 pv);
