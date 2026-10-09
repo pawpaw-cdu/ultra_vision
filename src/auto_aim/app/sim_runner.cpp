@@ -74,6 +74,10 @@ namespace auto_aim
             if (const char* s = std::getenv("ULTRA_VISION_LOCAL_FIT_SIGN")) {
                 track_cfg.local_fit.yaw_rate_sign = std::atof(s);
             }
+            // 多板联合 A/B 开关（方向2）
+            if (const char* j = std::getenv("ULTRA_VISION_LOCAL_FIT_JOINT")) {
+                track_cfg.local_fit.joint_plates = (std::atoi(j) == 1);
+            }
             const auto_aim::PnpGeometry pnp_geometry = auto_aim::loadPnpGeometry(tracker_cfg);
 
             // Optional neural-network detector. It replaces the light-bar pipeline but

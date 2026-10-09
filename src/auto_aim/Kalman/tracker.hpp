@@ -66,6 +66,10 @@ namespace auto_aim
         double assoc_gate_px = 45.0;    // 帧间板心关联门限（px），配合常速预测
         double min_depth = 1.5;         // 参与局部拟合的板深下限（m，滤掉近处杂检/道具）
         double max_depth = 9.0;         // 上限（m）
+        // 多板联合（方向2 P0）：把**同时可见的多块板**堆进同一次拟合——共享 C/R/h、
+        // 相位相差固定角（由 plate_yaw_offsets 给）。打破单板 R–Cz 耦合、Yaw 更准。
+        bool joint_plates = false;
+        int joint_max_arcs = 4;         // 联合时最多用几条板弧
         double yaw_noise = 0.02;        // 拟合 yaw 的观测噪声（rad²，质量再缩放）
         double omega_noise = 0.05;      // 拟合 ω 的观测噪声
         // 相机系→整车系符号（标定项）：拟合器的 θ 约定（相机 X-Z 平面，从 +Z 向 +X 量）

@@ -130,15 +130,32 @@ namespace auto_aim
         {
             std::lock_guard<std::mutex> lock(local_fit_mutex_);
             if (!local_fitter_) return false;
-            // 选弧最长（>= min_bars）的一条来拟合：一段=一块板正面弧
-            const LocalFitArc* best = nullptr;
+            // 收集 >= min_bars 的弧，按长度降序
+            std::vector<const LocalFitArc*> cand;
             for (const auto& a : local_fit_arcs_)
+                if (static_cast<int>(a.obs.size()) >= cfg_.local_fit.min_bars) cand.push_back(&a);
+            if (cand.empty()) return false;
+            std::sort(cand.begin(), cand.end(), [](const LocalFitArc* x, const LocalFitArc* y) {
+                return x->obs.size() > y->obs.size();
+            });
+            if (cfg_.local_fit.joint_plates)
             {
-                if (static_cast<int>(a.obs.size()) < cfg_.local_fit.min_bars) continue;
-                if (best == nullptr || a.obs.size() > best->obs.size()) best = &a;
+                // 多板联合：堆叠多块板（同板号只取最长的一条，避免相位冲突）
+                std::vector<int> used;
+                for (const LocalFitArc* a : cand)
+                {
+                    if (static_cast<int>(used.size()) >= cfg_.local_fit.joint_max_arcs) break;
+                    if (a->plate_hint >= 0 &&
+                        std::find(used.begin(), used.end(), a->plate_hint) != used.end())
+                        continue;
+                    if (a->plate_hint >= 0) used.push_back(a->plate_hint);
+                    window.insert(window.end(), a->obs.begin(), a->obs.end());
+                }
             }
-            if (best == nullptr) return false;
-            window = best->obs;
+            else
+            {
+                window = cand.front()->obs;   // 单板：最长弧
+            }
             fitter = local_fitter_;
         }
         LocalFitResult result;
