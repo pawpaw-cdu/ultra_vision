@@ -254,6 +254,20 @@ namespace auto_aim
         //     yaw 分量；超了就当"这一帧没测到 yaw"（位置照用，yaw 靠 ω 外推/拟合器）。
         // 0 = 关闭门控（回到老行为，A/B 用）。
         double pnp_yaw_trust_deg = 25.0;
+        // ---- 观测慢收敛：让底盘几何（逐板距离 / 逐板高度）自己学出来 -------------
+        // 用户要求："即使四块板不同远/不同高，也应该根据观测收敛"。落地方式：
+        // **在硬钉之前**量"观测板心 − 模型板心"，把它在该板**径向**上的分量低通进
+        // 该板的回转距离、在竖直方向上的分量低通进该板高度。
+        //   · 只看到正对那块板时：缓慢修正 R（半径写死 0.25 那类偏差）；
+        //   · 同帧看到两块（本车常态：正对 + 侧板）时：把矩形底盘/p​er-plate 距离学出来；
+        //   · 残差过大（> max_error）视为翻解/关联错，当帧不学。
+        // 注意必须在 hard_plate_constraint **之前**算 —— 硬钉会把该板残差清零。
+        bool geometry_learn = true;
+        double geometry_learn_gain = 0.05;        // 每帧最多修 5%
+        double geometry_learn_max_step = 0.004;   // 单帧最大 4 mm
+        double geometry_learn_max_error = 0.05;   // 残差 > 5 cm 当异常，不学
+        double geometry_learn_range = 0.08;       // 相对初值最多学 ±8 cm
+
         // ---- 硬约束：构造用的那块板一定是**离相机最近**的那块 -------------------
         // 现场事实（用户确认）：我们总是拿最正对相机、也就是最近的那块板来建底盘。
         // 推论：车心（以及另外三块板）在画面上一定比这块板**更靠上/更远**。
@@ -354,6 +368,8 @@ namespace auto_aim
         void updateChassisFromFit(double radius, double armor_pitch_rad, double height_up);
         /// @brief 把世界系几何参数（板面尺寸）同步成与 PnP 同一组标定值。
         void syncGeometryFromConfig();
+        /// @brief 把底盘几何（逐板距离/高度）同步给滤波器。改几何后**必须**调用它。
+        void syncGeometryToEkf();
 
         /// @brief 第 plate 块板的刚体姿态（**世界系**：板心 + 三轴）。
         ArmorPose armorPose(int plate) const;

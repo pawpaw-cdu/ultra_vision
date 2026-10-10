@@ -1805,7 +1805,13 @@ int auto_aim::app::RealRunner::run()
                       << ", model_fit="
                       << (model_fit_n > 0 ? model_fit_sum / model_fit_n : -1.0) << "/"
                       << (model_fit_n > 0 ? model_fit_max : -1.0) << "px(n=" << model_fit_n << ")"
-                      // 诊断：最近板硬约束翻了几次（正常应长期 0）+ 拟合器判的运动状态
+                      // 几何慢收敛的结果（现场就看这四个数会不会收敛成"前后一个值、
+                      // 左右另一个值"）；np_flip/motion 是另外两个机制的诊断。
+                      << ", Rgeo="
+                      << cv::format("%.3f/%.3f/%.3f/%.3f", tracker.chassisGeometry().distance(0),
+                                    tracker.chassisGeometry().distance(1),
+                                    tracker.chassisGeometry().distance(2),
+                                    tracker.chassisGeometry().distance(3))
                       << ", np_flip=" << tracker.nearestPlateFlips()
                       << ", motion=" << static_cast<int>(tracker.lastMotion())
                       << "(0静/1转/2移/3转+移)"

@@ -193,6 +193,15 @@ namespace auto_aim
                 kalman["nearest_plate_constraint"].as<bool>(cfg.nearest_plate_constraint);
             cfg.nearest_plate_margin_m =
                 kalman["nearest_plate_margin_m"].as<double>(cfg.nearest_plate_margin_m);
+            cfg.geometry_learn = kalman["geometry_learn"].as<bool>(cfg.geometry_learn);
+            cfg.geometry_learn_gain =
+                kalman["geometry_learn_gain"].as<double>(cfg.geometry_learn_gain);
+            cfg.geometry_learn_max_step =
+                kalman["geometry_learn_max_step"].as<double>(cfg.geometry_learn_max_step);
+            cfg.geometry_learn_max_error =
+                kalman["geometry_learn_max_error"].as<double>(cfg.geometry_learn_max_error);
+            cfg.geometry_learn_range =
+                kalman["geometry_learn_range"].as<double>(cfg.geometry_learn_range);
             cfg.position_nis_threshold =
                 kalman["position_nis_threshold"].as<double>(
                     cfg.position_nis_threshold);
@@ -234,7 +243,9 @@ namespace auto_aim
             // 逐板回转距离 + 大/小板标记（真车是**矩形**底盘：前后 ≠ 左右）。
             // 不给就用 kalman.armor_radius 当圆（仿真靶）。见 common/chassis_model.hpp。
             if (const YAML::Node dist = pnp["plate_distance"]) {
-                if (dist.size() == 4) {
+                if (dist.size() == 0 || dist.IsNull()) {
+                    // 空列表 = 没配（用 kalman.armor_radius 当圆），不是错误
+                } else if (dist.size() == 4) {
                     for (std::size_t i = 0; i < 4; ++i)
                         cfg.plate_distance[i] = dist[i].as<double>(0.0);
                 } else {

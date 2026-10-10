@@ -85,6 +85,12 @@ public:
     void setPlateDistance(const std::array<double, 4>& distances) {
         cfg_.plate_distance = distances;
     }
+    /// @brief 逐板竖直偏置（home 系，正 = 更靠下）。同样只改几何、不动状态。
+    ///        底盘模型的 plate_height（向上为正）取负号同步到这里，二者必须一致，
+    ///        否则"滤波器摆的板"和"画出来的板"会差一个高度。
+    void setArmorYOffsets(const std::array<double, 4>& offsets) {
+        cfg_.armor_y_offsets = offsets;
+    }
 
     void reset() {
         x_ = Vec<9>();

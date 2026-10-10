@@ -172,6 +172,16 @@ tracker:
     # 但要在实车上单独 A/B 确认后再打开（配合 Tracker::nearestPlateFlips() 诊断）。
     nearest_plate_constraint: false
     nearest_plate_margin_m: 0.05
+    # ---- 观测慢收敛：底盘几何自己学（默认开）-----------------------------------
+    # 在硬钉**之前**量"观测板心 − 模型板心"，径向分量低通进该板回转距离、竖直分量
+    # 低通进该板高度 —— 这就是"即使四块板不同远/不同高，也按观测收敛"。
+    # 现场意义：plate_distance 不用手量了，跑一段它自己收敛（状态行打印 Rgeo）。
+    # 单帧最多修 4 mm、残差 > 5 cm 视为翻解/关联错当帧不学、相对初值最多漂 ±8 cm。
+    geometry_learn: true
+    geometry_learn_gain: 0.05
+    geometry_learn_max_step: 0.004
+    geometry_learn_max_error: 0.05
+    geometry_learn_range: 0.08
     # 距离门限同理随距离噪声放大（上限 m）；角度门限仍是主判据，不会放进相邻板。
     range_gate_sigma: 2.0
     range_gate_max: 1.00

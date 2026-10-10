@@ -483,6 +483,13 @@ int main()
         //   · 矩形底盘（前后距离 ≠ 左右距离）+ 四块板**同一高度** + 15° 安装倾角；
         //   · 重投影必须外推到"被显示那一帧"（观测延迟在 3 rad/s 上是 10~30°）。
         auto_aim::Tracker online_tracker(tracker_config);
+        // 初值（还没喂任何观测、几何慢收敛还没动过）
+        passed &= expect(std::abs(online_tracker.chassisGeometry().meanDistance() -
+                                  tracker_config.armor_radius) < 1e-9,
+                         "chassis model must start from the configured radius");
+        passed &= expect(std::abs(online_tracker.chassisGeometry().armor_pitch -
+                                  tracker_config.armor_tilt_deg * kPi / 180.0) < 1e-9,
+                         "chassis model must start from the configured armor pitch (15 deg)");
         for (int frame = 0; frame <= 30; ++frame) {
             const double time = frame * tracker_dt;
             online_tracker.update(std::vector<auto_aim::Armor>{
@@ -491,13 +498,7 @@ int main()
         }
         auto_aim::CameraPose identity_pose;   // invalid → 用 tracker 内部姿态（无姿态=单位阵）
         const auto before_radius = online_tracker.modelAt(0.0, identity_pose);
-        passed &= expect(before_radius.valid &&
-                             std::abs(before_radius.geometry.meanDistance() -
-                                      tracker_config.armor_radius) < 1e-9,
-                         "chassis model must use the configured radius by default");
-        passed &= expect(std::abs(before_radius.geometry.armor_pitch -
-                                  tracker_config.armor_tilt_deg * kPi / 180.0) < 1e-9,
-                         "chassis model must use the configured armor pitch (15 deg default)");
+        passed &= expect(before_radius.valid, "chassis model must be valid after tracking starts");
 
         online_tracker.setArmorRadius(0.185);
         passed &= expect(std::abs(online_tracker.getArmorRadius() - 0.185) < 1e-9,

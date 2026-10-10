@@ -83,6 +83,17 @@ namespace auto_aim
     // 灯条方向再由安装倾角 α 定死。这样"板心 + 切向 + 灯条方向"三件套把板定死，
     // 不需要借任何观测板的东西（老 overlay 拿观测板 PnP 的 rvec 当整车竖直，
     // 会把观测板的 roll 传染给另外三块板）。
+    // 把底盘几何同步给滤波器（逐板回转距离 + 逐板高度）。
+    // 高度符号：模型 plate_height 向上为正，EKF 的 armor_y_offsets 向下为正 → 取负。
+    void Tracker::syncGeometryToEkf()
+    {
+        ekf_.setPlateDistance(geometry_.plate_distance);
+        std::array<double, 4> offsets{{0.0, 0.0, 0.0, 0.0}};
+        for (std::size_t i = 0; i < offsets.size(); ++i)
+            offsets[i] = -geometry_.plate_height[i];
+        ekf_.setArmorYOffsets(offsets);
+    }
+
     void Tracker::syncGeometryFromConfig()
     {
         // 慢层几何的初值全部来自配置（此后只由拟合器慢层/在线慢收敛修改）：
@@ -102,7 +113,7 @@ namespace auto_aim
         geometry_.small_half_width = 0.5 * cfg_.armor_small_width;
         geometry_.large_half_width = 0.5 * cfg_.armor_large_width;
         geometry_.half_height = 0.5 * cfg_.armor_height;
-        ekf_.setPlateDistance(geometry_.plate_distance);
+        syncGeometryToEkf();
     }
 
     void Tracker::setChassisGeometry(const ChassisGeometry& geometry)
@@ -112,7 +123,7 @@ namespace auto_aim
             cfg_.armor_radius = geometry_.meanDistance();
             ekf_.setArmorRadius(cfg_.armor_radius);
         }
-        ekf_.setPlateDistance(geometry_.plate_distance);
+        syncGeometryToEkf();
         cfg_.armor_tilt_deg = geometry_.armor_pitch * 180.0 / CV_PI;
     }
 
@@ -147,7 +158,7 @@ namespace auto_aim
             for (auto& h : geometry_.plate_height) h = target;
             changed = true;
         }
-        if (changed) ekf_.setPlateDistance(geometry_.plate_distance);
+        if (changed) syncGeometryToEkf();
     }
 
     ArmorPose Tracker::armorPose(int plate) const

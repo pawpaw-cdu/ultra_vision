@@ -298,6 +298,7 @@ namespace auto_aim
         std::array<bool, 4> plate_used{{false, false, false, false}};
         std::vector<YpdObservation> ypd_observations;
         ypd_observations.reserve(candidates.size());
+        std::vector<std::pair<int, std::size_t>> accepted_pairs;   // 几何慢收敛要用
         // 被选中的那块板的 PnP yaw 是否可信（见 pnp_yaw_trust_deg）——
         // 不可信时不能喂差分测速器（差分正是放大量）。
         bool best_yaw_trusted = true;
@@ -327,6 +328,7 @@ namespace auto_aim
             armor_used[candidate.armor_index] = true;
             plate_used[candidate.plate_id] = true;
             ypd_observations.push_back(accepted);
+            accepted_pairs.emplace_back(candidate.plate_id, candidate.armor_index);
             ++accepted_observations_;
             if (best_armor_index < 0) {
                 best_armor_index = static_cast<int>(candidate.armor_index);
@@ -376,6 +378,46 @@ namespace auto_aim
         // ---- 硬约束：构造用的那块板一定是**离相机最近**的那块 ----------------
         // 车心必须比它更远（画面上更靠上）。违反 = 模型的径向/相位翻了 180°
         // （PnP 法向翻号或关联到对面板）→ 把 yaw 翻回来再摆。
+        // ---- 观测慢收敛：底盘几何自己学（必须在硬钉之前，硬钉会清零残差）----
+        if (cfg_.geometry_learn && ekf_.isInit() && !accepted_pairs.empty()) {
+            bool geometry_changed = false;
+            for (const auto& [plate, armor_index] : accepted_pairs) {
+                const Vec<3> observed = toVec(valid_pairs[armor_index].home.tvec);
+                const Vec<3> modeled = ekf_.armorPosition(plate);
+                const double phase = ekf_.getYaw() + ArmorEKF::angleForPlate(plate);
+                // 径向（水平）上的残差 → 该板的回转距离
+                const double radial_error =
+                    (observed(0, 0) - modeled(0, 0)) * std::cos(phase) +
+                    (observed(2, 0) - modeled(2, 0)) * std::sin(phase);
+                // 竖直残差（world y 向下）→ 该板的高度（模型里向上为正 → 取负）
+                const double vertical_error = observed(1, 0) - modeled(1, 0);
+                if (std::abs(radial_error) < cfg_.geometry_learn_max_error) {
+                    const double step = std::clamp(cfg_.geometry_learn_gain * radial_error,
+                                                   -cfg_.geometry_learn_max_step,
+                                                   cfg_.geometry_learn_max_step);
+                    if (std::abs(step) > 1e-7) {
+                        const double base = cfg_.plate_distance[plate] > 0.05
+                            ? cfg_.plate_distance[plate] : cfg_.armor_radius;
+                        geometry_.plate_distance[plate] = std::clamp(
+                            geometry_.plate_distance[plate] + step,
+                            base - cfg_.geometry_learn_range, base + cfg_.geometry_learn_range);
+                        geometry_changed = true;
+                    }
+                }
+                if (std::abs(vertical_error) < cfg_.geometry_learn_max_error) {
+                    const double step = std::clamp(-cfg_.geometry_learn_gain * vertical_error,
+                                                   -cfg_.geometry_learn_max_step,
+                                                   cfg_.geometry_learn_max_step);
+                    if (std::abs(step) > 1e-7) {
+                        geometry_.plate_height[plate] = std::clamp(
+                            geometry_.plate_height[plate] + step, -0.10, 0.10);
+                        geometry_changed = true;
+                    }
+                }
+            }
+            if (geometry_changed) syncGeometryToEkf();
+        }
+
         // 判据必须用**沿视轴的深度**，不能用"到相机的距离"：
         //   ±90° 那两块侧板到相机的距离本来就 > 车心（√(d²+R²) > d），
         //   用距离判会在"看到侧板"时误触发 → yaw 每帧被翻 180° → 模型直接崩（实车踩过）。
