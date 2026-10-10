@@ -83,6 +83,13 @@ namespace auto_aim
         /// 实测：直接注入拟合 yaw 会让慢转工况从 0.3px 劣化到 30px —— 拟合器自带
         /// ≈8~12° 的常值偏差；而 EKF 的滞后是 ∝ω 的、整圈平均≈0。把两者的差做慢低通
         /// 当地标，注入前减掉，只取拟合器"无滞后"的那部分。
+        // ---- 按 |ω| 混合拟合 yaw 与 EKF yaw ----------------------------------
+        // 实测（MODEL_CSV, 2026-10-10）：
+        //   · 静态/慢转：只用 EKF 自己 yaw → trusted_fit 0.3px（EKF 平滑是优势）
+        //   · 高速自旋：只用拟合 yaw（无平滑滞后）→ 24px；只用 EKF → 42~47px（滞后 ∝ω）
+        // 所以按 |ω| 线性混合：≤min 全用 EKF，≥full 全用拟合，中间过渡。
+        double yaw_use_omega_min = 1.0;    // rad/s
+        double yaw_use_omega_full = 2.5;   // rad/s
         double yaw_bias_alpha = 0.02;      // 学习率
         double yaw_bias_limit_deg = 30.0;  // 限幅（防跑飞）
         // 相机系→整车系符号（标定项）：拟合器的 θ 约定（相机 X-Z 平面，从 +Z 向 +X 量）

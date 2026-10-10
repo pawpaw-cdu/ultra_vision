@@ -85,6 +85,10 @@ tracker:
     # 拟合 yaw 的常值相位偏置在线学习（见 tracker.hpp 注释）：实测直接注入会让慢转
     # 工况从 0.3px 劣化到 30px（拟合器自带 8~12° 常值偏差）；把"拟合 yaw − EKF yaw"
     # 慢低通当地标减掉，只取它"无滞后"的部分。alpha 越小越稳，limit 防跑飞。
+    # 按 |ω| 混合：≤min 全用 EKF 自己的 yaw（静态最准 0.3px），
+    # ≥full 全用拟合 yaw（无平滑滞后，高速时 EKF 那一路滞后 ∝ω）。
+    yaw_use_omega_min: 1.0
+    yaw_use_omega_full: 2.5
     yaw_bias_alpha: 0.02
     yaw_bias_limit_deg: 30.0
     yaw_noise: 0.02            # 拟合 yaw 的观测噪声（rad²）

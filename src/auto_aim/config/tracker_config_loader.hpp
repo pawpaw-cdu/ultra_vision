@@ -68,6 +68,10 @@ namespace auto_aim
             cfg.local_fit.yaw_noise = lf["yaw_noise"].as<double>(cfg.local_fit.yaw_noise);
             cfg.local_fit.omega_noise = lf["omega_noise"].as<double>(cfg.local_fit.omega_noise);
             cfg.local_fit.use_yaw = lf["use_yaw"].as<bool>(cfg.local_fit.use_yaw);
+            cfg.local_fit.yaw_use_omega_min =
+                lf["yaw_use_omega_min"].as<double>(cfg.local_fit.yaw_use_omega_min);
+            cfg.local_fit.yaw_use_omega_full =
+                lf["yaw_use_omega_full"].as<double>(cfg.local_fit.yaw_use_omega_full);
             cfg.local_fit.yaw_bias_alpha =
                 lf["yaw_bias_alpha"].as<double>(cfg.local_fit.yaw_bias_alpha);
             cfg.local_fit.yaw_bias_limit_deg =

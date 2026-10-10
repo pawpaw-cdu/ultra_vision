@@ -373,8 +373,27 @@ namespace auto_aim
         }
 
         // 默认只喂 ω（+中心），不喂 yaw（见 config.use_yaw；2026-10-10 起默认开）。
-        if (!cfg_.local_fit.use_yaw || std::getenv("ULTRA_VISION_LOCAL_FIT_NO_YAW") != nullptr)
+        // 并**按 |ω| 混合**（见 LocalFitConfig::yaw_use_omega_* 注释）：
+        // 静态/慢转时 EKF 自己的 yaw 更准（0.3px），高速时拟合 yaw 无滞后更准。
+        double yaw_weight = 1.0;
+        if (cfg_.local_fit.use_yaw && cfg_.local_fit.yaw_use_omega_full >
+                                          cfg_.local_fit.yaw_use_omega_min) {
+            const double omega_abs = std::abs(ekf_.getOmega());
+            yaw_weight = std::clamp(
+                (omega_abs - cfg_.local_fit.yaw_use_omega_min) /
+                    (cfg_.local_fit.yaw_use_omega_full - cfg_.local_fit.yaw_use_omega_min),
+                0.0, 1.0);
+        }
+        if (!cfg_.local_fit.use_yaw || std::getenv("ULTRA_VISION_LOCAL_FIT_NO_YAW") != nullptr) {
             conv.yaw = ekf_yaw;
+            yaw_weight = 0.0;
+        } else if (yaw_weight < 1.0) {
+            conv.yaw = wrapPi(ekf_yaw + yaw_weight * std::remainder(conv.yaw - ekf_yaw,
+                                                                   0.5 * M_PI));
+            // 权重越小 = 这条 yaw 观测越不可信 → 噪声按 1/w² 放大；w→0 时等于不喂。
+            yaw_noise_eff /= std::max(0.05, yaw_weight * yaw_weight);
+        }
+        if (yaw_weight <= 0.0) conv.yaw = ekf_yaw;
 
         const double fit_weight = (fresh || slow_ok)
             ? ekf_.updateWithLocalFit(conv, yaw_noise_eff, cfg_.local_fit.omega_noise,
