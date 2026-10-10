@@ -376,19 +376,35 @@ namespace auto_aim
         // ---- 硬约束：构造用的那块板一定是**离相机最近**的那块 ----------------
         // 车心必须比它更远（画面上更靠上）。违反 = 模型的径向/相位翻了 180°
         // （PnP 法向翻号或关联到对面板）→ 把 yaw 翻回来再摆。
-        if (cfg_.nearest_plate_constraint && ekf_.isInit()) {
+        // 判据必须用**沿视轴的深度**，不能用"到相机的距离"：
+        //   ±90° 那两块侧板到相机的距离本来就 > 车心（√(d²+R²) > d），
+        //   用距离判会在"看到侧板"时误触发 → yaw 每帧被翻 180° → 模型直接崩（实车踩过）。
+        // 只有观测板明确落在**远半侧**（沿视轴比车心还远 ⇒ 径向指反了）才翻，
+        // 且连续两帧确认（防单帧异常）。
+        if (cfg_.nearest_plate_constraint && ekf_.isInit() && camera_pose_.valid) {
+            const Matrix<3, 3> camera_to_home =
+                tracker_detail::cameraToWorldRotation(camera_pose_);
+            Vec<3> forward;                      // 相机光轴（+z）在 home 系里的方向
+            for (int i = 0; i < 3; ++i) forward(i, 0) = camera_to_home(i, 2);
             const Vec<3> camera_home = tracker_detail::pointToWorld(camera_pose_, Vec<3>());
             const Vec<3> observed = toVec(valid_pairs[best_armor_index].home.tvec);
             const Vec<3> center = ekf_.getCenter();
-            const auto squared = [](const Vec<3>& v) {
-                return v(0, 0) * v(0, 0) + v(1, 0) * v(1, 0) + v(2, 0) * v(2, 0);
+            const auto depth = [&](const Vec<3>& point) {
+                return (point(0, 0) - camera_home(0, 0)) * forward(0, 0) +
+                    (point(1, 0) - camera_home(1, 0)) * forward(1, 0) +
+                    (point(2, 0) - camera_home(2, 0)) * forward(2, 0);
             };
-            const double plate_distance2 = squared(observed - camera_home);
-            const double center_distance2 = squared(center - camera_home);
-            if (center_distance2 + cfg_.nearest_plate_margin_m < plate_distance2) {
-                ekf_.flipChassisYaw();
-                ++nearest_plate_flips_;
+            if (depth(observed) > depth(center) + cfg_.nearest_plate_margin_m) {
+                if (++nearest_plate_violation_frames_ >= 2) {
+                    ekf_.flipChassisYaw();
+                    ++nearest_plate_flips_;
+                    nearest_plate_violation_frames_ = 0;
+                }
+            } else {
+                nearest_plate_violation_frames_ = 0;
             }
+        } else {
+            nearest_plate_violation_frames_ = 0;
         }
         // ---- 硬约束：让"模型算出的这块板"精确落在观测上（只平移底盘中心）----
         // 单板工况下，滤波器对"中心沿板面法向/切向"这两个方向本就不可辨识，靠软量测

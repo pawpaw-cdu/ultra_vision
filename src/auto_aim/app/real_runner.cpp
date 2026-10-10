@@ -1805,6 +1805,10 @@ int auto_aim::app::RealRunner::run()
                       << ", model_fit="
                       << (model_fit_n > 0 ? model_fit_sum / model_fit_n : -1.0) << "/"
                       << (model_fit_n > 0 ? model_fit_max : -1.0) << "px(n=" << model_fit_n << ")"
+                      // 诊断：最近板硬约束翻了几次（正常应长期 0）+ 拟合器判的运动状态
+                      << ", np_flip=" << tracker.nearestPlateFlips()
+                      << ", motion=" << static_cast<int>(tracker.lastMotion())
+                      << "(0静/1转/2移/3转+移)"
                       << ", R=" << tracker.getArmorRadius()
                       << (tracker.armorRadiusOnline() ? "(online)" : "(cfg)")
                       << ", model_age=" << observation_age * 1000.0 << "ms"

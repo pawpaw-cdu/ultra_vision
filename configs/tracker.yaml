@@ -99,7 +99,10 @@ tracker:
     #   把车心往拟合中心强拉（gain_rotating）；有平移时只轻拉（gain_other）。
     # 治的是"旋转中心被单块检测板的噪声拖着跑"，也给模型构造一个中心先验。
     # 判错的代价：纯旋转被当成平移 → 只是拉得慢一点，不会发散。
-    center_anchor: true
+    # ⚠ 默认关：它会把车心往拟合中心拉（纯旋转 0.35/次），而车心本来由"硬钉到
+    # 观测板"决定 —— 拟合中心依赖拟合器自己的几何(R/α/h)，几何没标好时这一拉会让
+    # 模型整体偏离观测。实车单独 A/B 确认收益后再打开。
+    center_anchor: false
     center_anchor_spin_min: 1.0        # rad/s
     center_anchor_move_max: 0.15       # m/s
     center_anchor_gain_rotating: 0.35
@@ -155,12 +158,19 @@ tracker:
     # 不可接受"）。所以：关联**不再用 yaw 做硬门限**（改用 bearing 距离，米），只有
     # 当它和滤波器预测一致（≤ 本值）时才把 yaw 算进代价、才让 EKF 用它的 yaw 分量；
     # 不一致就当"这一帧没测到 yaw"，位置照用、yaw 由 ω 外推 + 拟合器慢层给。
-    pnp_yaw_trust_deg: 25.0
+    # ⚠ 现场 A/B 结论（2026-10-10 晚）：**先保持 0（关闭）**。
+    # 原因：这个门控拿"滤波器自己的预测"当参照 —— 一旦滤波器 yaw 初始就偏得多
+    # （刚上电/翻解后），它会永远拒绝所有 yaw 观测 → yaw 再也回不来（自锁）。
+    # 要重新启用，先解决"参照量不能是滤波器自己的 yaw"，否则实车会更差。
+    pnp_yaw_trust_deg: 0.0
     # 硬约束：用来构造底盘的那块板一定是**离相机最近**的那块（现场事实）——
     # 车心（以及另外三块板）必须比它更远/画面上更靠上。违反说明模型的径向翻了 180°
     # （PnP 法向翻号 / 关联到对面板），把底盘 yaw 翻回来重摆。
     # margin 是"明显违反才翻"的缓冲（m），防抖。
-    nearest_plate_constraint: true
+    # ⚠ 默认关：第一版判据用了"到相机的距离"，±90° 的侧板距离本来就大于车心 →
+    # 误触发、yaw 每帧翻 180°。现已改成**沿视轴深度**判据（见 tracker.cpp），
+    # 但要在实车上单独 A/B 确认后再打开（配合 Tracker::nearestPlateFlips() 诊断）。
+    nearest_plate_constraint: false
     nearest_plate_margin_m: 0.05
     # 距离门限同理随距离噪声放大（上限 m）；角度门限仍是主判据，不会放进相邻板。
     range_gate_sigma: 2.0

@@ -307,6 +307,7 @@ namespace auto_aim
             const ChassisMotion motion = classifyChassisMotion(
                 fit->omega, speed, cfg_.local_fit.center_anchor_spin_min,
                 cfg_.local_fit.center_anchor_move_max);
+            last_motion_ = motion;   // 诊断：状态行会显示
             Vec<3> camera_center;
             camera_center(0, 0) = fit->center[0];
             camera_center(1, 0) = fit->center[1];

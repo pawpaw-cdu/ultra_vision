@@ -435,6 +435,8 @@ namespace auto_aim
         double getLastMeasurementWeight() const { return last_measurement_weight_; }
         /// @brief "构造板一定最近"硬约束把 yaw 翻回来的累计次数（诊断用）。
         int nearestPlateFlips() const { return nearest_plate_flips_; }
+        /// @brief 最近一次拟合判出的运动状态（诊断用）。
+        ChassisMotion lastMotion() const { return last_motion_; }
 
         /// @brief 收敛看门狗统计：触发次数 / 当前拒绝比例 / 是否收敛。
         struct WatchdogStats
@@ -508,6 +510,10 @@ namespace auto_aim
         PlateEKF plate_ekf_;                       // 双模型的装甲板模型
         /// "最近板硬约束"把 yaw 翻回来的次数（诊断：正常应长期为 0，只有翻解时才动）。
         int nearest_plate_flips_ = 0;
+        /// 连续多少帧处在"观测板落到远半侧"（两条确认才翻，防单帧异常）。
+        int nearest_plate_violation_frames_ = 0;
+        /// 最近一次拟合判出的运动状态（诊断/状态行用）。
+        ChassisMotion last_motion_ = ChassisMotion::Still;
         double plate_model_last_timestamp_ = -1.0;
         double plate_model_weight_ = 0.0;
         /// @brief 由板模型反推的整车状态（板心 − R·径向；yaw = 板朝向 − 板号相位）。
