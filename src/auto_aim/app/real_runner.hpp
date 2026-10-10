@@ -9,7 +9,12 @@
 // 分层约定（docs/layer_dependencies.md）：能力层（perception/Kalman/control）负责算法，
 // 本文件只做真机专属的 IO 与执行层装配（相机 SDK、串口、下发的世界系换算、图像闭环）。
 
+#include <memory>
 #include <string>
+
+#ifdef ULTRA_VISION_HAVE_LOCAL_FIT
+#include "estimation/local_trajectory_fitter.hpp"
+#endif
 
 namespace auto_aim
 {
@@ -25,6 +30,12 @@ namespace auto_aim
 
         private:
             std::string config_dir_;
+#ifdef ULTRA_VISION_HAVE_LOCAL_FIT
+            // 局部拟合器（可选组件，Ceres）：与仿真入口同款，注入 Tracker 回调。
+            std::unique_ptr<auto_aim::LocalTrajectoryFitter> local_fitter_;
+            double local_fit_pitch_sign_ = 1.0;   // 真机云台俯仰符号（现场可 env 标定）
+            bool local_fit_r_fixed_ = false;      // A/B：写死 R（不跑在线慢层）
+#endif
         };
     } // namespace app
 } // namespace auto_aim

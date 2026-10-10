@@ -101,6 +101,31 @@ set(AUTO_AIM_REAL_TARGET auto_aim_real)
     set_target_properties(${AUTO_AIM_REAL_TARGET} PROPERTIES BUILD_RPATH "${HIK_LIB_DIR}")
   endif()
 
+# ---- 局部拟合器（运行组件；只要找到 Ceres 就编译，与是否构建测试无关）----------
+# 定位：EKF 弱点的补强（正面 Yaw/Omega + 旋转中心），异步低频、可注入、默认不接管主链路。
+# 与 spin_geometry 一样单独成库、不进 auto_aim_core；Tracker 通过 setLocalFitter 注入。
+# 注意：这是**运行组件**，不能藏在 ULTRA_VISION_BUILD_TESTS 里——真机构建 tests=OFF，
+# 那样 auto_aim_real 根本编不出拟合器（2026-10-10 发现）。
+find_package(Ceres QUIET)
+find_package(Eigen3 QUIET)
+if(Ceres_FOUND AND Eigen3_FOUND)
+  add_library(auto_aim_local_fit STATIC estimation/local_trajectory_fitter.cpp)
+  target_include_directories(auto_aim_local_fit PUBLIC
+      ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}
+      ${Eigen3_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS})
+  target_link_libraries(auto_aim_local_fit PUBLIC Eigen3::Eigen Ceres::ceres ${OpenCV_LIBS})
+  message(STATUS "auto_aim_local_fit: 启用（Ceres ${Ceres_VERSION}）")
+  # 仿真/真机入口都接入（ULTRA_VISION_LOCAL_FIT=1 打开，默认关）。
+  target_link_libraries(auto_aim_sim PRIVATE auto_aim_local_fit)
+  target_compile_definitions(auto_aim_sim PRIVATE ULTRA_VISION_HAVE_LOCAL_FIT=1)
+  if(TARGET auto_aim_real)
+    target_link_libraries(auto_aim_real PRIVATE auto_aim_local_fit)
+    target_compile_definitions(auto_aim_real PRIVATE ULTRA_VISION_HAVE_LOCAL_FIT=1)
+  endif()
+else()
+  message(STATUS "auto_aim_local_fit: 跳过（未找到 Ceres/Eigen）")
+endif()
+
 if(ULTRA_VISION_BUILD_TESTS)
   # ---- 小陀螺灯条轨迹几何估计器（可选组件：仅当找到 Ceres 时编译）----------
   # 定位：异步架构里的"低频全局几何先验/初始化器"，默认**不接管主链路**，
@@ -125,38 +150,19 @@ if(ULTRA_VISION_BUILD_TESTS)
     add_executable(spin_geom_check ${CMAKE_SOURCE_DIR}/tools/spin_geom_check.cpp)
     target_link_libraries(spin_geom_check PRIVATE auto_aim_spin_geometry)
 
-    add_executable(local_fit_from_csv ${CMAKE_SOURCE_DIR}/tools/local_fit_from_csv.cpp)
-    target_link_libraries(local_fit_from_csv PRIVATE auto_aim_local_fit)
-
-    add_executable(local_fit_from_lightbars ${CMAKE_SOURCE_DIR}/tools/local_fit_from_lightbars.cpp)
-    target_link_libraries(local_fit_from_lightbars PRIVATE auto_aim_local_fit)
-
-    # ---- 局部拟合器（小陀螺 θ/ω + 慢层 α/R；可选组件，仅当找到 Ceres 时编译）----
-    # 与 spin_geometry 同款：单独成库、不进 auto_aim_core；Tracker 通过注入回调
-    # 使用它（见 Kalman/tracker.hpp 的 setLocalFitter）。默认不接管主链路。
-    add_library(auto_aim_local_fit STATIC estimation/local_trajectory_fitter.cpp)
-    target_include_directories(auto_aim_local_fit PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_SOURCE_DIR}
-        ${Eigen3_INCLUDE_DIRS}
-        ${OpenCV_INCLUDE_DIRS}
-    )
-    target_link_libraries(auto_aim_local_fit PUBLIC Eigen3::Eigen Ceres::ceres ${OpenCV_LIBS})
-    message(STATUS "auto_aim_local_fit: 启用（Ceres ${Ceres_VERSION}）")
-
-    add_executable(local_trajectory_fitter_test
-        test/local_trajectory_fitter_test.cpp
-    )
-    target_include_directories(local_trajectory_fitter_test PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_SOURCE_DIR}
-    )
-    target_link_libraries(local_trajectory_fitter_test PRIVATE auto_aim_local_fit)
-    add_test(NAME local_trajectory_fitter_test COMMAND local_trajectory_fitter_test)
-
-    # 仿真入口接入（P2 A/B）：把拟合器链进 auto_aim_sim，用 ULTRA_VISION_LOCAL_FIT 开关。
-    target_link_libraries(auto_aim_sim PRIVATE auto_aim_local_fit)
-    target_compile_definitions(auto_aim_sim PRIVATE ULTRA_VISION_HAVE_LOCAL_FIT=1)
+    # 局部拟合器的离线工具与单测（库本身已在上面按"是否找到 Ceres"创建）。
+    if(TARGET auto_aim_local_fit)
+      add_executable(local_fit_from_csv ${CMAKE_SOURCE_DIR}/tools/local_fit_from_csv.cpp)
+      target_link_libraries(local_fit_from_csv PRIVATE auto_aim_local_fit)
+      add_executable(local_fit_from_lightbars ${CMAKE_SOURCE_DIR}/tools/local_fit_from_lightbars.cpp)
+      target_link_libraries(local_fit_from_lightbars PRIVATE auto_aim_local_fit)
+      add_executable(local_trajectory_fitter_test
+          test/local_trajectory_fitter_test.cpp)
+      target_include_directories(local_trajectory_fitter_test PRIVATE
+          ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR})
+      target_link_libraries(local_trajectory_fitter_test PRIVATE auto_aim_local_fit)
+      add_test(NAME local_trajectory_fitter_test COMMAND local_trajectory_fitter_test)
+    endif()
   else()
     message(STATUS "auto_aim_spin_geometry: 跳过（未找到 Ceres；见 docs/spin_geometry_estimator.md）")
   endif()

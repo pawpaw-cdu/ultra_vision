@@ -114,8 +114,36 @@ int auto_aim::app::RealRunner::run()
 
     const auto_aim::DetectorConfig det_cfg =
         auto_aim::loadDetectorConfig(detector_file);
-    const auto_aim::TrackerConfig track_cfg =
-        auto_aim::loadTrackerConfig(tracker_file);
+    auto_aim::TrackerConfig track_cfg = auto_aim::loadTrackerConfig(tracker_file);
+    // P2 A/B 开关：ULTRA_VISION_LOCAL_FIT=1 打开局部拟合器（否则用 tracker.yaml 的默认）。
+    if (const char* lf = std::getenv("ULTRA_VISION_LOCAL_FIT")) {
+        track_cfg.local_fit.enabled = (std::atoi(lf) == 1);
+    }
+
+#ifdef ULTRA_VISION_HAVE_LOCAL_FIT
+    if (track_cfg.local_fit.enabled && camera_matrix.rows == 3) {
+        const auto env_d = [](const char* n, double d) {
+            const char* v = std::getenv(n);
+            return v != nullptr ? std::atof(v) : d;
+        };
+        auto_aim::LocalTrajectoryFitConfig fcfg;
+        fcfg.K = { camera_matrix.at<double>(0, 0), camera_matrix.at<double>(1, 1),
+                   camera_matrix.at<double>(0, 2), camera_matrix.at<double>(1, 2) };
+        fcfg.lightbar_len = env_d("ULTRA_VISION_LOCAL_FIT_L", 0.060);   // 灯条/板高（m）
+        fcfg.plate_width = env_d("ULTRA_VISION_LOCAL_FIT_W", 0.135);    // 灯条中心间距（m）
+        fcfg.gimbal_pitch = 0.0;     // 每帧按实际云台俯仰更新（见主循环）
+        fcfg.center_init = {{ 0.0, 0.0, 3.0 }};
+        // 真实裁判系统灯条有 ~15° 安装倾角：α 固定 15°（慢层只在线估计 R）。
+        const double alpha0 = env_d("ULTRA_VISION_LOCAL_FIT_ALPHA_DEG", 15.0) * M_PI / 180.0;
+        local_fit_pitch_sign_ = env_d("ULTRA_VISION_LOCAL_FIT_PITCH_SIGN", 1.0);
+        local_fit_r_fixed_ = (std::getenv("ULTRA_VISION_LOCAL_FIT_R_FIXED") != nullptr);
+        local_fitter_ = std::make_unique<auto_aim::LocalTrajectoryFitter>(fcfg);
+        local_fitter_->seedSlow(alpha0, fcfg.R_prior);
+        std::cout << "[local_fit] enabled (real): alpha="
+                  << env_d("ULTRA_VISION_LOCAL_FIT_ALPHA_DEG", 15.0) << "deg pitch_sign="
+                  << local_fit_pitch_sign_ << " R_fixed=" << local_fit_r_fixed_ << std::endl;
+    }
+#endif
     const auto_aim::PnpGeometry pnp_geometry =
         auto_aim::loadPnpGeometry(tracker_file);
 
@@ -545,6 +573,20 @@ int auto_aim::app::RealRunner::run()
                                     camera_matrix.at<double>(1, 2));
     }
 
+#ifdef ULTRA_VISION_HAVE_LOCAL_FIT
+    if (local_fitter_) {
+        auto* fitter = local_fitter_.get();
+        const bool r_fixed = local_fit_r_fixed_;
+        tracker.setLocalFitter([fitter, r_fixed](const std::vector<auto_aim::LightBarObservation>& obs,
+                                                 auto_aim::LocalFitResult& out) {
+            // 默认：快层 + 在线慢层（R 在线估计）；r_fixed 时退回写死 R 做 A/B。
+            return r_fixed ? fitter->fit(obs, fitter->slowAlpha(), fitter->slowR(), out)
+                           : fitter->fitWithSlow(obs, out);
+        });
+        tracker.startLocalFitWorker();
+    }
+#endif
+
     cv::Mat frame;
     cv::Mat image;
 
@@ -810,7 +852,23 @@ int auto_aim::app::RealRunner::run()
         if (control_disabled) allow_control_now = false;
         frame_input.allow_control = allow_control_now;
         frame_input.fire_enabled = fire_enabled;
+#ifdef ULTRA_VISION_HAVE_LOCAL_FIT
+        if (local_fitter_) {
+            // 云台俯仰补偿：R_cv 必须用**实际**俯仰构造 —— 每帧把当前俯仰写进拟合器配置。
+            auto fcfg = local_fitter_->config();
+            const double gp = local_fit_pitch_sign_ * camera_pose.pitch;
+            if (std::abs(fcfg.gimbal_pitch - gp) > 1e-4) {
+                fcfg.gimbal_pitch = gp;
+                local_fitter_->setConfig(fcfg);
+            }
+            for (const auto& a : frame_input.armors)
+                tracker.pushArmorLightBars(a, observation_time, tracker.plateIdFor(a));
+        }
+#endif
         const auto outcome = pipeline.update(frame_input);
+#ifdef ULTRA_VISION_HAVE_LOCAL_FIT
+        if (local_fitter_) tracker.applyLatestLocalFit();
+#endif
         last_decision = outcome.decision;
         aim_ready = outcome.aim_ready;
         aim_yaw_error = outcome.aim_yaw_error;

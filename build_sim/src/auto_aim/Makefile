@@ -200,6 +200,20 @@ auto_aim_sim/fast:
 .PHONY : auto_aim_sim/fast
 
 # Convenience name for target.
+src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/rule:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/rule
+.PHONY : src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/rule
+
+# Convenience name for target.
+auto_aim_local_fit: src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/rule
+.PHONY : auto_aim_local_fit
+
+# fast build rule for target.
+auto_aim_local_fit/fast:
+	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/build.make src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/build
+.PHONY : auto_aim_local_fit/fast
+
+# Convenience name for target.
 src/auto_aim/CMakeFiles/auto_aim_spin_geometry.dir/rule:
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/auto_aim/CMakeFiles/auto_aim_spin_geometry.dir/rule
 .PHONY : src/auto_aim/CMakeFiles/auto_aim_spin_geometry.dir/rule
@@ -268,20 +282,6 @@ local_fit_from_lightbars: src/auto_aim/CMakeFiles/local_fit_from_lightbars.dir/r
 local_fit_from_lightbars/fast:
 	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/local_fit_from_lightbars.dir/build.make src/auto_aim/CMakeFiles/local_fit_from_lightbars.dir/build
 .PHONY : local_fit_from_lightbars/fast
-
-# Convenience name for target.
-src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/rule:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/rule
-.PHONY : src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/rule
-
-# Convenience name for target.
-auto_aim_local_fit: src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/rule
-.PHONY : auto_aim_local_fit
-
-# fast build rule for target.
-auto_aim_local_fit/fast:
-	cd /Users/a/Desktop/RM_source/Ultra_Vision/build_sim && $(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/build.make src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/build
-.PHONY : auto_aim_local_fit/fast
 
 # Convenience name for target.
 src/auto_aim/CMakeFiles/local_trajectory_fitter_test.dir/rule:

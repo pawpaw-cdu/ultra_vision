@@ -406,6 +406,19 @@ auto_aim_sim/fast:
 .PHONY : auto_aim_sim/fast
 
 #=============================================================================
+# Target rules for targets named auto_aim_local_fit
+
+# Build rule for target.
+auto_aim_local_fit: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 auto_aim_local_fit
+.PHONY : auto_aim_local_fit
+
+# fast build rule for target.
+auto_aim_local_fit/fast:
+	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/build.make src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/build
+.PHONY : auto_aim_local_fit/fast
+
+#=============================================================================
 # Target rules for targets named auto_aim_spin_geometry
 
 # Build rule for target.
@@ -469,19 +482,6 @@ local_fit_from_lightbars: cmake_check_build_system
 local_fit_from_lightbars/fast:
 	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/local_fit_from_lightbars.dir/build.make src/auto_aim/CMakeFiles/local_fit_from_lightbars.dir/build
 .PHONY : local_fit_from_lightbars/fast
-
-#=============================================================================
-# Target rules for targets named auto_aim_local_fit
-
-# Build rule for target.
-auto_aim_local_fit: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 auto_aim_local_fit
-.PHONY : auto_aim_local_fit
-
-# fast build rule for target.
-auto_aim_local_fit/fast:
-	$(MAKE) $(MAKESILENT) -f src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/build.make src/auto_aim/CMakeFiles/auto_aim_local_fit.dir/build
-.PHONY : auto_aim_local_fit/fast
 
 #=============================================================================
 # Target rules for targets named local_trajectory_fitter_test
