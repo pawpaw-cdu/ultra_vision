@@ -333,31 +333,33 @@ namespace auto_aim
         conv.yaw = wrapPi(conv.yaw + cam_yaw * cfg_.local_fit.yaw_rate_sign);
         conv.omega *= cfg_.local_fit.yaw_rate_sign;
 
+        // ---- 延迟量测：把拟合 yaw 用**它自己的 ω** 外推到当前时刻 -----------------
+        // NUC 上一次弧段拟合要 ~0.8~1s，发布时 age≈1s > max_result_age(0.2s)，
+        // 于是原来那句"fresh 才注入"直接把它跳过 —— 这正是"开了 use_yaw 却毫无变化"
+        // 的原因（实车 model3 vs model4 的 trusted_fit 一模一样：38.9 vs 40.4px）。
+        // yaw/ω 是同一个弧段解，用 ω 外推到 now 再用即可（标准延迟量测处理），
+        // 外推误差随 age 增长 → yaw 噪声按 age 放大。
+        double yaw_noise_eff = cfg_.local_fit.yaw_noise;
+        if (!fresh && slow_ok) {
+            conv.yaw = wrapPi(conv.yaw + conv.omega * age);
+            yaw_noise_eff *= 1.0 + age / std::max(0.05, cfg_.local_fit.max_result_age);
+        }
+
         // 板号绝对偏移不可靠（plateIdFor 在多板同现时会错）→ 拟合 yaw 可能整体差 k·90°。
         // EKF 自身 yaw 平滑、不会差 90°：把 fit.yaw 吸附到"与 EKF yaw 最近的、模 90° 同余"
-        // 的那个值，消掉未知的 k·90°（只修正板偏移，不改 ω/中心）。
+        // 的那个值，消掉未知的 k·90°（只修正板偏移，不改 ω/中心）。注意吸附要在
+        // **外推之后**做，否则比较的是两个不同时刻的 yaw。
         const double ekf_yaw = ekf_.getYaw();
         conv.yaw = ekf_yaw + std::remainder(conv.yaw - ekf_yaw, 0.5 * M_PI);
 
-        // 默认只喂 ω（+中心），不喂 yaw——yaw 是最脆弱的量，容易把 EKF 拉坏（见 config.use_yaw）。
+        // 默认只喂 ω（+中心），不喂 yaw（见 config.use_yaw；2026-10-10 起默认开）。
         if (!cfg_.local_fit.use_yaw || std::getenv("ULTRA_VISION_LOCAL_FIT_NO_YAW") != nullptr)
             conv.yaw = ekf_yaw;
 
-        const double fit_weight = fresh
-            ? ekf_.updateWithLocalFit(conv, cfg_.local_fit.yaw_noise,
-                                      cfg_.local_fit.omega_noise,
+        const double fit_weight = (fresh || slow_ok)
+            ? ekf_.updateWithLocalFit(conv, yaw_noise_eff, cfg_.local_fit.omega_noise,
                                       std::numeric_limits<double>::infinity())
-            : 0.0;   // 老结果不喂 ω/yaw（那是快层量，过期就是错的）
-
-        // 慢层几何：拟合器在一个弧段上把 (R, 安装倾角 α, 板心高度 h) 一起解出来了 ——
-        // 这三个量正好是"底盘模型"的慢层参数（见 common/chassis_model.hpp）。
-        // 用它们在线收敛几何，比在 yaml 里写死一个 0.25（实测 0.20~0.21）靠谱得多，
-        // 也是"四块板同高、矩形底盘"能被观测纠正的入口。半径/高度是几何量，
-        // 改它们不动状态/协方差。
-        if (cfg_.local_fit.use_fit_radius && slow_ok) {
-            updateChassisFromFit(fit->R, fit->alpha, fit->h);
-            ++local_fit_apply_geometry_;
-        }
+            : 0.0;
 
         // ---- 旋转中心先验：拟合器判出的运动状态决定"中心该不该动" ----------
         // 纯旋转 → 旋转中心物理上不变 → 把车心往拟合中心拉（强）；有平移 → 只轻拉。
