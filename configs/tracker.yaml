@@ -178,6 +178,10 @@ tracker:
     # 反推视视角，超门限就放大该板的 radial 与距离噪声（= 只信 bearing）。
     # 依据：实车每帧两块板，被观测那块 reproj≈10px，**另外那块**差 100~270px（≈0.11m）
     # —— 明显是擦边板的 PnP 把模型 yaw 拽歪。50° 是保守起点，可试 40/60。
+    # 换板时"相位重锚"：换板那一帧车心=观测板−R·radial(yaw+φ_k)，yaw 一滞后车心就
+    # 沿新板方向被拖走（实车 CSV 实测：换板跳 0.43m、同板只抖 0.026m）。新板的实测
+    # 径向直接给出底盘相位，用它硬置 yaw（只动 sin/cos，ω 保留）。默认开，可 A/B 关。
+    reanchor_yaw_on_plate_switch: true
     graze_gate_deg: 50.0
     graze_noise_scale: 100.0
     nearest_plate_constraint: false

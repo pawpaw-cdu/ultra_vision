@@ -834,6 +834,19 @@ public:
     /// @brief 底盘 yaw 翻 180°（sin/cos 同时取反），协方差不动。
     ///        用途：**硬约束**"构造用的那块板一定是离相机最近的那块"被违反时，
     ///        说明模型的径向翻了 180°（PnP 法向翻号 / 关联到对面板），把相位翻回来。
+    /// @brief 硬置底盘 yaw（换板时"相位重锚"用）。
+    ///        换板那一帧，滤波器的 yaw 还停在旧板的状态上，而车心 = 观测板 − R·radial(yaw+φ)
+    ///        → yaw 一滞后，车心就被新板方向拖走（实车 CSV：换板跳 0.43m、同板只抖 0.026m）。
+    ///        新板的实测径向是**直接的**底盘相位观测（误差=PnP 那几度），用它重锚比让
+    ///        滤波器慢慢追要稳得多。只动 sin/cos，ω 与协方差保留（yaw 方差略放宽）。
+    void setChassisYaw(double yaw) {
+        if (!initialized_ || !std::isfinite(yaw)) return;
+        x_(4, 0) = std::sin(yaw);
+        x_(5, 0) = std::cos(yaw);
+        P_(4, 4) = std::max(P_(4, 4), 0.02);
+        P_(5, 5) = std::max(P_(5, 5), 0.02);
+    }
+
     void flipChassisYaw() {
         if (!initialized_) return;
         x_(4, 0) = -x_(4, 0);

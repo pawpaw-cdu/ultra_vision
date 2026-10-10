@@ -293,6 +293,8 @@ namespace auto_aim
         // 超门限就放大该板的 radial 与距离噪声（等价于"只信 bearing"）。
         // 实车依据：每帧两块板、被观测那块 reproj≈10px，**另外那块**差 100~270px
         // （≈0.11m）—— 就是擦边板的 PnP 把模型 yaw 拽歪了。
+        // 换板时把底盘 yaw 相位重锚到新板的实测径向（默认开）。关闭用于 A/B。
+        bool reanchor_yaw_on_plate_switch = true;
         double graze_gate_deg = 50.0;      // 0 = 关闭
         double graze_noise_scale = 100.0;  // 距离噪声放大倍数
         double nearest_plate_margin_m = 0.05;   // 明显违反才翻（防抖）
@@ -595,6 +597,8 @@ namespace auto_aim
         double local_fit_apply_age_ms_ = -1.0;
         /// 最近一次拟合（含慢层）耗时（ms）——低功耗机器上这是关键指标。
         double local_fit_last_ms_ = -1.0;
+        /// 上一帧被选中的板号（换板检测：换板时把底盘 yaw 相位重锚到新板实测径向）。
+        int previous_plate_id_ = -1;
         /// 被选中那块板的**视视角**（度，0=正对、90=完全侧视）。用于调 graze_gate_deg。
         double last_view_deg_ = -1.0;
         /// 最后一次"往弧里累计灯条"的时间：worker 用它判断哪条弧还活着。
