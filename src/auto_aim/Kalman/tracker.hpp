@@ -308,6 +308,18 @@ namespace auto_aim
         // （≈0.11m）—— 就是擦边板的 PnP 把模型 yaw 拽歪了。
         // 换板时把底盘 yaw 相位重锚到新板的实测径向（默认开）。关闭用于 A/B。
         bool reanchor_yaw_on_plate_switch = true;
+
+        // ---- 同帧多板**联立解** (车心, yaw) --------------------------------------
+        // 用同帧 ≥2 块可信板的**观测位置**直接解 (车心, yaw)：位置是良态的，不像
+        // PnP 朝向有 ±12° 双解、也不像擦边距离会退化。两块的零空间只剩"沿视线平移"，
+        // 由已知的逐板半径补上 —— 所以它同时把 yaw 与"矩形底盘距离差"钉住，
+        // 换板时车心不再由"当前被钉那块"单独决定（实车换板跳 0.23~0.31m 的来源）。
+        // 解出的 (车心, yaw) 作为一路**强观测**喂 EKF（yaw/中心），
+        // 逐板距离差继续走 geometry_learn（用联立解之后更干净的残差）。
+        bool joint_solve = true;
+        double joint_solve_max_residual = 0.06;   // 联立残差 > 6cm 视为不可信，不喂
+        double joint_solve_yaw_noise = 0.0004;    // (rad²) ≈ 1.1°
+        double joint_solve_center_noise = 0.0004; // (m²) ≈ 2cm
         double graze_gate_deg = 50.0;      // 0 = 关闭
         double graze_noise_scale = 100.0;  // 距离噪声放大倍数
         double nearest_plate_margin_m = 0.05;   // 明显违反才翻（防抖）
@@ -513,6 +525,16 @@ namespace auto_aim
         double lastViewDeg() const { return last_view_deg_; }
         int localFitArcs() const { return static_cast<int>(local_fit_arcs_.size()); }
 
+        /// @brief 同帧多板联立解 (车心, yaw)（home 系）。返回是否成功（残差 < limit）。
+        ///        几何用当前慢层的逐板半径；只解 1 个 yaw 自由度（1D 高斯-牛顿），
+        ///        车心由各板反推取平均。板对接近正对/相反（信息矩阵退化）时返回 false。
+        bool solveChassisFromPlates(const std::vector<std::pair<int, Vec<3>>>& plates,
+                                    Vec<3>& center_out, double& yaw_out,
+                                    double& residual_out) const;
+        int jointSolveCount() const { return joint_solves_; }
+        double jointSolveResidual() const { return joint_solve_residual_; }
+        double jointSolveYaw() const { return joint_solve_yaw_; }
+
         /// @brief 收敛看门狗统计：触发次数 / 当前拒绝比例 / 是否收敛。
         struct WatchdogStats
         {
@@ -610,6 +632,10 @@ namespace auto_aim
         double local_fit_apply_age_ms_ = -1.0;
         /// 最近一次拟合（含慢层）耗时（ms）——低功耗机器上这是关键指标。
         double local_fit_last_ms_ = -1.0;
+        /// 同帧多板联立解统计（诊断用）。
+        int joint_solves_ = 0;
+        double joint_solve_residual_ = -1.0;
+        double joint_solve_yaw_ = 0.0;
         /// 拟合 yaw 相对 EKF yaw 的**常值相位偏置**在线估计（rad，模 90° 内）。
         /// 实测：直接注入拟合 yaw 会让慢转工况从 0.3px 劣化到 30px —— 拟合器自带
         /// ≈8~12° 的常值偏差；而 EKF 的滞后是 ∝ω 的、整圈平均≈0。所以把两者的差

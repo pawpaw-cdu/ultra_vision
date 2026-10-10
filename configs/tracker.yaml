@@ -198,6 +198,20 @@ tracker:
     # 沿新板方向被拖走（实车 CSV 实测：换板跳 0.43m、同板只抖 0.026m）。新板的实测
     # 径向直接给出底盘相位，用它硬置 yaw（只动 sin/cos，ω 保留）。默认开，可 A/B 关。
     reanchor_yaw_on_plate_switch: true
+    # ---- 同帧多板联立解 (车心, yaw)（默认开）----------------------------------
+    # 同帧 ≥2 块**可信**板时，用它们的**观测位置**直接解 (车心, yaw)：位置良态，
+    # 不用 PnP 朝向（±12° 双解）、不怕擦边距离退化。车心由多块板共同决定，
+    # 换板时不再由"当前被钉那块"单独决定（实车换板跳 0.2~0.3m 的来源）。
+    # 解出的 (车心,yaw) 作为强观测喂 EKF；逐板距离差继续走 geometry_learn。
+    # 注意：四块板 90° 对称 ⇒ yaw 只在模 90° 意义下有定义（整体差 90° 是等价解）。
+    # **默认关**：仿真同机 A/B（5rad/s、20s、同一台仿真）joint OFF 0.170 / ON 0.202 m
+    # —— 仿真检测无 PnP 双解、位置干净，EKF 自己已接近最优，联立解只是把两块板的
+    # 噪声再混一遍。实车（有 ±12° 双解、有换板拖中心）再 A/B 决定是否默认开。
+    # 单测已证明它本身是对的（两块板 90° 同现：相位误差 0.06°、残差 4.5mm）。
+    joint_solve: false
+    joint_solve_max_residual: 0.06    # 联立残差 > 6cm 视为不可信、不喂
+    joint_solve_yaw_noise: 0.0004     # rad² ≈ 1.1°
+    joint_solve_center_noise: 0.0004  # m² ≈ 2cm
     graze_gate_deg: 50.0
     graze_noise_scale: 100.0
     nearest_plate_constraint: false

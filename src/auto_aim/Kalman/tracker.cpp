@@ -480,6 +480,33 @@ namespace auto_aim
         } else {
             nearest_plate_violation_frames_ = 0;
         }
+        // ---- 同帧多板联立解 (车心, yaw) --------------------------------------
+        // 用同帧 ≥2 块可信板的**位置**解 (车心, yaw)，作为一路强观测喂 EKF。
+        // 位置良态（不像 PnP 朝向 ±12° 双解、擦边距离退化），且车心由多块板共同
+        // 决定 —— 换板时不再由"当前被钉那块"单独决定（实车换板跳 0.2~0.3m 的来源）。
+        if (cfg_.joint_solve && ekf_.isInit() && accepted_pairs.size() >= 2) {
+            std::vector<std::pair<int, Vec<3>>> plates;
+            plates.reserve(accepted_pairs.size());
+            for (const auto& entry : accepted_pairs)
+                plates.emplace_back(entry.first, toVec(valid_pairs[entry.second].home.tvec));
+            Vec<3> center_solved;
+            double yaw_solved = 0.0;
+            double residual = 0.0;
+            if (solveChassisFromPlates(plates, center_solved, yaw_solved, residual) &&
+                residual <= cfg_.joint_solve_max_residual) {
+                ekf_.updateAngle(
+                    ArmorEKF::normalizeAngle(yaw_solved + ArmorEKF::angleForPlate(0)), 0,
+                    cfg_.joint_solve_yaw_noise,
+                    std::numeric_limits<double>::infinity());
+                ekf_.updateCenter(center_solved, cfg_.joint_solve_center_noise,
+                                  cfg_.y_noise_mult,
+                                  std::numeric_limits<double>::infinity());
+                ++joint_solves_;
+                joint_solve_residual_ = residual;
+                joint_solve_yaw_ = yaw_solved;
+            }
+        }
+
         // ---- 硬约束：让"模型算出的这块板"精确落在观测上（只平移底盘中心）----
         // 单板工况下，滤波器对"中心沿板面法向/切向"这两个方向本就不可辨识，靠软量测
         // 会稳定偏出板心十几厘米（离线实测：径向 140 mm）。把观测当硬约束后，模型必定

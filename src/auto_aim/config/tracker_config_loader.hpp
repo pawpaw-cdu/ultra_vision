@@ -200,6 +200,13 @@ namespace auto_aim
             // PnP 平面解 yaw 的可信门限（度）；0 = 关闭门控（见 TrackerConfig 注释）。
             cfg.pnp_yaw_trust_deg =
                 kalman["pnp_yaw_trust_deg"].as<double>(cfg.pnp_yaw_trust_deg);
+            cfg.joint_solve = kalman["joint_solve"].as<bool>(cfg.joint_solve);
+            cfg.joint_solve_max_residual =
+                kalman["joint_solve_max_residual"].as<double>(cfg.joint_solve_max_residual);
+            cfg.joint_solve_yaw_noise =
+                kalman["joint_solve_yaw_noise"].as<double>(cfg.joint_solve_yaw_noise);
+            cfg.joint_solve_center_noise =
+                kalman["joint_solve_center_noise"].as<double>(cfg.joint_solve_center_noise);
             cfg.reanchor_yaw_on_plate_switch =
                 kalman["reanchor_yaw_on_plate_switch"].as<bool>(
                     cfg.reanchor_yaw_on_plate_switch);

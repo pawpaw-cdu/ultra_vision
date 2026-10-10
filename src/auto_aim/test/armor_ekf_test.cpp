@@ -389,6 +389,54 @@ int main()
                          "a clean nearest-plate stream must not trip the hard constraint");
     }
 
+    // ---- 同帧多板联立解 (车心, yaw) -----------------------------------------
+    // 两块板 90° 同现时，用**位置**解 (车心, yaw)；即使初始 yaw 差 25° 也必须收敛，
+    // 而且模型的两块板都要落在观测上（这是联合解存在的意义）。
+    {
+        auto_aim::TrackerConfig joint_cfg = tracker_config;
+        joint_cfg.joint_solve = true;
+        auto_aim::Tracker joint_tracker(joint_cfg);
+        constexpr double kCenterZ = 4.0;
+        constexpr double kTrueYaw = 0.6;
+        constexpr double kR = 0.22;
+        // 两块相邻板（id 2 与 id 3），位置按真值造
+        std::vector<auto_aim::Armor> armors;
+        for (int plate : {2, 3}) {
+            armors.push_back(makeTrackerArmor(kCenterZ, kTrueYaw, 0.0, 0.0, plate, kR));
+        }
+        // 先用一帧建立状态（初始 yaw 会由第一块板决定，故意偏 25°）
+        double t = 0.0;
+        for (int frame = 0; frame < 40; ++frame) {
+            t = frame * tracker_dt;
+            std::vector<auto_aim::Armor> obs;
+            for (int plate : {2, 3})
+                obs.push_back(makeTrackerArmor(kCenterZ, kTrueYaw, 0.0, t, plate, kR));
+            joint_tracker.update(obs, t);
+        }
+        // 注意：四块板 90° 对称 ⇒ "yaw" 只在**模 90°** 意义下有定义（整体差 90°
+        // 是等价解，画出来完全一样）。所以按模 90° 比较，并按"板位置集合"比较。
+        const double yaw_err = std::abs(std::remainder(
+            joint_tracker.getYawWorld() - kTrueYaw, 0.5 * kPi));
+        passed &= expect(yaw_err < 0.05,
+                         "two-plate joint solve must pin the chassis phase (mod 90 deg, ~3deg)");
+        passed &= expect(joint_tracker.jointSolveCount() > 0,
+                         "joint solve must actually run when two plates are seen");
+        // 两块板都要贴合（**无标签**比较：每块观测板到最近模型板的距离）
+        const auto model = joint_tracker.modelAt(0.0);
+        for (int plate : {2, 3}) {
+            const double phase = kTrueYaw + auto_aim::ArmorEKF::angleForPlate(plate);
+            const cv::Vec3d truth(kR * std::cos(phase), 0.0, kCenterZ + kR * std::sin(phase));
+            double best = 1e9;
+            for (int m = 0; m < 4; ++m)
+                best = std::min(best, cv::norm(model.poses[m].center - truth));
+            passed &= expect(best < 0.03,
+                             "joint solve must place BOTH observed plates on their detections");
+        }
+        std::cout << "joint solve: yaw_err(mod90)=" << yaw_err * 180.0 / kPi
+                  << "deg residual=" << joint_tracker.jointSolveResidual()
+                  << "m count=" << joint_tracker.jointSolveCount() << std::endl;
+    }
+
     // ---- PnP yaw 翻解保护（pnp_yaw_trust_deg）-------------------------------
     // 平面靶 IPPE 有两个解：同一块板的 yaw 会跳（实测 ±12°，极端镜像）。位置（bearing）
     // 是良态的，所以位置对、yaw 被翻的观测流必须：① 仍然选对板；② 不把整车模型带歪；

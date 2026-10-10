@@ -2020,6 +2020,10 @@ int auto_aim::app::RealRunner::run()
                       << " fitms=" << tracker.localFitLastMs()
                       // view=被选中那块板的视视角（度）：>graze_gate_deg 时该板的
                       // PnP 径向/距离会被降权（只信 bearing）。调门限就看这个数。
+                      // joint=同帧多板联立解 (车心,yaw) 的次数 + 最近一次残差(m)。
+                      // res 很小(<2cm) 说明两块板都被模型解释；n 不涨说明同帧没两块可信板。
+                      << " joint=" << tracker.jointSolveCount() << " jres="
+                      << tracker.jointSolveResidual()
                       << " view=" << tracker.lastViewDeg()
                       << " ufr=" << (tracker.fitRadiusEnabled() ? 1 : 0)
                       << " lf=" << (tracker.localFitEnabled() ? 1 : 0)
