@@ -79,6 +79,12 @@ namespace auto_aim
         // EKF 拉坏，A/B 里 6.5m/5rad 误差从 0.67 炸到 13.9）；ω/中心才是稳健可用的输出。
         // 默认只喂 ω（yaw 观测关）。
         bool use_yaw = false;
+        /// 拟合 yaw 相对 EKF yaw 的**常值相位偏置**在线学习（rad，模 90° 内）。
+        /// 实测：直接注入拟合 yaw 会让慢转工况从 0.3px 劣化到 30px —— 拟合器自带
+        /// ≈8~12° 的常值偏差；而 EKF 的滞后是 ∝ω 的、整圈平均≈0。把两者的差做慢低通
+        /// 当地标，注入前减掉，只取拟合器"无滞后"的那部分。
+        double yaw_bias_alpha = 0.02;      // 学习率
+        double yaw_bias_limit_deg = 30.0;  // 限幅（防跑飞）
         // 相机系→整车系符号（标定项）：拟合器的 θ 约定（相机 X-Z 平面，从 +Z 向 +X 量）
         // 与 EKF 的 ω/yaw 约定相反 → 仿真实测 -1（gyro5 A/B：+1 会让 EKF ω 更差，-1 明显更稳）。
         double yaw_rate_sign = -1.0;
@@ -597,6 +603,12 @@ namespace auto_aim
         double local_fit_apply_age_ms_ = -1.0;
         /// 最近一次拟合（含慢层）耗时（ms）——低功耗机器上这是关键指标。
         double local_fit_last_ms_ = -1.0;
+        /// 拟合 yaw 相对 EKF yaw 的**常值相位偏置**在线估计（rad，模 90° 内）。
+        /// 实测：直接注入拟合 yaw 会让慢转工况从 0.3px 劣化到 30px —— 拟合器自带
+        /// ≈8~12° 的常值偏差；而 EKF 的滞后是 ∝ω 的、整圈平均≈0。所以把两者的差
+        /// 做慢低通当地标，注入前减掉，只取拟合器"无滞后"的那部分。
+        double fit_yaw_bias_ = 0.0;
+        bool fit_yaw_bias_valid_ = false;
         /// 上一帧被选中的板号（换板检测：换板时把底盘 yaw 相位重锚到新板实测径向）。
         int previous_plate_id_ = -1;
         /// 被选中那块板的**视视角**（度，0=正对、90=完全侧视）。用于调 graze_gate_deg。

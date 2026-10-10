@@ -352,6 +352,26 @@ namespace auto_aim
         const double ekf_yaw = ekf_.getYaw();
         conv.yaw = ekf_yaw + std::remainder(conv.yaw - ekf_yaw, 0.5 * M_PI);
 
+        // ---- 拟合 yaw 的常值相位偏置在线学习 ------------------------------------
+        // 实测（model4 vs model5）：直接注入拟合 yaw 后，慢转工况从 0.3px 劣化到 30px
+        // —— 拟合器自带 ≈8~12° 的常值偏差（它自己的几何/约定），而 EKF 的滞后 ∝ω、
+        // 整圈平均≈0。把"拟合 yaw − EKF yaw"（模 90° 内）慢低通当地标，注入前减掉，
+        // 就只取拟合器"无滞后"的那部分。
+        {
+            const double diff = std::remainder(conv.yaw - ekf_yaw, 0.5 * M_PI);
+            const double limit = cfg_.local_fit.yaw_bias_limit_deg * M_PI / 180.0;
+            if (limit > 0.0 && std::abs(diff) < limit) {
+                if (!fit_yaw_bias_valid_) {
+                    fit_yaw_bias_ = diff;      // 首次直接建立
+                    fit_yaw_bias_valid_ = true;
+                } else {
+                    const double a = std::clamp(cfg_.local_fit.yaw_bias_alpha, 0.001, 0.5);
+                    fit_yaw_bias_ = (1.0 - a) * fit_yaw_bias_ + a * diff;
+                }
+            }
+            conv.yaw = wrapPi(conv.yaw - fit_yaw_bias_);
+        }
+
         // 默认只喂 ω（+中心），不喂 yaw（见 config.use_yaw；2026-10-10 起默认开）。
         if (!cfg_.local_fit.use_yaw || std::getenv("ULTRA_VISION_LOCAL_FIT_NO_YAW") != nullptr)
             conv.yaw = ekf_yaw;
