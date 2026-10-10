@@ -634,6 +634,16 @@ int auto_aim::app::RealRunner::run()
         "ULTRA_VISION_OBSERVATION_CSV",
         "x,y,z,rx,ry,rz,tracker_x,tracker_y,tracker_z,cmd_yaw,cmd_pitch,time_us,plate_id,state,"
         "u0,v0,u1,v1,u2,v2,u3,v3,source_time_us\n");
+    // 底盘模型逐帧导出（ULTRA_VISION_MODEL_CSV=/tmp/model.csv 时才落盘）：
+    // 模型中心/四块板心（相机系）+ 车心(yaw/ω 世界系) + 观测板 PnP + 几何 + 指标。
+    // 用途：把"模型到底在哪、怎么动"整段拿出来看，而不是靠一行行 log 猜。
+    // 单位：米 / 弧度；时间戳为观测时刻（与 observation.csv 同一时间基）。
+    auto model_recorder = std::make_unique<auto_aim::app::CsvSink>(
+        "ULTRA_VISION_MODEL_CSV",
+        "time_us,obs_id,n_det,reproj,model_fit,trusted_fit,"
+        "cx,cy,cz,wx,wy,wz,yaw,omega,"
+        "p0x,p0y,p0z,p1x,p1y,p1z,p2x,p2y,p2z,p3x,p3y,p3z,"
+        "obs_x,obs_y,obs_z,R0,R1,R2,R3,H0,H1,H2,H3,alpha\n");
 
     cv::Mat frame;
     cv::Mat image;
@@ -707,6 +717,10 @@ int auto_aim::app::RealRunner::run()
     double model_fit_max = 0.0;
     int model_fit_n = 0;
     // "最差那个检测"的细节（每条秒更新一次）：像素误差 + 三维误差(m) + 类型/PnP 距离/宽度/板号
+    double res_radial_sum = 0.0;
+    double res_tangent_sum = 0.0;
+    double res_vertical_sum = 0.0;
+    int res_n = 0;
     double trusted_fit_sum = 0.0;
     double trusted_fit_max = 0.0;
     int trusted_fit_n = 0;
@@ -1719,6 +1733,22 @@ int auto_aim::app::RealRunner::run()
                             trusted_fit_sum += best;
                             ++trusted_fit_n;
                             trusted_fit_max = std::max(trusted_fit_max, best);
+                            // 残差**按模型自身的三轴分解**（相机系）：这一步决定下一刀砍哪里
+                            //   radial   = 沿板法向   → 回转距离 R 错
+                            //   tangent  = 沿板切向   → **yaw 错**（相位）
+                            //   vertical = 沿灯条方向 → 板高 h / 车心 y 错
+                            if (best_plate >= 0) {
+                                const auto& ax = model_at_obs.poses[best_plate].axes;
+                                const cv::Vec3d obs_p(armor.tvec.at<double>(0),
+                                                      armor.tvec.at<double>(1),
+                                                      armor.tvec.at<double>(2));
+                                const cv::Vec3d mdl_p = model_at_obs.poses[best_plate].center;
+                                const cv::Vec3d res = obs_p - mdl_p;
+                                res_radial_sum += std::abs(res.dot(ax.normal));
+                                res_tangent_sum += std::abs(res.dot(ax.tangent));
+                                res_vertical_sum += std::abs(res.dot(ax.bar));
+                                ++res_n;
+                            }
                         } else {
                             ++ignored_dets;
                         }
@@ -1746,6 +1776,36 @@ int auto_aim::app::RealRunner::run()
                         }
                     }
                 }
+            }
+
+            // ---- 底盘模型逐帧落盘（ULTRA_VISION_MODEL_CSV）--------------------
+            if (*model_recorder && model.valid) {
+                const auto world_center = tracker.getTargetCenterWorldArray();
+                const auto& geom = tracker.chassisGeometry();
+                auto& s = model_recorder->stream();
+                s << std::fixed << std::setprecision(6)
+                  << static_cast<long long>(observation_time * 1e6) << ',' << observed_plate << ','
+                  << static_cast<int>(armors.size()) << ',' << reprojection_px << ','
+                  << (model_fit_n > 0 ? model_fit_sum / model_fit_n : -1.0) << ','
+                  << (trusted_fit_n > 0 ? trusted_fit_sum / trusted_fit_n : -1.0) << ','
+                  << model.center_camera[0] << ',' << model.center_camera[1] << ','
+                  << model.center_camera[2] << ',' << world_center[0] << ','
+                  << world_center[1] << ',' << world_center[2] << ',' << tracker.getYawWorld()
+                  << ',' << tracker.getOmega();
+                for (int plate = 0; plate < 4; ++plate) {
+                    s << ',' << model.poses[plate].center[0] << ','
+                      << model.poses[plate].center[1] << ',' << model.poses[plate].center[2];
+                }
+                if (has_observation && observed_armor.tvec.rows == 3) {
+                    s << ',' << observed_armor.tvec.at<double>(0) << ','
+                      << observed_armor.tvec.at<double>(1) << ','
+                      << observed_armor.tvec.at<double>(2);
+                } else {
+                    s << ",nan,nan,nan";
+                }
+                for (int plate = 0; plate < 4; ++plate) s << ',' << geom.distance(plate);
+                for (int plate = 0; plate < 4; ++plate) s << ',' << geom.height(plate);
+                s << ',' << geom.armor_pitch << '\n';
             }
 
             // 红点 = 底盘中心，也画在外推后的时刻（和上面四块板同一个时刻）。
@@ -1918,6 +1978,12 @@ int auto_aim::app::RealRunner::run()
                       << " trusted=" << (trusted_fit_n > 0 ? trusted_fit_sum / trusted_fit_n : -1.0)
                       << "/" << (trusted_fit_n > 0 ? trusted_fit_max : -1.0)
                       << "px(n=" << trusted_fit_n << ") ig=" << ignored_dets
+                      // 可信检测残差的三轴分解（米）：rad=沿板法向(R 错)
+                      // tan=沿切向(**yaw 错**) ver=沿灯条方向(板高/车心 y 错)
+                      << " res(rad=" << (res_n > 0 ? res_radial_sum / res_n : -1.0)
+                      << " tan=" << (res_n > 0 ? res_tangent_sum / res_n : -1.0)
+                      << " ver=" << (res_n > 0 ? res_vertical_sum / res_n : -1.0)
+                      << "m)"
                       // 最差那个检测：3D=到最近模型板的三维误差(m) type=大/小 d=PnP距离
                       // pxw=检测框宽度 px plate=最近模型板号
                       << " worst(3D=" << worst_det_err3d << "m d=" << worst_det_dist
@@ -2006,6 +2072,10 @@ int auto_aim::app::RealRunner::run()
             model_fit_sum = 0.0;
             model_fit_max = 0.0;
             model_fit_n = 0;
+            res_radial_sum = 0.0;
+            res_tangent_sum = 0.0;
+            res_vertical_sum = 0.0;
+            res_n = 0;
             trusted_fit_sum = 0.0;
             trusted_fit_max = 0.0;
             trusted_fit_n = 0;
