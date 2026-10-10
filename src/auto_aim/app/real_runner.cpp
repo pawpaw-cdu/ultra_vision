@@ -716,11 +716,27 @@ int auto_aim::app::RealRunner::run()
     //   panel1  回传 pitch vs 我们下发的 pitch
     //   panel2  板相对视轴 az/el（0 = 正中；收敛就是两条线回到 0）
     //   panel3  命令偏置 off yaw/pitch（比例项；有静差 = 弹性，发散 = 一直变大）
+    // 没有显示环境（SSH 会话 / 无 X / 无 Wayland）时**自动**关掉窗口：
+    // 否则 cv::imshow 会抛 "Can't initialize GTK backend" 直接 terminate（实车踩过）。
+    // 显式 ULTRA_VISION_NO_DISPLAY=1/0 仍然优先。
+    const bool display_env_ok = [] {
+#if defined(__linux__)
+        return std::getenv("DISPLAY") != nullptr || std::getenv("WAYLAND_DISPLAY") != nullptr;
+#else
+        return true;   // macOS/Windows 上窗口一般可用
+#endif
+    }();
+    const bool windows_wanted = std::getenv("ULTRA_VISION_NO_DISPLAY") == nullptr;
+    const bool windows_usable = windows_wanted && display_env_ok;
+    if (windows_wanted && !display_env_ok) {
+        std::cout << "[display] 没检测到 DISPLAY/WAYLAND_DISPLAY → 自动关闭窗口"
+                     "（无头运行；要用窗口请在有图形界面的终端里跑，或设 DISPLAY）"
+                  << std::endl;
+    }
     const char* curves_env = std::getenv("ULTRA_VISION_CURVES");
     const bool curves_enabled = curves_env != nullptr
         ? std::string(curves_env) != "0"
-        : (std::getenv("ULTRA_VISION_CURVE_CSV") != nullptr ||
-           std::getenv("ULTRA_VISION_NO_DISPLAY") == nullptr);
+        : (std::getenv("ULTRA_VISION_CURVE_CSV") != nullptr || windows_usable);
     auto_aim::visualization::CurvePlotter curves(600);
     const auto curve_start = std::chrono::steady_clock::now();
     curves.addCurve("mcu_yaw [deg]", cv::Scalar(80, 220, 255), 90.0, 0);
@@ -754,7 +770,7 @@ int auto_aim::app::RealRunner::run()
             std::cout << "[curve] CSV → " << curve_csv << "（第一列 t，单位 s）" << std::endl;
         }
     }
-    const bool show_display = std::getenv("ULTRA_VISION_NO_DISPLAY") == nullptr;
+    const bool show_display = windows_usable;
     // ------------------- 3.6 一次性"轴符号"探针 ---------------------------
     // 命令帧/符号这台车已经反复猜错（两版符号都试过、都朝反方向转），但"哪个符号对"
     // 其实是个**可测的量**，而且不需要任何坐标系假设：冻结图像闭环，只给 pitch 通道
@@ -1733,7 +1749,18 @@ int auto_aim::app::RealRunner::run()
                 const cv::Mat merged = curves.renderStacked(display, 1000);
                 if (!merged.empty()) display = merged;
             }
-            cv::imshow("Detection & Tracking", display);
+            // 双保险：即便有 DISPLAY，后端也可能失败（驱动/权限），任何异常都降级无头，
+            // 不能让一个画图异常把整条自瞄链路 terminate 掉。
+            static bool display_failed = false;
+            if (!display_failed) {
+                try {
+                    cv::imshow("Detection & Tracking", display);
+                } catch (const cv::Exception& e) {
+                    display_failed = true;
+                    std::cerr << "[display] imshow 失败（" << e.what()
+                              << "）→ 关闭窗口，继续无头运行" << std::endl;
+                }
+            }
         }
         key = show_display ? cv::waitKey(1) : 1;
 
