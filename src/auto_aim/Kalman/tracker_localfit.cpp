@@ -123,6 +123,14 @@ namespace auto_aim
             o.armor_id = pid;
             o.bar_offset = offset;
             o.confidence = 1.0;
+            // 诊断：落"推给拟合器的原始观测"（拟合器真正看到的东西，和观测 CSV 里
+            // tracker.getLastObservedArmor() 会重复/滞后不同）。
+            if (const char* p = std::getenv("ULTRA_VISION_LOCAL_FIT_PUSH")) {
+                static std::ofstream dump(p, std::ios::out);
+                dump << static_cast<long long>(o.timestamp * 1e6) << ',' << o.armor_id << ','
+                     << o.bar_offset << ',' << o.u_top << ',' << o.v_top << ',' << o.u_bot << ','
+                     << o.v_bot << '\n';
+            }
             arc->obs.push_back(o);
         };
         push_bar(armor.left, +0.5 * k_local_fit_plate_width);
