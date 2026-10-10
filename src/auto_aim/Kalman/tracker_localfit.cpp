@@ -148,16 +148,18 @@ namespace auto_aim
         push_bar(armor.right, -0.5 * k_local_fit_plate_width);
 
         // 弧内只保留最近 window_frames 帧（每帧 2 根灯条）
+        last_push_time_ = t;
         const size_t cap = static_cast<size_t>(2 * std::max(1, cfg_.local_fit.window_frames));
         if (arc->obs.size() > cap)
             arc->obs.erase(arc->obs.begin(), arc->obs.end() - static_cast<long>(cap));
 
-        // 清理长时间不活跃的空弧
+        // 清理长时间不活跃的弧：**不管里面还有没有 obs** 都要删。
+        // 暂停语义下（一帧丢门控不清空）旧弧会一直留着，不清理就会堆成几百条，
+        // 而且 worker 会挑中它们去拟合几十秒前的数据。
+        const double idle_timeout = std::max(1.0, 4.0 * cfg_.local_fit.max_result_age);
         local_fit_arcs_.erase(
             std::remove_if(local_fit_arcs_.begin(), local_fit_arcs_.end(),
-                           [&](const LocalFitArc& a) {
-                               return a.obs.empty() && t - a.t > cfg_.local_fit.max_result_age;
-                           }),
+                           [&](const LocalFitArc& a) { return t - a.t > idle_timeout; }),
             local_fit_arcs_.end());
     }
 
@@ -174,13 +176,20 @@ namespace auto_aim
         {
             std::lock_guard<std::mutex> lock(local_fit_mutex_);
             if (!local_fitter_) return false;
-            // 收集 >= min_bars 的弧，按长度降序
+            // 收集 >= min_bars 的弧，并且**必须是当前还活着的弧**：
+            // 距最后一次累计不超过 max_result_age —— 否则拟合的是几十秒前的旧弧，
+            // 结果会被 applyLatestLocalFit 的老化门限丢掉（实车 log: arcs=176、apply=2
+            // 就是挑中旧弧、结果全废）。并列时先按"最新"，再按长度。
             std::vector<const LocalFitArc*> cand;
-            for (const auto& a : local_fit_arcs_)
-                if (static_cast<int>(a.obs.size()) >= cfg_.local_fit.min_bars) cand.push_back(&a);
+            for (const auto& a : local_fit_arcs_) {
+                if (static_cast<int>(a.obs.size()) < cfg_.local_fit.min_bars) continue;
+                if (last_push_time_ - a.t > cfg_.local_fit.max_result_age) continue;
+                cand.push_back(&a);
+            }
             if (cand.empty()) return false;
             std::sort(cand.begin(), cand.end(), [](const LocalFitArc* x, const LocalFitArc* y) {
-                return x->obs.size() > y->obs.size();
+                if (x->obs.size() != y->obs.size()) return x->obs.size() > y->obs.size();
+                return x->t > y->t;
             });
             fitter = local_fitter_;
             window = cand.front()->obs;   // 参考弧（最长）

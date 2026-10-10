@@ -547,6 +547,8 @@ namespace auto_aim
         double local_fit_last_R_ = 0.0;
         int local_fit_last_bars_ = 0;
         int local_fit_pushed_ = 0;
+        /// 最后一次"往弧里累计灯条"的时间：worker 用它判断哪条弧还活着。
+        double last_push_time_ = 0.0;
         int local_fit_applied_ = 0;
         double plate_model_last_timestamp_ = -1.0;
         double plate_model_weight_ = 0.0;
