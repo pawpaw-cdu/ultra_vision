@@ -22,6 +22,8 @@
 #include <string>
 #include <vector>
 
+#include <opencv2/calib3d.hpp>
+
 namespace
 {
     struct BarObs { int bar_id = 0; double cu = 0.0, ut = 0, vt = 0, ub = 0, vb = 0; };
@@ -49,6 +51,21 @@ int main(int argc, char** argv)
     const int iu0=idx("u0"),iu1=idx("u1"),iu2=idx("u2"),iu3=idx("u3");
     const int iv0=idx("v0"),iv1=idx("v1"),iv2=idx("v2"),iv3=idx("v3");
     const bool pixel_mode = (iu0>=0 && iv0>=0 && iu3>=0 && iv3>=0);
+    // 可选：离线按镜头畸变先去畸变（在线拟合器会做这一步；实车对账必须一致）。
+    //   ULTRA_VISION_LOCAL_FIT_TOOL_DIST="k1,k2,p1,p2[,k3]"
+    std::vector<double> dist_v;
+    if (const char* de = std::getenv("ULTRA_VISION_LOCAL_FIT_TOOL_DIST")) {
+        std::stringstream ds(de); std::string tok;
+        while (std::getline(ds, tok, ',')) { try { dist_v.push_back(std::stod(tok)); } catch (...) {} }
+    }
+    const cv::Mat Kmat = (cv::Mat_<double>(3, 3) << cfg.K.fx, 0.0, cfg.K.cx,
+                          0.0, cfg.K.fy, cfg.K.cy, 0.0, 0.0, 1.0);
+    cv::Mat Dmat;
+    if (dist_v.size() >= 4) { Dmat = cv::Mat(static_cast<int>(dist_v.size()), 1, CV_64F); for (size_t i=0;i<dist_v.size();++i) Dmat.at<double>((int)i,0)=dist_v[i]; }
+    auto und=[&](double& u, double& vv){ if (Dmat.empty()) return;
+        std::vector<cv::Point2f> in{cv::Point2f((float)u,(float)vv)}, out;
+        cv::undistortPoints(in,out,Kmat,Dmat,cv::noArray(),Kmat);
+        if(!out.empty()){u=out[0].x; vv=out[0].y;} };
     auto proj=[&](double X,double Y,double Z,double&u,double&v){u=cfg.K.fx*X/Z+cfg.K.cx; v=cfg.K.fy*Y/Z+cfg.K.cy;};
     const int maxcol = pixel_mode ? std::max({i_t,i_pl,iu0,iv0,iu1,iv1,iu2,iv2,iu3,iv3}) : std::max({i_t,i_pl,i0,i1,i2,i3,i4,i5});
 
@@ -65,8 +82,11 @@ int main(int argc, char** argv)
         if (pixel_mode)
         {
             // 检测到的角点顺序 = Armor::Points_2D = {left.bottom, left.top, right.top, right.bottom}
-            BarObs L; L.bar_id=0; L.ub=v[iu0]; L.vb=v[iv0]; L.ut=v[iu1]; L.vt=v[iv1]; L.cu=0.5*(L.ut+L.ub);
-            BarObs R; R.bar_id=1; R.ut=v[iu2]; R.vt=v[iv2]; R.ub=v[iu3]; R.vb=v[iv3]; R.cu=0.5*(R.ut+R.ub);
+            double lb_u=v[iu0], lb_v=v[iv0], lt_u=v[iu1], lt_v=v[iv1];
+            double rt_u=v[iu2], rt_v=v[iv2], rb_u=v[iu3], rb_v=v[iv3];
+            und(lb_u, lb_v); und(lt_u, lt_v); und(rt_u, rt_v); und(rb_u, rb_v);
+            BarObs L; L.bar_id=0; L.ub=lb_u; L.vb=lb_v; L.ut=lt_u; L.vt=lt_v; L.cu=0.5*(L.ut+L.ub);
+            BarObs R; R.bar_id=1; R.ut=rt_u; R.vt=rt_v; R.ub=rb_u; R.vb=rb_v; R.cu=0.5*(R.ut+R.ub);
             if (std::isnan(L.ut)||std::isnan(R.ut)) continue;
             frames[it->second].bars.push_back(L);
             frames[it->second].bars.push_back(R);
