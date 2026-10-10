@@ -84,6 +84,19 @@ namespace auto_aim
             std::array<double, 9> rcv_;
         };
 
+        // h 的慢层先验：r = (h − h_prior)/σ。防止快层把 Cz 的误差吸进 h。
+        struct HeightPrior
+        {
+            explicit HeightPrior(double prior, double sigma) : prior_(prior), inv_(1.0 / sigma) {}
+            template <typename T>
+            bool operator()(const T* const h, T* residual) const
+            {
+                residual[0] = (h[0] - T(prior_)) * T(inv_);
+                return true;
+            }
+            double prior_, inv_;
+        };
+
         struct VelPrior
         {
             explicit VelPrior(double sigma) : inv_(1.0 / sigma) {}
@@ -200,6 +213,13 @@ namespace auto_aim
             if (!use_beta) problem.SetParameterBlockConstant(&beta);
             problem.AddResidualBlock(
                 new ceres::AutoDiffCostFunction<VelPrior, 3, 3>(new VelPrior(0.6)), nullptr, vel);
+            // h 的慢层先验（见 HeightPrior 注释）：把"板心高度是机械常数"显式加进残差。
+            if (cfg.h_prior_sigma > 1e-6) {
+                problem.AddResidualBlock(
+                    new ceres::AutoDiffCostFunction<HeightPrior, 1, 1>(
+                        new HeightPrior(cfg.h_prior, cfg.h_prior_sigma)),
+                    nullptr, &h);
+            }
             problem.SetParameterLowerBound(&h, 0, -2.0);
             problem.SetParameterUpperBound(&h, 0, 2.0);
             // θ0 只在 cos/sin 里出现 → 模 2π 等价，限定到 [-π,π] 即可（防优化器沿

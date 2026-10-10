@@ -976,6 +976,16 @@ int auto_aim::app::RealRunner::run()
             // 关掉 rcv 时退回 Rx(gimbal_pitch·sign + pitch_offset)·R_base 的旧口径做 A/B。
             auto fcfg = local_fitter_->config();
             bool changed = false;
+            // h 的慢层先验 = tracker 慢层几何里的板心高度（见 LocalTrajectoryFitConfig
+            // 的 h_prior 注释：显式加入"板心高度是机械常数"这条硬约束，防止快层把
+            // Cz 的误差吸进 h）。慢层本身由拟合器结果缓慢更新，所以这是一条**慢反馈**。
+            {
+                const double h_now = tracker.chassisGeometry().height(0);
+                if (std::abs(fcfg.h_prior - h_now) > 1e-4) {
+                    fcfg.h_prior = h_now;
+                    changed = true;
+                }
+            }
             if (local_fit_rcv_pose_) {
                 const auto R = tracker.fitterRcv();
                 if (!fcfg.use_rcv || fcfg.rcv != R) { fcfg.use_rcv = true; fcfg.rcv = R; changed = true; }

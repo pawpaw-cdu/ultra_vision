@@ -40,6 +40,16 @@ namespace auto_aim
         std::array<double, 9> rcv{{1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0}};
         std::array<double, 3> center_init{{0.0, 0.0, 3.0}};
         double h_init = 0.10;           // 灯条中心高度初值（车辆系）
+        // ---- 高度 h（板心相对旋转中心的高度，车辆系，向上为正）的**慢层先验** ----
+        // h 在快层里是自由变量，而它与 Cz 强耦合（板心的 v 坐标同时受两者影响）：
+        // 拟合器会把本该属于 Cz 的误差吸进 h。给它一个慢层先验（σ 内自由），
+        // 就等于把"板心高度是机械常数"这条硬约束**显式**加进残差 —— 部分打破 h-Cz 耦合。
+        // 先验值由 tracker 慢层几何提供（geometry.plate_height，缓慢收敛）。
+        // 量化前提（本项目实车实测）：相机与板心高度差仅 ~6cm（obs_y/cz≈0.02），
+        // ∂v/∂Cz ≈ f·Δh/Cz² ≈ 16 px/m（不是 44 px/m），所以这条约束的**绝对增益有限**，
+        // 主要价值是"别让 h 乱跑"。
+        double h_prior = 0.0;
+        double h_prior_sigma = 0.05;    // m；<=0 表示不加先验
         double omega_init = 3.0;        // 角速度初值（rad/s，多起点用）
         int omega_model_order = 1;      // 1=常 ω；2=带角加速度 β
         int max_iterations = 100;
