@@ -186,6 +186,7 @@ namespace auto_aim
         }
         LocalFitResult result;
         bool ok = false;
+        ++local_fit_attempts_;
         if (aux.empty())
         {
             ok = fitter(window, result) && result.valid;
@@ -225,7 +226,11 @@ namespace auto_aim
                     << result.reprojection_rmse_px << ',' << (ok ? 1 : 0) << ',' << dbg_k << ','
                     << result.R << '\n';
             }
+        local_fit_last_rmse_ = result.reprojection_rmse_px;
+        local_fit_last_R_ = result.R;
+        local_fit_last_bars_ = static_cast<int>(window.size());
         if (!ok) return false;
+        ++local_fit_valids_;
 
         std::lock_guard<std::mutex> lock(local_fit_mutex_);
         latest_local_fit_ = result;

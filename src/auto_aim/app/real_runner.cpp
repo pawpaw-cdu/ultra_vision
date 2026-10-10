@@ -1812,6 +1812,11 @@ int auto_aim::app::RealRunner::run()
                                     tracker.chassisGeometry().distance(1),
                                     tracker.chassisGeometry().distance(2),
                                     tracker.chassisGeometry().distance(3))
+                      // 局部拟合器统计：attempts/valids + 最近一次 rmse/R/灯条数。
+                      // 实车若一直 R=(cfg)、motion=0，就看这里的 valids 与 rmse。
+                      << ", fit=" << tracker.localFitValids() << "/" << tracker.localFitAttempts()
+                      << " rmse=" << tracker.localFitLastRmse() << "px Rfit="
+                      << tracker.localFitLastR() << " nbars=" << tracker.localFitLastBars()
                       << ", np_flip=" << tracker.nearestPlateFlips()
                       << ", motion=" << static_cast<int>(tracker.lastMotion())
                       << "(0静/1转/2移/3转+移)"

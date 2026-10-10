@@ -415,7 +415,22 @@ namespace auto_aim
                     }
                 }
             }
-            if (geometry_changed) syncGeometryToEkf();
+            if (geometry_changed) {
+                // **尺度锚定**：只让学习器改"逐板差异"（矩形底盘），总尺度不动 ——
+                // 单板帧里"半径偏大"与"车心沿径向偏"不可分（实车 log 里 Rgeo 一路
+                // 涨到 clamp 就是这个耦合），尺度交给拟合器的弧段解（可观）。
+                double mean = 0.0;
+                for (double d : geometry_.plate_distance) mean += d;
+                mean /= 4.0;
+                double anchor = cfg_.armor_radius;
+                if (armor_radius_online_ > 0.0) anchor = armor_radius_online_;
+                for (std::size_t i = 0; i < geometry_.plate_distance.size(); ++i) {
+                    geometry_.plate_distance[i] = std::clamp(
+                        geometry_.plate_distance[i] + (anchor - mean),
+                        anchor - cfg_.geometry_learn_range, anchor + cfg_.geometry_learn_range);
+                }
+                syncGeometryToEkf();
+            }
         }
 
         // 判据必须用**沿视轴的深度**，不能用"到相机的距离"：

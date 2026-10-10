@@ -453,6 +453,12 @@ namespace auto_aim
         int nearestPlateFlips() const { return nearest_plate_flips_; }
         /// @brief 最近一次拟合判出的运动状态（诊断用）。
         ChassisMotion lastMotion() const { return last_motion_; }
+        /// @brief 局部拟合器运行统计（诊断：实车"R=(cfg)/motion 一直 0"就是它没出过有效解）。
+        int localFitAttempts() const { return local_fit_attempts_; }
+        int localFitValids() const { return local_fit_valids_; }
+        double localFitLastRmse() const { return local_fit_last_rmse_; }
+        double localFitLastR() const { return local_fit_last_R_; }
+        int localFitLastBars() const { return local_fit_last_bars_; }
 
         /// @brief 收敛看门狗统计：触发次数 / 当前拒绝比例 / 是否收敛。
         struct WatchdogStats
@@ -530,6 +536,12 @@ namespace auto_aim
         int nearest_plate_violation_frames_ = 0;
         /// 最近一次拟合判出的运动状态（诊断/状态行用）。
         ChassisMotion last_motion_ = ChassisMotion::Still;
+        /// 局部拟合器统计（诊断用）。
+        int local_fit_attempts_ = 0;
+        int local_fit_valids_ = 0;
+        double local_fit_last_rmse_ = -1.0;
+        double local_fit_last_R_ = 0.0;
+        int local_fit_last_bars_ = 0;
         double plate_model_last_timestamp_ = -1.0;
         double plate_model_weight_ = 0.0;
         /// @brief 由板模型反推的整车状态（板心 − R·径向；yaw = 板朝向 − 板号相位）。
