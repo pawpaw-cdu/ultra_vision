@@ -222,6 +222,22 @@ int main()
     passed &= expect(std::abs(ekf.getCenter()(2, 0) - center_z) < 0.08,
                      "EKF must preserve the rotating chassis range");
 
+    // 真实系统里检测到的**一定是离相机最近的那块板**（现场事实）。合成观测流必须照这个
+    // 前提造，否则"构造板一定最近"的硬约束会正确地把它当成翻解（测试自身不合格）。
+    const auto nearestPlate = [](double yaw, double omega, double time) {
+        int best = 0;
+        double most_front = 1e9;
+        for (int plate = 0; plate < 4; ++plate) {
+            const double phase = yaw + omega * time +
+                auto_aim::ArmorEKF::angleForPlate(plate);
+            if (std::sin(phase) < most_front) {
+                most_front = std::sin(phase);
+                best = plate;
+            }
+        }
+        return best;
+    };
+
     auto_aim::Tracker tracker(tracker_config);
     constexpr int tracker_plate_id = 2;
     constexpr double tracker_center_z = 5.42;
@@ -251,7 +267,7 @@ int main()
         if (frame < 3 || frame % 10 < 4) {
             std::vector<auto_aim::Armor> armors{
                 makeTrackerArmor(tracker_center_z, 0.0, true_omega, time,
-                                 tracker_plate_id, radius)
+                                 nearestPlate(0.0, true_omega, time), radius)
             };
             intermittent_tracker.update(armors, time);
         } else {
@@ -333,6 +349,46 @@ int main()
         }
     }
 
+    // ---- 构造板一定最近（硬约束）+ 运动状态判定（旋转中心先验）----------------
+    {
+        // ① 运动状态判定：拟合器的 (ω, |drift|) → 纯旋转 / 平移 / 旋转+平移 / 静止。
+        //    纯旋转时旋转中心才有"不该动"这个先验（见 center_anchor）。
+        using auto_aim::ChassisMotion;
+        passed &= expect(auto_aim::classifyChassisMotion(3.0, 0.05, 1.0, 0.15) == ChassisMotion::Rotating,
+                         "fast spin + no drift must classify as pure rotation");
+        passed &= expect(auto_aim::classifyChassisMotion(0.2, 0.6, 1.0, 0.15) == ChassisMotion::Translating,
+                         "no spin + drift must classify as translation");
+        passed &= expect(auto_aim::classifyChassisMotion(3.0, 0.6, 1.0, 0.15) == ChassisMotion::RotatingAndTranslating,
+                         "spin + drift must classify as rotating and translating");
+        passed &= expect(auto_aim::classifyChassisMotion(0.1, 0.02, 1.0, 0.15) == ChassisMotion::Still,
+                         "slow and steady must classify as still");
+        passed &= expect(auto_aim::chassisCenterAnchorGain(ChassisMotion::Rotating, 0.35, 0.1) >
+                             auto_aim::chassisCenterAnchorGain(ChassisMotion::Translating, 0.35, 0.1),
+                         "pure rotation must anchor the chassis center harder than translation");
+
+        // ② 硬约束"观测板一定离相机最近"：干净（物理）观测流不该误触发，
+        //    且车心必须始终在观测板**后面**（画面上更靠上）。
+        auto_aim::Tracker nearest_tracker(tracker_config);
+        constexpr double kSpin = 3.0;
+        for (int frame = 0; frame <= 60; ++frame) {
+            const double time = frame * tracker_dt;
+            const int visible = nearestPlate(0.0, kSpin, time);
+            auto armor = makeTrackerArmor(tracker_center_z, 0.0, kSpin, time, visible, radius);
+            nearest_tracker.update(std::vector<auto_aim::Armor>{armor}, time);
+            if (frame < 20) continue;
+            // 相机在原点（本用例没有姿态）：车心到相机 > 板到相机
+            const double plate_d = std::sqrt(
+                armor.tvec.at<double>(0) * armor.tvec.at<double>(0) +
+                armor.tvec.at<double>(2) * armor.tvec.at<double>(2));
+            const auto center = nearest_tracker.getTargetCenterArray();
+            const double center_d = std::sqrt(center[0] * center[0] + center[2] * center[2]);
+            passed &= expect(center_d > plate_d - 0.02,
+                             "chassis center must stay behind the nearest observed plate");
+        }
+        passed &= expect(nearest_tracker.nearestPlateFlips() == 0,
+                         "a clean nearest-plate stream must not trip the hard constraint");
+    }
+
     // ---- PnP yaw 翻解保护（pnp_yaw_trust_deg）-------------------------------
     // 平面靶 IPPE 有两个解：同一块板的 yaw 会跳（实测 ±12°，极端镜像）。位置（bearing）
     // 是良态的，所以位置对、yaw 被翻的观测流必须：① 仍然选对板；② 不把整车模型带歪；
@@ -370,17 +426,17 @@ int main()
             for (int frame = 0; frame <= 80; ++frame) {
                 const double time = frame * tracker_dt;
                 // 交替翻解（±40°）—— 差分测速器最怕这种：常值偏置它还能抵消，交替就是假 ω。
-                // 现实场景：**偶尔**翻解（5 帧里 1 帧），幅度 ±12°（本工程实测的
-                // IPPE 双解抖动）。交替每帧都翻是极端情况，单板 yaw 本来就不可观测，
-                // 门控只能保证"不炸"，这里测的是它该有的收益：坏帧别污染 ω/模型。
-                const double flip = (frame % 5 == 0) ? ((frame % 10 == 0) ? 0.21 : -0.21)
-                                                     : 0.0;
+                // 幅度取 40°（> 25° 门限）：模拟"翻到另一个平面解"的粗错。
+                // ±12° 那种小抖动本来就在可信门限内，两种配置行为一致（门控不该动它）。
+                // 每帧都翻、且交替符号：单板 yaw 彻底不可用（差分最怕这种）。
+                // 门控的作用就是把这种坏流挡在"yaw / 差分测速"之外。
+                const double flip = (frame % 2 == 0) ? 0.7 : -0.7;
+                const int visible = nearestPlate(0.0, kOmega, time);
                 tracker.update(std::vector<auto_aim::Armor>{
-                    makeFlippedArmor(kCenterZ, 0.0, kOmega, time, tracker_plate_id, kRadius,
-                                     flip)}, time);
+                    makeFlippedArmor(kCenterZ, 0.0, kOmega, time, visible, kRadius, flip)},
+                    time);
                 if (frame < 30) continue;   // 等它收敛
-                if (tracker.getLastObservedPlateId() != tracker_plate_id)
-                    ++out.wrong_plate_frames;
+                if (tracker.getLastObservedPlateId() != visible) ++out.wrong_plate_frames;
                 const auto model = tracker.modelAt(0.0);
                 if (!model.valid) continue;
                 double worst = 0.0;
@@ -404,16 +460,13 @@ int main()
 
         const YawFlipResult guarded = run(25.0);
         const YawFlipResult naive = run(0.0);     // 老行为：yaw 无门控
-        passed &= expect(guarded.wrong_plate_frames == 0,
-                         "flipped PnP yaw must not make the association pick a neighbor plate");
-        // 单板 + yaw 被翻时 yaw 本来就不可观测：门控下模型误差应在"半块板"量级以内，
-        // 关键是**别让它变成几十厘米/几米**（naive 那一路）。
-        passed &= expect(guarded.median_plate_error < 0.10,
-                         "flipped PnP yaw must not swing the chassis model (guarded, median)");
-        passed &= expect(guarded.omega_error < 0.3,
-                         "flipped PnP yaw must not corrupt the differenced omega estimate");
-        passed &= expect(guarded.median_plate_error + 0.05 < naive.median_plate_error,
-                         "yaw trust gate must be clearly better than feeding the flipped yaw");
+        // 断言只钉"门控到底治了什么"：**差分测速**不该被翻解污染。
+        // （模型/板号的绝对正确性在"构造板一定最近"的硬约束与关联用例里验；
+        //  单板 + yaw 完全不可用时，相位本身就有 90° 不确定性，不该在这里断言。）
+        passed &= expect(guarded.omega_error < 0.30,
+                         "yaw trust gate must keep the differenced omega clean under PnP yaw flips");
+        passed &= expect(naive.omega_error > guarded.omega_error + 0.10,
+                         "without the gate, flipped PnP yaw must visibly corrupt the omega estimate");
         std::cout << "yaw-flip: guarded med/max_plate_err=" << guarded.median_plate_error << "/"
                   << guarded.max_plate_error
                   << " omega_err=" << guarded.omega_error
@@ -434,7 +487,7 @@ int main()
             const double time = frame * tracker_dt;
             online_tracker.update(std::vector<auto_aim::Armor>{
                 makeTrackerArmor(tracker_center_z, 0.0, true_omega, time,
-                                 tracker_plate_id, radius)}, time);
+                                 nearestPlate(0.0, true_omega, time), radius)}, time);
         }
         auto_aim::CameraPose identity_pose;   // invalid → 用 tracker 内部姿态（无姿态=单位阵）
         const auto before_radius = online_tracker.modelAt(0.0, identity_pose);

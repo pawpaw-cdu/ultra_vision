@@ -134,6 +134,41 @@ namespace auto_aim
         return poses;
     }
 
+    /// @brief 底盘的运动状态（由局部拟合器一次弧段拟合出来的 ω 与旋转中心平移速度判定）。
+    ///        现场思路：**纯旋转时旋转中心不该动** —— 这给"旋转中心/模型构造"一个先验，
+    ///        避免车心被单块检测板的噪声拖着跑（"旋转中心随检测板跑飞"）。
+    enum class ChassisMotion
+    {
+        Still,                    // 既不怎么转也不怎么平移
+        Rotating,                 // 纯旋转（小陀螺）→ 中心可用强先验
+        Translating,              // 纯平移
+        RotatingAndTranslating,   // 陀螺 + 跑动
+    };
+
+    /// @param omega     拟合角速度（rad/s）
+    /// @param speed     旋转中心平移速度（m/s，|drift|）
+    /// @param spin_min  判定"在转"的最小 |ω|（rad/s）
+    /// @param move_max  判定"没怎么平移"的最大速度（m/s）
+    inline ChassisMotion classifyChassisMotion(double omega, double speed, double spin_min,
+                                               double move_max)
+    {
+        const bool spinning = std::abs(omega) >= spin_min;
+        const bool moving = speed >= move_max;
+        if (spinning && moving) return ChassisMotion::RotatingAndTranslating;
+        if (spinning) return ChassisMotion::Rotating;
+        if (moving) return ChassisMotion::Translating;
+        return ChassisMotion::Still;
+    }
+
+    /// @brief 由运动状态给出"把滤波器车心拉向拟合中心"的系数（0=不拉，1=完全替换）。
+    ///        纯旋转：中心物理上不变 → 强拉（但不硬替，留一点柔性给慢漂移）；
+    ///        有平移：中心本来就在动 → 只轻拉，主要靠滤波器自己跟。
+    inline double chassisCenterAnchorGain(ChassisMotion motion, double gain_rotating,
+                                          double gain_other)
+    {
+        return motion == ChassisMotion::Rotating ? gain_rotating : gain_other;
+    }
+
     /// @brief 把一个世界系姿态转到相机系（板心用点变换，三轴用方向变换）。
     ///        调用方必须传**同一时刻**的相机姿态 —— 这就是"模型重投影到哪一帧"
     ///        的唯一开关，禁止再用 tracker 内部存的那个（观测时刻的）姿态去画。

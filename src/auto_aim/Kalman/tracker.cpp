@@ -373,6 +373,23 @@ namespace auto_aim
         }
 
         plate_id_ = best_plate_id;
+        // ---- 硬约束：构造用的那块板一定是**离相机最近**的那块 ----------------
+        // 车心必须比它更远（画面上更靠上）。违反 = 模型的径向/相位翻了 180°
+        // （PnP 法向翻号或关联到对面板）→ 把 yaw 翻回来再摆。
+        if (cfg_.nearest_plate_constraint && ekf_.isInit()) {
+            const Vec<3> camera_home = tracker_detail::pointToWorld(camera_pose_, Vec<3>());
+            const Vec<3> observed = toVec(valid_pairs[best_armor_index].home.tvec);
+            const Vec<3> center = ekf_.getCenter();
+            const auto squared = [](const Vec<3>& v) {
+                return v(0, 0) * v(0, 0) + v(1, 0) * v(1, 0) + v(2, 0) * v(2, 0);
+            };
+            const double plate_distance2 = squared(observed - camera_home);
+            const double center_distance2 = squared(center - camera_home);
+            if (center_distance2 + cfg_.nearest_plate_margin_m < plate_distance2) {
+                ekf_.flipChassisYaw();
+                ++nearest_plate_flips_;
+            }
+        }
         // ---- 硬约束：让"模型算出的这块板"精确落在观测上（只平移底盘中心）----
         // 单板工况下，滤波器对"中心沿板面法向/切向"这两个方向本就不可辨识，靠软量测
         // 会稳定偏出板心十几厘米（离线实测：径向 140 mm）。把观测当硬约束后，模型必定

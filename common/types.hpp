@@ -124,6 +124,7 @@ namespace auto_aim
         double alpha = 0.0;             // 灯条安装倾角（rad，慢层）
         double R = 0.20;                // 回转半径（m，慢层）
         double h = 0.0;                 // 板心相对旋转中心的高度（m，向上为正；慢层）
+        double drift[3] = {0, 0, 0};    // 旋转中心的平移速度（m/s，相机系；快层）
         double reprojection_rmse_px = 0.0;  // 诊断用，不作为唯一有效性判据
         double quality = 0.0;           // 0~1，越大越可信（用于缩放观测协方差）
         int num_bars = 0;               // 参与拟合的灯条数

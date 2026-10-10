@@ -825,6 +825,15 @@ public:
         x_(7, 0) += delta(2, 0);
     }
 
+    /// @brief 底盘 yaw 翻 180°（sin/cos 同时取反），协方差不动。
+    ///        用途：**硬约束**"构造用的那块板一定是离相机最近的那块"被违反时，
+    ///        说明模型的径向翻了 180°（PnP 法向翻号 / 关联到对面板），把相位翻回来。
+    void flipChassisYaw() {
+        if (!initialized_) return;
+        x_(4, 0) = -x_(4, 0);
+        x_(5, 0) = -x_(5, 0);
+    }
+
     void dampMotion(double linear_factor, double angular_factor) {
         if (!initialized_) return;
         x_(1, 0) *= linear_factor;

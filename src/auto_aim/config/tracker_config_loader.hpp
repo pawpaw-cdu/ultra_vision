@@ -79,6 +79,21 @@ namespace auto_aim
                 lf["radius_alpha"].as<double>(cfg.local_fit.radius_alpha);
             cfg.local_fit.radius_max_step =
                 lf["radius_max_step"].as<double>(cfg.local_fit.radius_max_step);
+            cfg.local_fit.center_anchor =
+                lf["center_anchor"].as<bool>(cfg.local_fit.center_anchor);
+            cfg.local_fit.center_anchor_spin_min =
+                lf["center_anchor_spin_min"].as<double>(cfg.local_fit.center_anchor_spin_min);
+            cfg.local_fit.center_anchor_move_max =
+                lf["center_anchor_move_max"].as<double>(cfg.local_fit.center_anchor_move_max);
+            cfg.local_fit.center_anchor_gain_rotating =
+                lf["center_anchor_gain_rotating"].as<double>(
+                    cfg.local_fit.center_anchor_gain_rotating);
+            cfg.local_fit.center_anchor_gain_other =
+                lf["center_anchor_gain_other"].as<double>(
+                    cfg.local_fit.center_anchor_gain_other);
+            cfg.local_fit.center_anchor_max_error =
+                lf["center_anchor_max_error"].as<double>(
+                    cfg.local_fit.center_anchor_max_error);
         }
 
         if (const YAML::Node rotation = tracker["rotation_rate"]) {
@@ -174,6 +189,10 @@ namespace auto_aim
             // PnP 平面解 yaw 的可信门限（度）；0 = 关闭门控（见 TrackerConfig 注释）。
             cfg.pnp_yaw_trust_deg =
                 kalman["pnp_yaw_trust_deg"].as<double>(cfg.pnp_yaw_trust_deg);
+            cfg.nearest_plate_constraint =
+                kalman["nearest_plate_constraint"].as<bool>(cfg.nearest_plate_constraint);
+            cfg.nearest_plate_margin_m =
+                kalman["nearest_plate_margin_m"].as<double>(cfg.nearest_plate_margin_m);
             cfg.position_nis_threshold =
                 kalman["position_nis_threshold"].as<double>(
                     cfg.position_nis_threshold);

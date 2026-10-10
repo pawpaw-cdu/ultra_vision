@@ -93,6 +93,18 @@ tracker:
     use_fit_radius: true
     radius_alpha: 0.25         # 每次有效拟合最多跟 25% 的差值
     radius_max_step: 0.02      # 单次最大变化（m）
+    # ---- 旋转中心先验（拟合器判运动状态）--------------------------------------
+    # 拟合器在一个弧段上同时解出 (ω, 旋转中心平移速度 drift)：
+    #   |ω| ≥ spin_min 且 |drift| < move_max → **纯旋转** → 旋转中心物理上不该动，
+    #   把车心往拟合中心强拉（gain_rotating）；有平移时只轻拉（gain_other）。
+    # 治的是"旋转中心被单块检测板的噪声拖着跑"，也给模型构造一个中心先验。
+    # 判错的代价：纯旋转被当成平移 → 只是拉得慢一点，不会发散。
+    center_anchor: true
+    center_anchor_spin_min: 1.0        # rad/s
+    center_anchor_move_max: 0.15       # m/s
+    center_anchor_gain_rotating: 0.35
+    center_anchor_gain_other: 0.10
+    center_anchor_max_error: 0.60      # 拟合中心与车心差太多就不拉（m）
 
 
   # ---- 估计器（ArmorEKF）---------------------------------------------------
@@ -144,6 +156,12 @@ tracker:
     # 当它和滤波器预测一致（≤ 本值）时才把 yaw 算进代价、才让 EKF 用它的 yaw 分量；
     # 不一致就当"这一帧没测到 yaw"，位置照用、yaw 由 ω 外推 + 拟合器慢层给。
     pnp_yaw_trust_deg: 25.0
+    # 硬约束：用来构造底盘的那块板一定是**离相机最近**的那块（现场事实）——
+    # 车心（以及另外三块板）必须比它更远/画面上更靠上。违反说明模型的径向翻了 180°
+    # （PnP 法向翻号 / 关联到对面板），把底盘 yaw 翻回来重摆。
+    # margin 是"明显违反才翻"的缓冲（m），防抖。
+    nearest_plate_constraint: true
+    nearest_plate_margin_m: 0.05
     # 距离门限同理随距离噪声放大（上限 m）；角度门限仍是主判据，不会放进相邻板。
     range_gate_sigma: 2.0
     range_gate_max: 1.00

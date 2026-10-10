@@ -296,6 +296,40 @@ namespace auto_aim
         if (cfg_.local_fit.use_fit_radius)
             updateChassisFromFit(fit->R, fit->alpha, fit->h);
 
+        // ---- 旋转中心先验：拟合器判出的运动状态决定"中心该不该动" ----------
+        // 纯旋转 → 旋转中心物理上不变 → 把车心往拟合中心拉（强）；有平移 → 只轻拉。
+        // 这一步是"防止旋转中心随检测板跑飞"的关键，也是模型构造的先验来源。
+        if (cfg_.local_fit.center_anchor)
+        {
+            const double speed = std::sqrt(fit->drift[0] * fit->drift[0] +
+                                           fit->drift[1] * fit->drift[1] +
+                                           fit->drift[2] * fit->drift[2]);
+            const ChassisMotion motion = classifyChassisMotion(
+                fit->omega, speed, cfg_.local_fit.center_anchor_spin_min,
+                cfg_.local_fit.center_anchor_move_max);
+            Vec<3> camera_center;
+            camera_center(0, 0) = fit->center[0];
+            camera_center(1, 0) = fit->center[1];
+            camera_center(2, 0) = fit->center[2];
+            const Vec<3> fit_center_home = camera_pose_.valid
+                ? tracker_detail::pointToWorld(camera_pose_, camera_center)
+                : camera_center;
+            const Vec<3> current = ekf_.getCenter();
+            const double error = std::sqrt(std::pow(fit_center_home(0, 0) - current(0, 0), 2) +
+                                           std::pow(fit_center_home(1, 0) - current(1, 0), 2) +
+                                           std::pow(fit_center_home(2, 0) - current(2, 0), 2));
+            const double gain = chassisCenterAnchorGain(
+                motion, cfg_.local_fit.center_anchor_gain_rotating,
+                cfg_.local_fit.center_anchor_gain_other);
+            if (error < cfg_.local_fit.center_anchor_max_error && gain > 0.0)
+            {
+                Vec<3> delta;
+                for (int i = 0; i < 3; ++i)
+                    delta(i, 0) = gain * (fit_center_home(i, 0) - current(i, 0));
+                ekf_.shiftCenter(delta);
+            }
+        }
+
         // 可选：把拟合出的**旋转中心**也当观测（also_update_center，默认关）。
         // 单板工况下模型中心只能靠"钉在观测板上"得到，擦边/正面观测的 PnP 位置误差
         // （实测 ±0.15 m）会 1:1 进模型中心 —— 自旋时整台车的重投影框被单块板拖着跑，

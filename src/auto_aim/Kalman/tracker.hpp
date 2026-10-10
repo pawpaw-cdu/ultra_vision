@@ -96,6 +96,19 @@ namespace auto_aim
         bool use_fit_radius = false;
         double radius_alpha = 0.25;      // 一阶低通系数（每次有效拟合最多跟 25%）
         double radius_max_step = 0.02;   // 单次最大变化（m）
+        // ---- 旋转中心先验（由拟合器判运动状态）--------------------------------
+        // 拟合器在一个弧段上同时解出 (ω, 旋转中心平移速度 drift)：
+        //   · |ω| 大 & |drift| 小 → **纯旋转** → 旋转中心物理上不该动 → 把车心往
+        //     拟合中心强拉（这就是"拟合器给模型构造提供先验"）；
+        //   · 有平移 → 中心本来就在动，只轻拉。
+        // 治的是"旋转中心被单块检测板的噪声拖着跑"。见 common/chassis_model.hpp 的
+        // classifyChassisMotion / chassisCenterAnchorGain。
+        bool center_anchor = true;
+        double center_anchor_spin_min = 1.0;      // rad/s
+        double center_anchor_move_max = 0.15;     // m/s
+        double center_anchor_gain_rotating = 0.35;
+        double center_anchor_gain_other = 0.10;
+        double center_anchor_max_error = 0.60;    // 差太多（m）说明拟合不可信，不拉
     };
 
     struct TrackerConfig {
@@ -241,6 +254,13 @@ namespace auto_aim
         //     yaw 分量；超了就当"这一帧没测到 yaw"（位置照用，yaw 靠 ω 外推/拟合器）。
         // 0 = 关闭门控（回到老行为，A/B 用）。
         double pnp_yaw_trust_deg = 25.0;
+        // ---- 硬约束：构造用的那块板一定是**离相机最近**的那块 -------------------
+        // 现场事实（用户确认）：我们总是拿最正对相机、也就是最近的那块板来建底盘。
+        // 推论：车心（以及另外三块板）在画面上一定比这块板**更靠上/更远**。
+        // 违反 = 模型的径向翻了 180°（PnP 法向翻号、或关联到对面板）——
+        // 这时把底盘 yaw 翻回来重摆，比让车心跑到板前面去要正确得多。
+        bool nearest_plate_constraint = true;
+        double nearest_plate_margin_m = 0.05;   // 明显违反才翻（防抖）
         double position_nis_threshold = 7.815;
         double angle_nis_threshold = 3.841;
         // ---- NIS：诊断量而不是硬门限（对齐 sp_vision 的 recent_nis_failures）----
@@ -413,6 +433,8 @@ namespace auto_aim
         }
         bool armorRadiusOnline() const { return armor_radius_online_ > 0.0; }
         double getLastMeasurementWeight() const { return last_measurement_weight_; }
+        /// @brief "构造板一定最近"硬约束把 yaw 翻回来的累计次数（诊断用）。
+        int nearestPlateFlips() const { return nearest_plate_flips_; }
 
         /// @brief 收敛看门狗统计：触发次数 / 当前拒绝比例 / 是否收敛。
         struct WatchdogStats
@@ -484,6 +506,8 @@ namespace auto_aim
         /// 底盘慢层几何（唯一模型来源；由 config / 拟合器慢层 / 观测慢收敛更新）。
         ChassisGeometry geometry_;
         PlateEKF plate_ekf_;                       // 双模型的装甲板模型
+        /// "最近板硬约束"把 yaw 翻回来的次数（诊断：正常应长期为 0，只有翻解时才动）。
+        int nearest_plate_flips_ = 0;
         double plate_model_last_timestamp_ = -1.0;
         double plate_model_weight_ = 0.0;
         /// @brief 由板模型反推的整车状态（板心 − R·径向；yaw = 板朝向 − 板号相位）。
