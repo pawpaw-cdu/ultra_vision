@@ -459,6 +459,10 @@ namespace auto_aim
         double localFitLastRmse() const { return local_fit_last_rmse_; }
         double localFitLastR() const { return local_fit_last_R_; }
         int localFitLastBars() const { return local_fit_last_bars_; }
+        /// 推给拟合器的灯条总数 / 拟合结果真正写进几何的次数（诊断用）。
+        int localFitPushed() const { return local_fit_pushed_; }
+        int localFitApplied() const { return local_fit_applied_; }
+        int localFitArcs() const { return static_cast<int>(local_fit_arcs_.size()); }
 
         /// @brief 收敛看门狗统计：触发次数 / 当前拒绝比例 / 是否收敛。
         struct WatchdogStats
@@ -542,6 +546,8 @@ namespace auto_aim
         double local_fit_last_rmse_ = -1.0;
         double local_fit_last_R_ = 0.0;
         int local_fit_last_bars_ = 0;
+        int local_fit_pushed_ = 0;
+        int local_fit_applied_ = 0;
         double plate_model_last_timestamp_ = -1.0;
         double plate_model_weight_ = 0.0;
         /// @brief 由板模型反推的整车状态（板心 − R·径向；yaw = 板朝向 − 板号相位）。

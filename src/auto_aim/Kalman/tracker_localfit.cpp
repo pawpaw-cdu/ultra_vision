@@ -71,10 +71,19 @@ namespace auto_aim
         }
         if (!front)
         {
-            // 板转离正对区 → 关掉命中的那条弧（清空），等 worker 拟合完/丢弃，
-            // 避免把两次正面弧首尾拼起来（相位跨 >90° 会出镜像解）。
-            if (arc) { arc->obs.clear(); arc->plate_hint = -1; }
+            // 板离开正对区：**只暂停，不清空**。
+            // 真机上板在门控阈值附近会来回抖，一帧不满足就把整条弧清掉 ⇒ 弧永远攒不够
+            // min_bars ⇒ 拟合器几乎不触发（实车 log: fit=2/5 就是这个原因）。
+            // "两次正面弧首尾拼起来"由下面的 gap 检查挡住（距上次累计太久才清）。
             return;
+        }
+        // 距上次累计太久（板转过一圈又回来 / 中间长时间被挡）→ 清空重来：
+        // θ(t) 线性模型跨过 >90° 相位会出镜像解。
+        const double arc_gap_timeout = std::max(0.25, 1.5 * cfg_.local_fit.max_result_age);
+        if (arc != nullptr && (t - arc->t) > arc_gap_timeout)
+        {
+            arc->obs.clear();
+            arc->plate_hint = -1;
         }
         if (arc == nullptr)
         {
@@ -133,6 +142,7 @@ namespace auto_aim
                      << o.v_bot << '\n';
             }
             arc->obs.push_back(o);
+            ++local_fit_pushed_;
         };
         push_bar(armor.left, +0.5 * k_local_fit_plate_width);
         push_bar(armor.right, -0.5 * k_local_fit_plate_width);
@@ -234,6 +244,7 @@ namespace auto_aim
 
         std::lock_guard<std::mutex> lock(local_fit_mutex_);
         latest_local_fit_ = result;
+        ++local_fit_applied_;
         return true;
     }
 

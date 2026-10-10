@@ -1817,6 +1817,11 @@ int auto_aim::app::RealRunner::run()
                       << ", fit=" << tracker.localFitValids() << "/" << tracker.localFitAttempts()
                       << " rmse=" << tracker.localFitLastRmse() << "px Rfit="
                       << tracker.localFitLastR() << " nbars=" << tracker.localFitLastBars()
+                      // push=推给拟合器的灯条累计、arcs=当前弧数、apply=结果真正写进几何的次数。
+                      // 若 push 在涨而 arcs 一直是 0/1 → 门控把它挡了；apply=0 → 时间基/老化。
+                      << " push=" << tracker.localFitPushed()
+                      << " arcs=" << tracker.localFitArcs()
+                      << " apply=" << tracker.localFitApplied()
                       << ", np_flip=" << tracker.nearestPlateFlips()
                       << ", motion=" << static_cast<int>(tracker.lastMotion())
                       << "(0静/1转/2移/3转+移)"
