@@ -64,8 +64,12 @@ namespace auto_aim
         {
             const double dt = t - a.t;
             if (dt <= 0 || dt > cfg_.local_fit.max_result_age) continue;
-            // 板号提示：同一弧内板号应一致（armor_id 是几何选的板号，做身份提示足够）。
-            if (armor_id >= 0 && armor_id <= 3 && a.plate_hint >= 0 && a.plate_hint != armor_id) continue;
+            // **只用像素邻近 + 常速预测**做弧关联，不要拿 plateIdFor 的板号当硬条件：
+            // 板号来自模型 yaw，会被 PnP 平面解抖动带着跳（fore/aft/left/right 全试过），
+            // 一跳就每帧新建一条弧、弧永远攒不到 min_bars —— 实车 log 里
+            // push=4280 却只 fit=4/5、arcs 一直是 1~2 就是这个。
+            // 本车相邻板在图像里差 100+px，45px 的门限不会串台，所以位置足够判身份。
+            // 板号仍然保留，只作为"给拟合器的相位偏移提示"，并且每帧用最新的覆盖。
             const double d = std::hypot(cu - (a.u + a.vu * dt), cv - (a.v + a.vv * dt));
             if (d < cfg_.local_fit.assoc_gate_px && d < best) { best = d; arc = &a; }
         }
@@ -87,6 +91,7 @@ namespace auto_aim
         }
         if (arc == nullptr)
         {
+            ++local_fit_new_arcs_;
             local_fit_arcs_.push_back(LocalFitArc{});
             arc = &local_fit_arcs_.back();
             arc->plate_hint = (armor_id >= 0 && armor_id <= 3) ? armor_id : -1;
@@ -97,6 +102,9 @@ namespace auto_aim
         }
         else
         {
+            ++local_fit_links_;
+            // 每帧用**最新**的几何板号刷新提示（板号会随 PnP 抖，用最近的更可信）。
+            if (armor_id >= 0 && armor_id <= 3) arc->plate_hint = armor_id;
             const double dt = t - arc->t;
             if (dt > 0)
             {
@@ -186,11 +194,14 @@ namespace auto_aim
                 if (last_push_time_ - a.t > cfg_.local_fit.max_result_age) continue;
                 cand.push_back(&a);
             }
-            if (cand.empty()) return false;
+            if (cand.empty()) { ++local_fit_cand_empty_; return false; }
             std::sort(cand.begin(), cand.end(), [](const LocalFitArc* x, const LocalFitArc* y) {
                 if (x->obs.size() != y->obs.size()) return x->obs.size() > y->obs.size();
                 return x->t > y->t;
             });
+            for (const auto& a : local_fit_arcs_)
+                local_fit_obs_max_ = std::max(local_fit_obs_max_,
+                                              static_cast<int>(a.obs.size()));
             fitter = local_fitter_;
             window = cand.front()->obs;   // 参考弧（最长）
             ref_hint = (cand.front()->plate_hint >= 0 && cand.front()->plate_hint <= 3)

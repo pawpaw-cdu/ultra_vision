@@ -464,6 +464,10 @@ namespace auto_aim
         int localFitApplied() const { return local_fit_applied_; }
         bool fitRadiusEnabled() const { return cfg_.local_fit.use_fit_radius; }
         bool localFitEnabled() const { return cfg_.local_fit.enabled; }
+        int localFitLinks() const { return local_fit_links_; }
+        int localFitNewArcs() const { return local_fit_new_arcs_; }
+        int localFitObsMax() const { return local_fit_obs_max_; }
+        int localFitCandEmpty() const { return local_fit_cand_empty_; }
         int localFitApplyCalls() const { return local_fit_apply_calls_; }
         int localFitApplyNoFit() const { return local_fit_apply_no_fit_; }
         int localFitApplyStale() const { return local_fit_apply_stale_; }
@@ -555,6 +559,12 @@ namespace auto_aim
         int local_fit_last_bars_ = 0;
         int local_fit_pushed_ = 0;
         // applyLatestLocalFit 的逐步计数（定位"拟合有结果但没生效"）
+        // 弧关联统计：linked=接进已有弧、new=新建弧、obs_max=见过的最大弧长、
+        // cand_empty=worker 有灯条但没弧够 min_bars 的次数。定位"弧攒不起来"。
+        int local_fit_links_ = 0;
+        int local_fit_new_arcs_ = 0;
+        int local_fit_obs_max_ = 0;
+        int local_fit_cand_empty_ = 0;
         int local_fit_apply_calls_ = 0;
         int local_fit_apply_no_fit_ = 0;
         int local_fit_apply_stale_ = 0;
