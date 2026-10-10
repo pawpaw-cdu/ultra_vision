@@ -274,6 +274,11 @@ namespace auto_aim
         double geometry_learn_max_step = 0.004;   // 单帧最大 4 mm
         double geometry_learn_max_error = 0.05;   // 残差 > 5 cm 当异常，不学
         double geometry_learn_range = 0.08;       // 相对初值最多学 ±8 cm
+        // 逐板**高度**学习默认关：在 hard_plate_constraint 下，"板高"与"车心 y"完全
+        // 不可分（硬钉把车心 y 钉在观测板上），观测到的竖直残差里还混着靶车真实的
+        // 上下运动 —— 开着的实测结果是它自己随机游走，模型整体被抬/压下去几十 px。
+        // 真机四块板同高是硬件事实，保持 0（需要时才开，并配合 status 行的 Hgeo 看）。
+        bool geometry_learn_height = false;
 
         // ---- 硬约束：构造用的那块板一定是**离相机最近**的那块 -------------------
         // 现场事实（用户确认）：我们总是拿最正对相机、也就是最近的那块板来建底盘。

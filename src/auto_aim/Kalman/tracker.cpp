@@ -404,7 +404,8 @@ namespace auto_aim
                         geometry_changed = true;
                     }
                 }
-                if (std::abs(vertical_error) < cfg_.geometry_learn_max_error) {
+                if (cfg_.geometry_learn_height &&
+                    std::abs(vertical_error) < cfg_.geometry_learn_max_error) {
                     const double step = std::clamp(-cfg_.geometry_learn_gain * vertical_error,
                                                    -cfg_.geometry_learn_max_step,
                                                    cfg_.geometry_learn_max_step);

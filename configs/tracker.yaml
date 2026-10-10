@@ -185,6 +185,10 @@ tracker:
     geometry_learn_max_step: 0.004
     geometry_learn_max_error: 0.05
     geometry_learn_range: 0.08
+    # 逐板**高度**学习（默认关）：硬钉下车心 y 与板高不可分，开了会随机游走、
+    # 把模型整体抬/压几十 px（实车实测 model_fit 从 8px 涨到 70~86px）。
+    # 真机四块板同高是硬件事实，保持 0；要试就配合 status 行的 Hgeo= 看。
+    geometry_learn_height: false
     # 距离门限同理随距离噪声放大（上限 m）；角度门限仍是主判据，不会放进相邻板。
     range_gate_sigma: 2.0
     range_gate_max: 1.00

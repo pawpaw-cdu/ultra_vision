@@ -1594,8 +1594,17 @@ int auto_aim::app::RealRunner::run()
             // 的状态外推到被显示那一帧，并用**那一帧的相机姿态**做世界→相机变换
             // （真机云台在延迟期间会动/漂，用观测时刻的姿态画整片模型都是歪的）。
             // 控制/选板那条路已由选择器按 estimate.age 补过，不要重复补。
-            const double model_dt = std::max(0.0, std::min(observation_age, 0.20));
+            // 画面上的模型要外推到**被显示那一帧的曝光时刻**：
+            // observation_age 是"相对当前时刻"的年龄，减去这一帧自身的传输延迟 frame_age，
+            // 才是"显示帧 ↔ 观测帧"的真实时间差（不减去会让模型比画面提前 20~30ms，
+            // 自旋 3.45 rad/s 时就是 4~6°，画面上模型"抢在板前面"）。
+            const double model_dt =
+                std::max(0.0, std::min(observation_age - frame_age, 0.20));
             const auto model = tracker.modelAt(model_dt, render_pose);
+            // **指标必须与检测同刻**：reproj / model_fit 是"模型 vs 本帧检测框"，
+            // 若拿外推到"现在"的模型去比 30ms 前的检测，会混进 ω·延迟 的伪误差
+            // （实测 3.45 rad/s、30ms → 60~100px，看起来像模型崩了，其实是时间差）。
+            const auto model_at_obs = tracker.modelAt(0.0, camera_pose);
             for (int plate = 0; plate < 4; ++plate) {
                 if (!model.valid) continue;
                 const auto_aim::ArmorPose& pose = model.poses[plate];
@@ -1617,6 +1626,19 @@ int auto_aim::app::RealRunner::run()
                             corners[0] + cv::Point2f(2.0f, -3.0f), cv::FONT_HERSHEY_SIMPLEX, 0.45,
                             color, 1, cv::LINE_AA);
                 if (observed) {
+                    // 用**与检测同刻**的模型算残差（见 model_at_obs 的注释）。
+                    std::vector<cv::Point2f> corners_at_obs = corners;
+                    if (model_at_obs.valid) {
+                        const auto& pose_obs = model_at_obs.poses[plate];
+                        const cv::Mat center_obs =
+                            (cv::Mat_<double>(3, 1) << pose_obs.center[0], pose_obs.center[1],
+                             pose_obs.center[2]);
+                        const auto projected = auto_aim::projectArmorCameraFrame(
+                            center_obs, pose_obs.axes.tangent, pose_obs.axes.bar,
+                            tracker.armorHalfWidth(plate), tracker.armorHalfHeight(),
+                            auto_aim::CAMERA_MATRIX, auto_aim::DIST_COEFFS);
+                        if (projected.size() == 4) corners_at_obs = projected;
+                    }
                     // 角点顺序：模型是 (左下,左上,右上,右下)，检测是 (左上,右上,右下,左下)
                     // —— 必须循环移位配对，否则等于把一个"板高"当成误差（实测虚报 ~90 px）。
                     const std::array<cv::Point2f, 4> detected{
@@ -1628,7 +1650,7 @@ int auto_aim::app::RealRunner::run()
                     for (int shift = 0; shift < 4; ++shift) {
                         double sum = 0.0;
                         for (int k = 0; k < 4; ++k) {
-                            sum += cv::norm(corners[k] - detected[(k + shift) % 4]);
+                            sum += cv::norm(corners_at_obs[k] - detected[(k + shift) % 4]);
                         }
                         best = std::min(best, sum / 4.0);
                     }
@@ -1642,11 +1664,11 @@ int auto_aim::app::RealRunner::run()
             // 中心比最近距离。正确时典型 ≲10 px；姿态约定（pitch 符号 / 世界系约定）
             // 错了会几十~上百 px，而 reproj 仍然很小 —— 这正是"被观测板贴得住、
             // 另外三块板飞了"的直接度量。
-            if (model.valid && !armors.empty()) {
+            if (model_at_obs.valid && !armors.empty()) {
                 std::array<cv::Point2f, 4> model_px{};
                 std::array<bool, 4> model_px_ok{};
                 for (int plate = 0; plate < 4; ++plate) {
-                    const auto& pose = model.poses[plate];
+                    const auto& pose = model_at_obs.poses[plate];
                     const cv::Mat plate_center =
                         (cv::Mat_<double>(3, 1) << pose.center[0], pose.center[1], pose.center[2]);
                     model_px_ok[plate] = auto_aim::projectPoint(
@@ -1868,6 +1890,14 @@ int auto_aim::app::RealRunner::run()
                       << " fitms=" << tracker.localFitLastMs()
                       << " ufr=" << (tracker.fitRadiusEnabled() ? 1 : 0)
                       << " lf=" << (tracker.localFitEnabled() ? 1 : 0)
+                      // 逐板高度（cm，向上为正）——默认应恒为 0.0/0.0/0.0/0.0；
+                      // 若它在漂，就是"高度学习"在随机游走（默认已关）。
+                      << ", Hgeo="
+                      << cv::format("%.1f/%.1f/%.1f/%.1f",
+                                    tracker.chassisGeometry().height(0) * 100.0,
+                                    tracker.chassisGeometry().height(1) * 100.0,
+                                    tracker.chassisGeometry().height(2) * 100.0,
+                                    tracker.chassisGeometry().height(3) * 100.0)
                       << ", np_flip=" << tracker.nearestPlateFlips()
                       << ", motion=" << static_cast<int>(tracker.lastMotion())
                       << "(0静/1转/2移/3转+移)"
