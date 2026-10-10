@@ -67,6 +67,7 @@ namespace auto_aim
                 lf["max_window_gap_frames"].as<int>(cfg.local_fit.max_window_gap_frames);
             cfg.local_fit.yaw_noise = lf["yaw_noise"].as<double>(cfg.local_fit.yaw_noise);
             cfg.local_fit.omega_noise = lf["omega_noise"].as<double>(cfg.local_fit.omega_noise);
+            cfg.local_fit.use_yaw = lf["use_yaw"].as<bool>(cfg.local_fit.use_yaw);
             cfg.local_fit.yaw_rate_sign =
                 lf["yaw_rate_sign"].as<double>(cfg.local_fit.yaw_rate_sign);
             cfg.local_fit.also_update_center =

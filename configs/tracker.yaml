@@ -76,6 +76,12 @@ tracker:
     # 结果算出来就已经"几秒前"，用 0.2s 一刀切会把几何全丢掉（实车实测 geometry=0）。
     max_slow_result_age: 2.00
     max_window_gap_frames: 6   # 连续丢帧超过它就清窗（避免跨运动段）
+    # 是否把拟合 yaw 也当观测喂 EKF（默认 false=只喂 ω）。**2026-10-10 起改 true**：
+    # MODEL_CSV 实测模型误差与转速成正比（ω=1.65→trusted_fit 0.5px；ω=4.5→45px，
+    # ≈13° yaw 滞后 = 4.5rad/s × 50ms），那是 **EKF 平滑滞后**，而拟合器给的是
+    # **弧段解**、没有单帧滞后。早期它被关是因为当时相位/关联还在抖，现在
+    # 90° 吸附 + 换板相位重锚 + 擦边门控都在，重新启用。要 A/B：false。
+    use_yaw: true
     yaw_noise: 0.02            # 拟合 yaw 的观测噪声（rad²）
     omega_noise: 0.05          # 拟合 ω 的观测噪声
     # 相机系→整车系符号（标定项）：拟合器 θ 约定与 EKF ω 约定相反 → -1
@@ -105,7 +111,8 @@ tracker:
     # ⚠ 默认关：它会把车心往拟合中心拉（纯旋转 0.35/次），而车心本来由"硬钉到
     # 观测板"决定 —— 拟合中心依赖拟合器自己的几何(R/α/h)，几何没标好时这一拉会让
     # 模型整体偏离观测。实车单独 A/B 确认收益后再打开。
-    center_anchor: false
+    # 同步打开：纯旋转时中心不该动（拟合器判运动状态），小陀螺段能让车心更稳。
+    center_anchor: true
     center_anchor_spin_min: 1.0        # rad/s
     center_anchor_move_max: 0.15       # m/s
     center_anchor_gain_rotating: 0.35
