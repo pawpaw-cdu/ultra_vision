@@ -62,6 +62,13 @@ namespace auto_aim
         // 实际门限取 max(max_rmse_px, fx·tan(max_rmse_deg))，即"绝对像素"当保底，
         // 角度门限随分辨率自动放大。
         double max_rmse_deg = 0.4;
+        // Ceres 单次求解的时间上限（秒）。NUC 这类低功耗 x86 上，一次弧段拟合
+        // （fitWithSlow 会跑 2~3 次快层 + 慢层）可能要几百 ms；不限时会让 worker
+        // 几秒才转一圈，结果算完就已经"十几秒前"了（实车 log: fit=1/2、age=11.8s）。
+        // 注意：这是**安全网**，不是常规限速。仿真实测：0.05s → 有效解 17%（被掐断）；
+        // 0.25s → 99%、5s → 同样 99%，所以 0.25s 足够且能防住病态初值。
+        // 慢层结果的工龄由 LocalFitConfig::max_slow_result_age 兜（默认 2s）。
+        double max_solver_time_s = 0.25;
         // 板 yaw 偏移（armor_id → 偏移角）。默认四板 90° 均布。
         std::vector<double> plate_yaw_offsets{0.0, M_PI / 2, M_PI, 3.0 * M_PI / 2};
     };

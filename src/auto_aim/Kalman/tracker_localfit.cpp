@@ -57,22 +57,33 @@ namespace auto_aim
         const double sep_max = k_local_fit_plate_width * camera_fx_ / std::max(0.5, depth);
         const bool front = sep > cfg_.local_fit.front_gate * sep_max;
 
-        // A1 身份：按图像板心"最近邻 + 常速预测"关联到某条已开弧（不用 plate_id 分身份）
+        // A1 身份：按图像板心"最近邻 + 常速预测"关联到某条已开弧。
+        // **板号（plateIdFor）只当偏好，不当硬条件**：
+        //   · 板号来自模型 yaw，会被 PnP 平面解抖动带着跳；当硬条件时一跳就每帧新建弧，
+        //     弧永远攒不到 min_bars（实车 log: push=4280 却 fit=4/5）。
+        //   · 但完全不用板号也不行：同帧两块板在图像里接近时会把两块板串进一条弧，
+        //     弧里混了两块板的数据 → 拟合残差变大、有效解比例掉（仿真实测 100%→24%）。
+        // 所以：**优先接板号一致的弧；没有才退到最近的弧**。
         LocalFitArc* arc = nullptr;
+        LocalFitArc* fallback = nullptr;
         double best = 1e9;
+        double best_fallback = 1e9;
         for (auto& a : local_fit_arcs_)
         {
             const double dt = t - a.t;
             if (dt <= 0 || dt > cfg_.local_fit.max_result_age) continue;
-            // **只用像素邻近 + 常速预测**做弧关联，不要拿 plateIdFor 的板号当硬条件：
-            // 板号来自模型 yaw，会被 PnP 平面解抖动带着跳（fore/aft/left/right 全试过），
-            // 一跳就每帧新建一条弧、弧永远攒不到 min_bars —— 实车 log 里
-            // push=4280 却只 fit=4/5、arcs 一直是 1~2 就是这个。
-            // 本车相邻板在图像里差 100+px，45px 的门限不会串台，所以位置足够判身份。
-            // 板号仍然保留，只作为"给拟合器的相位偏移提示"，并且每帧用最新的覆盖。
             const double d = std::hypot(cu - (a.u + a.vu * dt), cv - (a.v + a.vv * dt));
-            if (d < cfg_.local_fit.assoc_gate_px && d < best) { best = d; arc = &a; }
+            if (d >= cfg_.local_fit.assoc_gate_px) continue;
+            const bool hint_match = !(armor_id >= 0 && armor_id <= 3 && a.plate_hint >= 0 &&
+                                      a.plate_hint != armor_id);
+            if (hint_match) {
+                if (d < best) { best = d; arc = &a; }
+            } else if (d < best_fallback) {
+                best_fallback = d;
+                fallback = &a;
+            }
         }
+        if (arc == nullptr) arc = fallback;
         if (!front)
         {
             // 板离开正对区：**只暂停，不清空**。
@@ -103,8 +114,9 @@ namespace auto_aim
         else
         {
             ++local_fit_links_;
-            // 每帧用**最新**的几何板号刷新提示（板号会随 PnP 抖，用最近的更可信）。
-            if (armor_id >= 0 && armor_id <= 3) arc->plate_hint = armor_id;
+            // 只在弧还很新时刷新板号提示（避免把两块板串起来后身份被改来改去）。
+            if (arc->obs.size() <= 2 && armor_id >= 0 && armor_id <= 3)
+                arc->plate_hint = armor_id;
             const double dt = t - arc->t;
             if (dt > 0)
             {
@@ -217,6 +229,7 @@ namespace auto_aim
         LocalFitResult result;
         bool ok = false;
         ++local_fit_attempts_;
+        const auto fit_begin = std::chrono::steady_clock::now();
         if (aux.empty())
         {
             ok = fitter(window, result) && result.valid;
@@ -256,6 +269,9 @@ namespace auto_aim
                     << result.reprojection_rmse_px << ',' << (ok ? 1 : 0) << ',' << dbg_k << ','
                     << result.R << '\n';
             }
+        local_fit_last_ms_ =
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
+                                                     fit_begin).count();
         local_fit_last_rmse_ = result.reprojection_rmse_px;
         local_fit_last_R_ = result.R;
         local_fit_last_bars_ = static_cast<int>(window.size());
@@ -305,7 +321,11 @@ namespace auto_aim
         if (!fit || !fit->valid) { ++local_fit_apply_no_fit_; return 0.0; }
         const double age = last_timestamp_ - fit->timestamp;
         local_fit_apply_age_ms_ = age * 1000.0;
-        if (age > cfg_.local_fit.max_result_age) { ++local_fit_apply_stale_; return 0.0; }
+        // 快层（ω/yaw）必须新鲜；慢层（R/α/h/中心）允许"几秒前"的结果 ——
+        // 拟合在低功耗机器上要几百 ms，一刀切会把慢层全丢掉（实车：geometry=0）。
+        const bool fresh = age <= cfg_.local_fit.max_result_age;
+        const bool slow_ok = age <= cfg_.local_fit.max_slow_result_age;
+        if (!fresh && !slow_ok) { ++local_fit_apply_stale_; return 0.0; }
 
         // 相机系 → EKF 系：yaw 相差相机自身 yaw（相机系底盘 yaw → 世界系底盘 yaw）。
         LocalFitResult conv = *fit;
@@ -323,16 +343,18 @@ namespace auto_aim
         if (!cfg_.local_fit.use_yaw || std::getenv("ULTRA_VISION_LOCAL_FIT_NO_YAW") != nullptr)
             conv.yaw = ekf_yaw;
 
-        const double fit_weight = ekf_.updateWithLocalFit(
-            conv, cfg_.local_fit.yaw_noise, cfg_.local_fit.omega_noise,
-            std::numeric_limits<double>::infinity());
+        const double fit_weight = fresh
+            ? ekf_.updateWithLocalFit(conv, cfg_.local_fit.yaw_noise,
+                                      cfg_.local_fit.omega_noise,
+                                      std::numeric_limits<double>::infinity())
+            : 0.0;   // 老结果不喂 ω/yaw（那是快层量，过期就是错的）
 
         // 慢层几何：拟合器在一个弧段上把 (R, 安装倾角 α, 板心高度 h) 一起解出来了 ——
         // 这三个量正好是"底盘模型"的慢层参数（见 common/chassis_model.hpp）。
         // 用它们在线收敛几何，比在 yaml 里写死一个 0.25（实测 0.20~0.21）靠谱得多，
         // 也是"四块板同高、矩形底盘"能被观测纠正的入口。半径/高度是几何量，
         // 改它们不动状态/协方差。
-        if (cfg_.local_fit.use_fit_radius) {
+        if (cfg_.local_fit.use_fit_radius && slow_ok) {
             updateChassisFromFit(fit->R, fit->alpha, fit->h);
             ++local_fit_apply_geometry_;
         }
@@ -340,7 +362,7 @@ namespace auto_aim
         // ---- 旋转中心先验：拟合器判出的运动状态决定"中心该不该动" ----------
         // 纯旋转 → 旋转中心物理上不变 → 把车心往拟合中心拉（强）；有平移 → 只轻拉。
         // 这一步是"防止旋转中心随检测板跑飞"的关键，也是模型构造的先验来源。
-        if (cfg_.local_fit.center_anchor)
+        if (cfg_.local_fit.center_anchor && slow_ok)
         {
             const double speed = std::sqrt(fit->drift[0] * fit->drift[0] +
                                            fit->drift[1] * fit->drift[1] +

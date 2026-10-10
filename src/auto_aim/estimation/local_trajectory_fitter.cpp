@@ -215,6 +215,7 @@ namespace auto_aim
             opt.linear_solver_type = ceres::DENSE_QR;
             opt.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
             opt.max_num_iterations = cfg.max_iterations;
+            opt.max_solver_time_in_seconds = std::max(0.005, cfg.max_solver_time_s);
             opt.minimizer_progress_to_stdout = false;
             ceres::Solver::Summary summary;
             ceres::Solve(opt, &problem, &summary);

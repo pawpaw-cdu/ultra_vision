@@ -1838,6 +1838,7 @@ int auto_aim::app::RealRunner::run()
                       << " stale=" << tracker.localFitApplyStale()
                       << " geometry=" << tracker.localFitApplyGeometry()
                       << " age=" << tracker.localFitApplyAgeMs() << "ms"
+                      << " fitms=" << tracker.localFitLastMs()
                       << " ufr=" << (tracker.fitRadiusEnabled() ? 1 : 0)
                       << " lf=" << (tracker.localFitEnabled() ? 1 : 0)
                       << ", np_flip=" << tracker.nearestPlateFlips()

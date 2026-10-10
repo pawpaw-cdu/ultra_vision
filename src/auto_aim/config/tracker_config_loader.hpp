@@ -94,6 +94,8 @@ namespace auto_aim
             cfg.local_fit.center_anchor_max_error =
                 lf["center_anchor_max_error"].as<double>(
                     cfg.local_fit.center_anchor_max_error);
+            cfg.local_fit.max_slow_result_age =
+                lf["max_slow_result_age"].as<double>(cfg.local_fit.max_slow_result_age);
         }
 
         if (const YAML::Node rotation = tracker["rotation_rate"]) {

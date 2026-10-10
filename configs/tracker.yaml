@@ -71,7 +71,10 @@ tracker:
     window_frames: 24          # 滑窗帧数；覆盖相位 ≥ π/3 才有 ω 可辨识性
     min_bars: 8                # 窗口内至少这么多条灯条观测才拟合
     period_frames: 10          # 每多少帧触发一次（低频）
-    max_result_age: 0.20       # s：拟合结果比当前帧老过它就丢弃
+    max_result_age: 0.20       # s：**快层**(ω/yaw)结果比当前帧老过它就丢弃
+    # **慢层**(R/α/h/中心)单独的工龄上限：拟合在低功耗机器上（NUC）要几百 ms，
+    # 结果算出来就已经"几秒前"，用 0.2s 一刀切会把几何全丢掉（实车实测 geometry=0）。
+    max_slow_result_age: 2.00
     max_window_gap_frames: 6   # 连续丢帧超过它就清窗（避免跨运动段）
     yaw_noise: 0.02            # 拟合 yaw 的观测噪声（rad²）
     omega_noise: 0.05          # 拟合 ω 的观测噪声

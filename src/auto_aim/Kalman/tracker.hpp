@@ -109,6 +109,13 @@ namespace auto_aim
         double center_anchor_gain_rotating = 0.35;
         double center_anchor_gain_other = 0.10;
         double center_anchor_max_error = 0.60;    // 差太多（m）说明拟合不可信，不拉
+        // ---- 快层 / 慢层的**老化工龄**分开 ------------------------------------
+        // ω/yaw 是快层：必须新鲜（max_result_age，默认 0.2s）。
+        // R/α/h/中心是慢层：拟合本身在低功耗机器上可能要几百 ms（NUC 实测一次
+        // fitWithSlow 会跑 2~3 次快层 + 慢层），结果算出来就已经"几秒前"了 ——
+        // 用 0.2s 一刀切会把它们全丢掉（实车 log：geometry=0、age=11.8s）。
+        // 所以慢层单独给一个宽松的老化上限（默认 2s），只要窗口是"最近这段弧"就还能用。
+        double max_slow_result_age = 2.0;
     };
 
     struct TrackerConfig {
@@ -473,6 +480,7 @@ namespace auto_aim
         int localFitApplyStale() const { return local_fit_apply_stale_; }
         int localFitApplyGeometry() const { return local_fit_apply_geometry_; }
         double localFitApplyAgeMs() const { return local_fit_apply_age_ms_; }
+        double localFitLastMs() const { return local_fit_last_ms_; }
         int localFitArcs() const { return static_cast<int>(local_fit_arcs_.size()); }
 
         /// @brief 收敛看门狗统计：触发次数 / 当前拒绝比例 / 是否收敛。
@@ -570,6 +578,8 @@ namespace auto_aim
         int local_fit_apply_stale_ = 0;
         int local_fit_apply_geometry_ = 0;
         double local_fit_apply_age_ms_ = -1.0;
+        /// 最近一次拟合（含慢层）耗时（ms）——低功耗机器上这是关键指标。
+        double local_fit_last_ms_ = -1.0;
         /// 最后一次"往弧里累计灯条"的时间：worker 用它判断哪条弧还活着。
         double last_push_time_ = 0.0;
         int local_fit_applied_ = 0;
