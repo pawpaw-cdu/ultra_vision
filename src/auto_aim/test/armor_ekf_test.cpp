@@ -333,6 +333,95 @@ int main()
         }
     }
 
+    // ---- PnP yaw 翻解保护（pnp_yaw_trust_deg）-------------------------------
+    // 平面靶 IPPE 有两个解：同一块板的 yaw 会跳（实测 ±12°，极端镜像）。位置（bearing）
+    // 是良态的，所以位置对、yaw 被翻的观测流必须：① 仍然选对板；② 不把整车模型带歪；
+    // ③ 不把假的 yaw 喂给差分测速器（那正是"模型突然转/崩"的来源）。
+    {
+        auto makeFlippedArmor = [](double center_z, double yaw, double omega, double time,
+                                   int plate_id, double radius, double yaw_error) {
+            auto_aim::Armor armor = makeTrackerArmor(center_z, yaw, omega, time, plate_id,
+                                                     radius);
+            if (yaw_error == 0.0) return armor;
+            cv::Mat rotation;
+            cv::Rodrigues(armor.rvec, rotation);
+            cv::Mat spin;
+            cv::Rodrigues(cv::Vec3d(0.0, 1.0, 0.0) * yaw_error, spin);   // 绕竖直轴转 yaw_error
+            cv::Mat flipped = spin * rotation;                            // 位置不动，只翻朝向
+            cv::Rodrigues(flipped, armor.rvec);
+            return armor;
+        };
+
+        struct YawFlipResult {
+            std::vector<double> plate_errors;
+            double median_plate_error = 0.0;
+            double max_plate_error = 0.0;
+            double omega_error = 0.0;
+            int wrong_plate_frames = 0;
+        };
+        auto run = [&](double trust_deg) {
+            auto_aim::TrackerConfig cfg = tracker_config;
+            cfg.pnp_yaw_trust_deg = trust_deg;
+            auto_aim::Tracker tracker(cfg);
+            constexpr double kCenterZ = 4.0;
+            constexpr double kOmega = 2.0;
+            constexpr double kRadius = 0.25;
+            YawFlipResult out;
+            for (int frame = 0; frame <= 80; ++frame) {
+                const double time = frame * tracker_dt;
+                // 交替翻解（±40°）—— 差分测速器最怕这种：常值偏置它还能抵消，交替就是假 ω。
+                // 现实场景：**偶尔**翻解（5 帧里 1 帧），幅度 ±12°（本工程实测的
+                // IPPE 双解抖动）。交替每帧都翻是极端情况，单板 yaw 本来就不可观测，
+                // 门控只能保证"不炸"，这里测的是它该有的收益：坏帧别污染 ω/模型。
+                const double flip = (frame % 5 == 0) ? ((frame % 10 == 0) ? 0.21 : -0.21)
+                                                     : 0.0;
+                tracker.update(std::vector<auto_aim::Armor>{
+                    makeFlippedArmor(kCenterZ, 0.0, kOmega, time, tracker_plate_id, kRadius,
+                                     flip)}, time);
+                if (frame < 30) continue;   // 等它收敛
+                if (tracker.getLastObservedPlateId() != tracker_plate_id)
+                    ++out.wrong_plate_frames;
+                const auto model = tracker.modelAt(0.0);
+                if (!model.valid) continue;
+                double worst = 0.0;
+                for (int plate = 0; plate < 4; ++plate) {
+                    const double phase = kOmega * time +
+                        auto_aim::ArmorEKF::angleForPlate(plate);
+                    const cv::Vec3d truth(kRadius * std::cos(phase), 0.0,
+                                          kCenterZ + kRadius * std::sin(phase));
+                    worst = std::max(worst, cv::norm(model.poses[plate].center - truth));
+                }
+                out.plate_errors.push_back(worst);
+                out.max_plate_error = std::max(out.max_plate_error, worst);
+            }
+            out.omega_error = std::abs(tracker.getOmega() - kOmega);
+            if (!out.plate_errors.empty()) {
+                std::sort(out.plate_errors.begin(), out.plate_errors.end());
+                out.median_plate_error = out.plate_errors[out.plate_errors.size() / 2];
+            }
+            return out;
+        };
+
+        const YawFlipResult guarded = run(25.0);
+        const YawFlipResult naive = run(0.0);     // 老行为：yaw 无门控
+        passed &= expect(guarded.wrong_plate_frames == 0,
+                         "flipped PnP yaw must not make the association pick a neighbor plate");
+        // 单板 + yaw 被翻时 yaw 本来就不可观测：门控下模型误差应在"半块板"量级以内，
+        // 关键是**别让它变成几十厘米/几米**（naive 那一路）。
+        passed &= expect(guarded.median_plate_error < 0.10,
+                         "flipped PnP yaw must not swing the chassis model (guarded, median)");
+        passed &= expect(guarded.omega_error < 0.3,
+                         "flipped PnP yaw must not corrupt the differenced omega estimate");
+        passed &= expect(guarded.median_plate_error + 0.05 < naive.median_plate_error,
+                         "yaw trust gate must be clearly better than feeding the flipped yaw");
+        std::cout << "yaw-flip: guarded med/max_plate_err=" << guarded.median_plate_error << "/"
+                  << guarded.max_plate_error
+                  << " omega_err=" << guarded.omega_error
+                  << " | naive med/max_plate_err=" << naive.median_plate_error << "/"
+                  << naive.max_plate_error
+                  << " omega_err=" << naive.omega_error << std::endl;
+    }
+
     // ---- 装甲板模型（双模型低速档，上科大 2026 §9.4.4）----------------------
     {
         // ---- 底盘模型：慢层几何 + 输出口径 + 外推 + 渲染姿态 ----------------
@@ -528,11 +617,14 @@ int main()
     // 这里喂确定性观测流（单板可见、可见板号随旋转切换、带 PnP 噪声）做 A/B：
     // adaptive_association_gate + soft_nis_gate 打开能收敛，关闭（旧行为）不能。
     {
-        const auto spin_omega = [&](bool adaptive, bool soft, bool mahalanobis) {
+        const auto spin_omega = [&](bool adaptive, bool soft, bool mahalanobis,
+                                    double yaw_trust_deg = 25.0) {
             auto_aim::TrackerConfig spin_config = tracker_config;
             spin_config.adaptive_association_gate = adaptive;
             spin_config.soft_nis_gate = soft;
             spin_config.mahalanobis_matching = mahalanobis;
+            // 0 = 老的 yaw 硬门限关联（A/B 用；见 pnp_yaw_trust_deg）
+            spin_config.pnp_yaw_trust_deg = yaw_trust_deg;
             auto_aim::Tracker spin_tracker(spin_config);
             std::mt19937 rng(20261005u);
             constexpr double spin_rate = 5.0;
@@ -568,7 +660,8 @@ int main()
         };
         const double spin_maha = spin_omega(true, true, true);
         const double spin_new = spin_omega(true, true, false);
-        const double spin_old = spin_omega(false, false, false);
+        // legacy = 老的 yaw 硬门限关联（把 pnp_yaw_trust_deg 设 0 才等价于旧行为）
+        const double spin_old = spin_omega(false, false, false, /*yaw_trust_deg=*/0.0);
         std::cout << "5rad/s deterministic: mahalanobis=" << spin_maha
                   << " adaptive_gate=" << spin_new
                   << " legacy=" << spin_old << std::endl;

@@ -74,9 +74,21 @@ namespace auto_aim
             lostUpdate();
             return false;
         }
+        bool yaw_trusted = true;
         if (ypd_observation) {
+            YpdObservation observation = *ypd_observation;
+            // PnP 平面解 yaw 只在和预测一致时才喂给 EKF（见 pnp_yaw_trust_deg）：
+            // 不一致 → 把它的 yaw 噪声放到无穷大，位置/距离照用，yaw 交给 ω 外推。
+            if (cfg_.pnp_yaw_trust_deg > 0.0 && ekf_.isInit()) {
+                const double error = std::abs(ArmorEKF::normalizeAngle(
+                    observation.armor_yaw - ekf_.getPlateAngle(plate_id_)));
+                if (error > cfg_.pnp_yaw_trust_deg * M_PI / 180.0) {
+                    observation.armor_yaw_noise = 1e3;
+                    yaw_trusted = false;
+                }
+            }
             measurement_weight = ekf_.updateYpd(
-                *ypd_observation,
+                observation,
                 effectiveNisThreshold(cfg_.soft_nis_gate, cfg_.ypd_nis_threshold));
         } else {
             if (radial_angle) {
@@ -96,7 +108,7 @@ namespace auto_aim
             lostUpdate();
             return false;
         }
-        updateRotationRate(home_armor, timestamp);
+        updateRotationRate(home_armor, timestamp, yaw_trusted);
 
         last_measurement_weight_ = measurement_weight;
         latest_armor_ = armor;
@@ -286,6 +298,9 @@ namespace auto_aim
         std::array<bool, 4> plate_used{{false, false, false, false}};
         std::vector<YpdObservation> ypd_observations;
         ypd_observations.reserve(candidates.size());
+        // 被选中的那块板的 PnP yaw 是否可信（见 pnp_yaw_trust_deg）——
+        // 不可信时不能喂差分测速器（差分正是放大量）。
+        bool best_yaw_trusted = true;
         for (const auto& candidate : candidates) {
             if (armor_used[candidate.armor_index] || plate_used[candidate.plate_id]) continue;
             const Armor& armor = *valid_armors[candidate.armor_index];
@@ -296,13 +311,27 @@ namespace auto_aim
                 continue;
             }
 
+            // PnP 平面解 yaw 的双解保护（见 pnp_yaw_trust_deg 注释）：只有当它和滤波器
+            // 预测的板相位一致（≤ 门限）时才让 EKF 用它的 yaw 分量；否则这一帧只信位置
+            // （bearing/距离），yaw 由 ω 外推 + 拟合器慢层提供。
+            YpdObservation accepted = *observation;
+            bool yaw_trusted = true;
+            if (cfg_.pnp_yaw_trust_deg > 0.0 && ekf_.isInit()) {
+                const double error = std::abs(ArmorEKF::normalizeAngle(
+                    accepted.armor_yaw - ekf_.getPlateAngle(candidate.plate_id)));
+                if (error > cfg_.pnp_yaw_trust_deg * M_PI / 180.0) {
+                    accepted.armor_yaw_noise = 1e3;
+                    yaw_trusted = false;
+                }
+            }
             armor_used[candidate.armor_index] = true;
             plate_used[candidate.plate_id] = true;
-            ypd_observations.push_back(*observation);
+            ypd_observations.push_back(accepted);
             ++accepted_observations_;
             if (best_armor_index < 0) {
                 best_armor_index = static_cast<int>(candidate.armor_index);
                 best_plate_id = candidate.plate_id;
+                best_yaw_trusted = yaw_trusted;
             }
         }
 
@@ -360,7 +389,7 @@ namespace auto_aim
             }
             ekf_.shiftCenter(observed - predicted);
         }
-        updateRotationRate(valid_pairs[best_armor_index].home, timestamp);
+        updateRotationRate(valid_pairs[best_armor_index].home, timestamp, best_yaw_trusted);
 
         // ---- 双模型：同步喂板模型（上科大 2026 §9.4.4）-----------------------
         // 观测 = 可见板的**世界系中心 + 板朝向（径向角）**。只并行运行，不参与输出；

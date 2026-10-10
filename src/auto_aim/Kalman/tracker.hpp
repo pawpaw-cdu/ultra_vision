@@ -232,6 +232,15 @@ namespace auto_aim
         double range_gate_sigma = 2.0;
         double range_gate_max = 1.00;         // m
         double angle_match_weight = 0.08;
+        // ---- PnP 平面解 yaw 的可信门限（度）----------------------------------
+        // 平面靶的 IPPE 有**两个解**，同一块板的 yaw 会来回跳（本项目实测视轴差 ±12°，
+        // 极端会镜像）；而本车的装甲板法向 = 径向，yaw 一被翻，整台底盘模型就跟着转。
+        // 位置（bearing/距离）是稳的，所以：
+        //   · **关联代价不再用 yaw 做硬门限**，改用 bearing 距离（米）+ 距离误差；
+        //   · 只有 |观测 yaw − 预测 yaw| ≤ 本门限时，才把 yaw 算进代价、才让 EKF 用它的
+        //     yaw 分量；超了就当"这一帧没测到 yaw"（位置照用，yaw 靠 ω 外推/拟合器）。
+        // 0 = 关闭门控（回到老行为，A/B 用）。
+        double pnp_yaw_trust_deg = 25.0;
         double position_nis_threshold = 7.815;
         double angle_nis_threshold = 3.841;
         // ---- NIS：诊断量而不是硬门限（对齐 sp_vision 的 recent_nis_failures）----
@@ -559,7 +568,10 @@ namespace auto_aim
         int selectPlateId(const Armor& armor) const;
         double distanceToPlate(const cv::Mat& tvec, int plate_id) const;
         double matchCost(const Armor& armor, int plate_id) const;
-        void updateRotationRate(const Armor& armor, double timestamp);
+        /// @param yaw_valid 这一帧的 PnP yaw（板法向=径向）是否可信（见 pnp_yaw_trust_deg）。
+        ///        不可信时**不要**把它喂给差分测速器：差分正是放大量，翻解一次就会
+        ///        推出一个假的 ω（现场"模型突然转/崩"的来源之一）。
+        void updateRotationRate(const Armor& armor, double timestamp, bool yaw_valid = true);
 
         // ---- 局部拟合器状态 ------------------------------------------------------
         mutable std::mutex local_fit_mutex_;

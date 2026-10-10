@@ -137,6 +137,13 @@ tracker:
     adaptive_association_gate: true
     association_gate_sigma: 1.5
     association_gate_max: 1.30
+    # PnP 平面解 yaw 的可信门限（度；0 = 关闭门控 → 回到老行为，A/B 用）。
+    # 平面靶 IPPE 有**两个解**，同一块板的 yaw 会来回跳（实测视轴差 ±12°，极端镜像）；
+    # 本车装甲板法向 = 径向，yaw 一翻整台底盘模型就跟着转（现场就是"重投影模型误差
+    # 不可接受"）。所以：关联**不再用 yaw 做硬门限**（改用 bearing 距离，米），只有
+    # 当它和滤波器预测一致（≤ 本值）时才把 yaw 算进代价、才让 EKF 用它的 yaw 分量；
+    # 不一致就当"这一帧没测到 yaw"，位置照用、yaw 由 ω 外推 + 拟合器慢层给。
+    pnp_yaw_trust_deg: 25.0
     # 距离门限同理随距离噪声放大（上限 m）；角度门限仍是主判据，不会放进相邻板。
     range_gate_sigma: 2.0
     range_gate_max: 1.00

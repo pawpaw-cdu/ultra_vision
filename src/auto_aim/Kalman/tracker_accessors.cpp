@@ -242,8 +242,9 @@ namespace auto_aim
         return std::atan2(radial(2, 0), radial(0, 0));
     }
 
-    void Tracker::updateRotationRate(const Armor& armor, double timestamp)
+    void Tracker::updateRotationRate(const Armor& armor, double timestamp, bool yaw_valid)
     {
+        if (!yaw_valid) return;
         const auto radial_angle = armorRadialAngle(armor);
         if (!radial_angle ||
             !rotation_rate_estimator_.update(*radial_angle, timestamp)) {

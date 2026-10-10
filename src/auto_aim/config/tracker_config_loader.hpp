@@ -171,6 +171,9 @@ namespace auto_aim
                                              .as<double>(cfg.plate_model_exit_omega);
             cfg.angle_match_weight =
                 kalman["angle_match_weight"].as<double>(cfg.angle_match_weight);
+            // PnP 平面解 yaw 的可信门限（度）；0 = 关闭门控（见 TrackerConfig 注释）。
+            cfg.pnp_yaw_trust_deg =
+                kalman["pnp_yaw_trust_deg"].as<double>(cfg.pnp_yaw_trust_deg);
             cfg.position_nis_threshold =
                 kalman["position_nis_threshold"].as<double>(
                     cfg.position_nis_threshold);
