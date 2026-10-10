@@ -10,12 +10,21 @@ namespace auto_aim
 {
     namespace
     {
-        // 车辆系→相机系旋转 R_cv = Rx(gimbal_pitch)·R_base，R_base: X_v→Z_c,
-        // Y_v→X_c, Z_v→-Y_c（与 experiments/local_fitter 一致）。
+        // 车辆系→相机系。默认 R_cv = Rx(gimbal_pitch + pitch_offset)·R_base，
+        // R_base: X_v→Z_c, Y_v→X_c, Z_v→-Y_c（与 experiments/local_fitter 一致）。
+        // use_rcv 时直接用给定的完整 3×3 R_cv（含"相机→云台安装旋转"，实车必须）。
         template <typename T>
-        inline void vehicleToCamera(const T* pv, double gp, T& X, T& Y, T& Z)
+        inline void vehicleToCamera(const T* pv, T gp, bool use_rcv, const double* R,
+                                    T& X, T& Y, T& Z)
         {
-            const T s = ceres::sin(T(gp)), c = ceres::cos(T(gp));
+            if (use_rcv)
+            {
+                X = T(R[0]) * pv[0] + T(R[1]) * pv[1] + T(R[2]) * pv[2];
+                Y = T(R[3]) * pv[0] + T(R[4]) * pv[1] + T(R[5]) * pv[2];
+                Z = T(R[6]) * pv[0] + T(R[7]) * pv[1] + T(R[8]) * pv[2];
+                return;
+            }
+            const T s = ceres::sin(gp), c = ceres::cos(gp);
             X = pv[1];
             Y = -s * pv[0] - c * pv[2];
             Z = c * pv[0] - s * pv[2];
@@ -38,9 +47,11 @@ namespace auto_aim
         {
             FastResidual(const LocalFitIntrinsics& K, double gp, double alpha, double R, double L,
                          double a, double yaw_off, double t, double t0, double tu, double tv,
-                         double bu, double bv, bool use_beta)
+                         double bu, double bv, bool use_beta, bool use_rcv,
+                         const std::array<double, 9>& rcv)
                 : K_(K), gp_(gp), alpha_(alpha), R_(R), L_(L), a_(a), yaw_off_(yaw_off), t_(t),
-                  t0_(t0), tu_(tu), tv_(tv), bu_(bu), bv_(bv), use_beta_(use_beta) {}
+                  t0_(t0), tu_(tu), tv_(tv), bu_(bu), bv_(bv), use_beta_(use_beta),
+                  use_rcv_(use_rcv), rcv_(rcv) {}
 
             template <typename T>
             bool operator()(const T* const center, const T* const h_ptr, const T* const phase,
@@ -52,14 +63,14 @@ namespace auto_aim
                 T pv[3], pc[3];
                 barEndpointV<T>(h_ptr[0], theta, T(alpha_), T(R_), T(L_), T(a_), T(0.5) * T(L_),
                                 pv);
-                vehicleToCamera<T>(pv, gp_, pc[0], pc[1], pc[2]);
+                vehicleToCamera<T>(pv, T(gp_), use_rcv_, rcv_.data(), pc[0], pc[1], pc[2]);
                 residual[0] = T(K_.fx) * (pc[0] + center[0] + vel[0] * dt) /
                                   (pc[2] + center[2] + vel[2] * dt) + T(K_.cx) - T(tu_);
                 residual[1] = T(K_.fy) * (pc[1] + center[1] + vel[1] * dt) /
                                   (pc[2] + center[2] + vel[2] * dt) + T(K_.cy) - T(tv_);
                 barEndpointV<T>(h_ptr[0], theta, T(alpha_), T(R_), T(L_), T(a_), T(-0.5) * T(L_),
                                 pv);
-                vehicleToCamera<T>(pv, gp_, pc[0], pc[1], pc[2]);
+                vehicleToCamera<T>(pv, T(gp_), use_rcv_, rcv_.data(), pc[0], pc[1], pc[2]);
                 residual[2] = T(K_.fx) * (pc[0] + center[0] + vel[0] * dt) /
                                   (pc[2] + center[2] + vel[2] * dt) + T(K_.cx) - T(bu_);
                 residual[3] = T(K_.fy) * (pc[1] + center[1] + vel[1] * dt) /
@@ -68,7 +79,8 @@ namespace auto_aim
             }
             LocalFitIntrinsics K_;
             double gp_, alpha_, R_, L_, a_, yaw_off_, t_, t0_, tu_, tv_, bu_, bv_;
-            bool use_beta_;
+            bool use_beta_, use_rcv_;
+            std::array<double, 9> rcv_;
         };
 
         struct VelPrior
@@ -95,7 +107,8 @@ namespace auto_aim
             double pv[3];
             barEndpointV<double>(h, theta, alpha, R, cfg.lightbar_len, a, b, pv);
             double x, y, z;
-            vehicleToCamera<double>(pv, cfg.gimbal_pitch, x, y, z);
+            vehicleToCamera<double>(pv, cfg.gimbal_pitch + cfg.pitch_offset, cfg.use_rcv,
+                                    cfg.rcv.data(), x, y, z);
             pc[0] = x + center[0] + drift[0] * dt;
             pc[1] = y + center[1] + drift[1] * dt;
             pc[2] = z + center[2] + drift[2] * dt;
@@ -154,10 +167,10 @@ namespace auto_aim
                 if (o.armor_id < 0 || o.armor_id >= static_cast<int>(cfg.plate_yaw_offsets.size()))
                     continue;
                 auto* cost = new ceres::AutoDiffCostFunction<FastResidual, 4, 3, 1, 2, 1, 3>(
-                    new FastResidual(cfg.K, cfg.gimbal_pitch, alpha_fixed, R_fixed,
+                    new FastResidual(cfg.K, cfg.gimbal_pitch + cfg.pitch_offset, alpha_fixed, R_fixed,
                                      cfg.lightbar_len, o.bar_offset,
                                      cfg.plate_yaw_offsets[o.armor_id], o.timestamp, t0, o.u_top,
-                                     o.v_top, o.u_bot, o.v_bot, use_beta));
+                                     o.v_top, o.u_bot, o.v_bot, use_beta, cfg.use_rcv, cfg.rcv));
                 problem.AddResidualBlock(cost,
                     cfg.use_huber ? new ceres::HuberLoss(cfg.huber_delta) : nullptr, center, &h,
                     phase, &beta, vel);

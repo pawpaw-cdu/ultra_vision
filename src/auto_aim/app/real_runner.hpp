@@ -35,6 +35,9 @@ namespace auto_aim
             std::unique_ptr<auto_aim::LocalTrajectoryFitter> local_fitter_;
             double local_fit_pitch_sign_ = 1.0;   // 真机云台俯仰符号（现场可 env 标定）
             bool local_fit_r_fixed_ = false;      // A/B：写死 R（不跑在线慢层）
+            // 用 pose 推的完整 R_cv（含手眼外参 + 云台俯仰）替代 Rx(gimbal_pitch)·R_base。
+            // 默认开；ULTRA_VISION_LOCAL_FIT_RCV=0/off 关（退回旧口径做 A/B）。
+            bool local_fit_rcv_pose_ = true;
 #endif
         };
     } // namespace app

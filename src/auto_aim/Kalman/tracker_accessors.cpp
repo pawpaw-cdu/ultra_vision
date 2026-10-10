@@ -147,6 +147,37 @@ namespace auto_aim
                              (camera_dist_.rows * camera_dist_.cols) >= 4;
     }
 
+    // 拟合器的"车辆系→相机系"完整旋转：R_cv = G^T · R_cb(yaw,pitch)^T · B
+    //   G   = camera→gimbal 手眼外参（CameraPose.camera_to_gimbal）
+    //   R_cb= camera→home 旋转（相机光轴与云台 yaw/pitch 的关系，见 tracker_utils）
+    //   B   = 拟合器车辆系(X前/Y右/Z上) → home 系(X右/Y下/Z前)：X_v→(0,0,1),
+    //         Y_v→(1,0,0), Z_v→(0,-1,0)
+    // 外参单位阵且 pitch=0 时 R_cb=I、G=I → R_cv=B，与旧行为逐位一致（仿真不受影响）。
+    std::array<double, 9> Tracker::fitterRcv() const
+    {
+        const auto cb = tracker_detail::cameraToBaseRotation(camera_pose_.yaw, camera_pose_.pitch);
+        const auto g = tracker_detail::cameraToGimbal(camera_pose_);
+        const double B[3][3] = {{0.0, 1.0, 0.0}, {0.0, 0.0, -1.0}, {1.0, 0.0, 0.0}};
+        // M = G^T · R_cb^T
+        double M[3][3];
+        for (int i = 0; i < 3; ++i)
+            for (int l = 0; l < 3; ++l)
+            {
+                double v = 0.0;
+                for (int k = 0; k < 3; ++k) v += g(k, i) * cb(l, k);
+                M[i][l] = v;
+            }
+        std::array<double, 9> out{};
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j)
+            {
+                double v = 0.0;
+                for (int l = 0; l < 3; ++l) v += M[i][l] * B[l][j];
+                out[i * 3 + j] = v;
+            }
+        return out;
+    }
+
     Armor Tracker::toWorld(const Armor& armor) const
     {
         if (!armor.solve_result || armor.tvec.empty()) return armor;

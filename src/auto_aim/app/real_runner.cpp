@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
 #include <string>
 #include <utility>
@@ -16,6 +17,7 @@
 #include "common/standard_clock.hpp"
 #include "config_loader.hpp"
 #include "app/config_paths.hpp"
+#include "app/csv_sink.hpp"
 #include "app/pipeline_config.hpp"
 #include "dataset.hpp"
 #include "visualization/projection.hpp"
@@ -135,8 +137,12 @@ int auto_aim::app::RealRunner::run()
         fcfg.center_init = {{ 0.0, 0.0, 3.0 }};
         // 真实裁判系统灯条有 ~15° 安装倾角：α 固定 15°（慢层只在线估计 R）。
         const double alpha0 = env_d("ULTRA_VISION_LOCAL_FIT_ALPHA_DEG", 15.0) * M_PI / 180.0;
+        fcfg.pitch_offset = env_d("ULTRA_VISION_LOCAL_FIT_PITCH_OFFSET_DEG", 0.0) * M_PI / 180.0;
         local_fit_pitch_sign_ = env_d("ULTRA_VISION_LOCAL_FIT_PITCH_SIGN", 1.0);
         local_fit_r_fixed_ = (std::getenv("ULTRA_VISION_LOCAL_FIT_R_FIXED") != nullptr);
+        const char* rcv = std::getenv("ULTRA_VISION_LOCAL_FIT_RCV");
+        local_fit_rcv_pose_ =
+            !(rcv != nullptr && (std::string(rcv) == "0" || std::string(rcv) == "off"));
         local_fitter_ = std::make_unique<auto_aim::LocalTrajectoryFitter>(fcfg);
         local_fitter_->seedSlow(alpha0, fcfg.R_prior);
         std::cout << "[local_fit] enabled (real): alpha="
@@ -589,6 +595,12 @@ int auto_aim::app::RealRunner::run()
     }
 #endif
 
+    // 真机观测记录（可选）：与仿真同格式，便于离线对账"重投影残差多大、集中在哪"。
+    auto observation_recorder = std::make_unique<auto_aim::app::CsvSink>(
+        "ULTRA_VISION_OBSERVATION_CSV",
+        "x,y,z,rx,ry,rz,tracker_x,tracker_y,tracker_z,cmd_yaw,cmd_pitch,time_us,plate_id,state,"
+        "u0,v0,u1,v1,u2,v2,u3,v3,source_time_us\n");
+
     cv::Mat frame;
     cv::Mat image;
 
@@ -856,13 +868,19 @@ int auto_aim::app::RealRunner::run()
         frame_input.fire_enabled = fire_enabled;
 #ifdef ULTRA_VISION_HAVE_LOCAL_FIT
         if (local_fitter_) {
-            // 云台俯仰补偿：R_cv 必须用**实际**俯仰构造 —— 每帧把当前俯仰写进拟合器配置。
+            // R_cv 每帧更新：默认用 pose 推的**完整**旋转（含手眼外参 + 云台俯仰）；
+            // 关掉 rcv 时退回 Rx(gimbal_pitch·sign + pitch_offset)·R_base 的旧口径做 A/B。
             auto fcfg = local_fitter_->config();
-            const double gp = local_fit_pitch_sign_ * camera_pose.pitch;
-            if (std::abs(fcfg.gimbal_pitch - gp) > 1e-4) {
-                fcfg.gimbal_pitch = gp;
-                local_fitter_->setConfig(fcfg);
+            bool changed = false;
+            if (local_fit_rcv_pose_) {
+                const auto R = tracker.fitterRcv();
+                if (!fcfg.use_rcv || fcfg.rcv != R) { fcfg.use_rcv = true; fcfg.rcv = R; changed = true; }
+            } else {
+                const double gp = local_fit_pitch_sign_ * camera_pose.pitch;
+                if (fcfg.use_rcv) { fcfg.use_rcv = false; changed = true; }
+                if (std::abs(fcfg.gimbal_pitch - gp) > 1e-4) { fcfg.gimbal_pitch = gp; changed = true; }
             }
+            if (changed) local_fitter_->setConfig(fcfg);
             for (const auto& a : frame_input.armors)
                 tracker.pushArmorLightBars(a, observation_time, tracker.plateIdFor(a));
         }
@@ -871,6 +889,29 @@ int auto_aim::app::RealRunner::run()
 #ifdef ULTRA_VISION_HAVE_LOCAL_FIT
         if (local_fitter_) tracker.applyLatestLocalFit();
 #endif
+        // 观测记录（可选）：真机也落 observation.csv，离线即可对账重投影残差。
+        if (*observation_recorder && tracker.hasObservation() &&
+            !tracker.getLastObservedArmor().tvec.empty()) {
+            const auto& observed = tracker.getLastObservedArmor();
+            const cv::Mat center = tracker.getTargetCenter();
+            auto& s = observation_recorder->stream();
+            s << std::fixed << std::setprecision(6)
+              << observed.tvec.at<double>(0) << ',' << observed.tvec.at<double>(1) << ','
+              << observed.tvec.at<double>(2) << ',' << observed.rvec.at<double>(0) << ','
+              << observed.rvec.at<double>(1) << ',' << observed.rvec.at<double>(2) << ','
+              << center.at<double>(0) << ',' << center.at<double>(1) << ',' << center.at<double>(2)
+              << ',' << gimbal_state.yaw << ',' << gimbal_state.pitch << ','
+              << source_result.timestamp_us << ',' << tracker.getLastObservedPlateId() << ','
+              << static_cast<int>(tracker.getState());
+            if (observed.Points_2D.size() >= 4) {
+                for (int i = 0; i < 4; ++i)
+                    s << ',' << observed.Points_2D[static_cast<std::size_t>(i)].x << ','
+                      << observed.Points_2D[static_cast<std::size_t>(i)].y;
+            } else {
+                for (int i = 0; i < 8; ++i) s << ",nan";
+            }
+            s << ',' << source_result.timestamp_us << '\n';
+        }
         last_decision = outcome.decision;
         aim_ready = outcome.aim_ready;
         aim_yaw_error = outcome.aim_yaw_error;

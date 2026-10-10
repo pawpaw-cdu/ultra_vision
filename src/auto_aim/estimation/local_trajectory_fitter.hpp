@@ -32,6 +32,11 @@ namespace auto_aim
         double lightbar_len = 0.10;     // 灯条长度 L（板高，米）
         double plate_width = 0.135;     // 装甲板宽度 W（米；决定两灯条切向偏移 ±W/2）
         double gimbal_pitch = 0.0;      // 云台俯仰（rad，构造 R_cv）
+        double pitch_offset = 0.0;      // 俯仰偏置（rad，加在 gimbal_pitch 上：相机安装俯仰，现场标定）
+        // 直接用完整 R_cv（车辆系→相机系，行主序）覆盖上面的 Rx(gimbal_pitch)·R_base。
+        // 用于把"相机→云台安装旋转"（hand-eye R_camera2gimbal）纳入模型——实车必须有。
+        bool use_rcv = false;
+        std::array<double, 9> rcv{{1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0}};
         std::array<double, 3> center_init{{0.0, 0.0, 3.0}};
         double h_init = 0.10;           // 灯条中心高度初值（车辆系）
         double omega_init = 3.0;        // 角速度初值（rad/s，多起点用）
