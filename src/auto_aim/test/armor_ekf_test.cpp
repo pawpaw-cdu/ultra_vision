@@ -389,6 +389,76 @@ int main()
                          "a clean nearest-plate stream must not trip the hard constraint");
     }
 
+    // ---- l/h 状态（sp_vision_25 的分组长短轴）：能否在线收敛 ------------------
+    // 造一个"矩形底盘 + 前后板更高"的靶：{0,2} 组 R=0.20/h=0，{1,3} 组 R=0.25/h=+3cm。
+    // 真值 l=+0.05 m、h=+0.03 m。滤波器从 l=h=0 出发，应能在几十帧内收敛到真值。
+    {
+        constexpr double kR0 = 0.20, kR1 = 0.25;    // 左右组 / 前后组半径
+        constexpr double kH1 = 0.03;                // 前后组比左右组高 3cm
+        constexpr double kCenterZ = 4.0;
+        auto makeGroupArmor = [](double center_z, double yaw, double omega, double time,
+                                 int plate_id, double radius, double height_up) {
+            const double phase = yaw + omega * time +
+                auto_aim::ArmorEKF::angleForPlate(plate_id);
+            const cv::Vec3d radial(std::cos(phase), 0.0, std::sin(phase));
+            const cv::Vec3d position(radius * radial[0], -height_up,
+                                     center_z + radius * radial[2]);
+            const cv::Vec3d vertical(0.0, 1.0, 0.0);
+            const cv::Vec3d third = radial.cross(vertical);
+            cv::Mat rotation = (cv::Mat_<double>(3, 3) <<
+                radial[0], vertical[0], third[0],
+                radial[1], vertical[1], third[1],
+                radial[2], vertical[2], third[2]);
+            auto_aim::Armor armor;
+            armor.solve_result = true;
+            armor.armor_type = auto_aim::small;
+            armor.tvec = (cv::Mat_<double>(3, 1) << position[0], position[1], position[2]);
+            cv::Rodrigues(rotation, armor.rvec);
+            return armor;
+        };
+        auto radiusOf = [&](int plate) { return (plate == 1 || plate == 3) ? kR1 : kR0; };
+        auto heightOf = [&](int plate) { return (plate == 1 || plate == 3) ? kH1 : 0.0; };
+
+        auto_aim::TrackerConfig geo_cfg = tracker_config;
+        geo_cfg.geometry_learn = false;   // 只看滤波器状态能不能收敛（不靠慢层学习）
+        // 硬钉会把"观测板的位置残差"整个平移进车心 → l/h 拿不到信息（这也是
+        // sp_vision 不需要硬钉的原因：它的状态本身能解释几何）。这里关掉硬钉。
+        geo_cfg.hard_plate_constraint = false;
+        auto_aim::Tracker geo_tracker(geo_cfg);
+        // 注意：l 的信息来自"观测板绕中心的轨迹是圆还是圆角方"（偏心量 ≈ l/2 = 2.5cm，
+        // 与位置噪声同量级）→ 必须转过**整圈以上**才收敛。取 2 rad/s × 8s ≈ 2.5 圈。
+        constexpr double kOmega = 2.0;
+        const double dt = 1.0 / 100.0;
+        for (int frame = 0; frame <= 800; ++frame) {
+            const double time = frame * dt;
+            const int visible = nearestPlate(0.0, kOmega, time);
+            geo_tracker.update(std::vector<auto_aim::Armor>{
+                makeGroupArmor(kCenterZ, 0.0, kOmega, time, visible, radiusOf(visible),
+                               heightOf(visible))}, time);
+        }
+        const double l_est = geo_tracker.groupRadiusDelta();
+        const double h_est = geo_tracker.groupHeightDelta();
+        passed &= expect(std::abs(l_est - (kR1 - kR0)) < 0.02,
+                         "l (front/back vs left/right radius difference) must converge online");
+        passed &= expect(std::abs(h_est - kH1) < 0.02,
+                         "h (front/back height difference) must converge online");
+        // 模型（重投影用）也必须体现这两组的差别
+        const auto model = geo_tracker.modelAt(0.0);
+        for (int plate = 0; plate < 4; ++plate) {
+            const double phase = geo_tracker.getYawWorld() +
+                auto_aim::ArmorEKF::angleForPlate(plate);
+            const cv::Vec3d truth(radiusOf(plate) * std::cos(phase), -heightOf(plate),
+                                  kCenterZ + radiusOf(plate) * std::sin(phase));
+            double best = 1e9;
+            for (int m = 0; m < 4; ++m)
+                best = std::min(best, cv::norm(model.poses[m].center - truth));
+            passed &= expect(best < 0.03,
+                             "model must place both plate groups on their own radius/height");
+        }
+        std::cout << "l/h: l_est=" << l_est << " (true " << kR1 - kR0 << "), h_est=" << h_est
+                  << " (true " << kH1 << ")" << std::endl;
+    }
+
     // ---- 同帧多板联立解 (车心, yaw) -----------------------------------------
     // 两块板 90° 同现时，用**位置**解 (车心, yaw)；即使初始 yaw 差 25° 也必须收敛，
     // 而且模型的两块板都要落在观测上（这是联合解存在的意义）。
@@ -564,8 +634,10 @@ int main()
             const double dz = after_radius.poses[plate].center[2] -
                               after_radius.center_camera[2];
             const double plate_radius = std::sqrt(dx * dx + dy * dy + dz * dz);
-            passed &= expect(std::abs(plate_radius - 0.185) < 1e-6,
-                             "modeled plate must sit on the new armor radius");
+            // 模型半径 = 慢层 R + 滤波器状态里的 l/h（前后组）；这里按**生效几何**比较
+            const double expected_r = after_radius.geometry.distance(plate);
+            passed &= expect(std::abs(plate_radius - expected_r) < 1e-6,
+                             "modeled plate must sit on the effective armor radius");
         }
 
         // 外推：yaw 前进 ω·dt，四块板绕模型中心刚性旋转同一个角
@@ -608,9 +680,11 @@ int main()
             const double py = rect_model.poses[plate].center[1] - rect_model.center_camera[1];
             const double pz = rect_model.poses[plate].center[2] - rect_model.center_camera[2];
             const double horizontal = std::sqrt(px * px + pz * pz);
-            passed &= expect(std::abs(horizontal - rect.distance(plate)) < 1e-6,
+            // 生效几何 = 慢层几何 + 滤波器 l/h（前后组），故用 rect_model.geometry 比较
+            const double want_r = rect_model.geometry.distance(plate);
+            passed &= expect(std::abs(horizontal - want_r) < 1e-6,
                              "rectangular chassis: each plate sits on its own distance");
-            passed &= expect(std::abs(py + rect.height(plate)) < 1e-6,
+            passed &= expect(std::abs(py + rect_model.geometry.height(plate)) < 1e-6,
                              "chassis plates share the configured height (world y points down)");
             const double phase = rect_model.world_yaw + auto_aim::armorPhaseOffset(plate);
             const cv::Vec3d radial(std::cos(phase), 0.0, std::sin(phase));

@@ -26,7 +26,7 @@ namespace auto_aim
             const Vec<3> velocity = worldToCameraVector(blendedVelocity());
             return {velocity(0, 0), velocity(1, 0), velocity(2, 0)};
         }
-        const Vec<9> state = ekf_.getState();
+        const auto state = ekf_.getState();
         Vec<3> velocity;
         velocity(0, 0) = state(1, 0);
         velocity(1, 0) = state(3, 0);
@@ -43,7 +43,7 @@ namespace auto_aim
 
     std::array<double, 3> Tracker::getTargetVelocityWorld() const
     {
-        const Vec<9> state = ekf_.getState();
+        const auto state = ekf_.getState();
         return {state(1, 0), state(3, 0), state(8, 0)};
     }
 
@@ -161,13 +161,29 @@ namespace auto_aim
         if (changed) syncGeometryToEkf();
     }
 
+    // 把滤波器状态里的 l/h（前后组半径差/高度差）叠加到慢层几何上：**模型与滤波器
+    // 必须用同一套几何**，否则"滤波器摆的板"和"画出来的板"又会分叉。
+    ChassisGeometry Tracker::effectiveChassisGeometry() const
+    {
+        ChassisGeometry geometry = geometry_;
+        if (ekf_.isInit()) {
+            const double dl = ekf_.groupRadiusDelta();
+            const double dh = ekf_.groupHeightDelta();
+            for (int plate : {1, 3}) {
+                geometry.plate_distance[plate] += dl;
+                geometry.plate_height[plate] += dh;
+            }
+        }
+        return geometry;
+    }
+
     ArmorPose Tracker::armorPose(int plate) const
     {
         Vec<3> center = ekf_.getCenter();
         if (plate_model_weight_ > 0.0) center = blendedCenter();
         const double yaw = blendedYawWorld();
         return chassisArmorPose(cv::Vec3d(center(0, 0), center(1, 0), center(2, 0)), yaw,
-                                geometry_, plate);
+                                effectiveChassisGeometry(), plate);
     }
 
     // 同帧多板联立解 (车心, yaw)：只用**观测位置**（良态），不用 PnP 朝向（±12° 双解）。
@@ -272,11 +288,13 @@ namespace auto_aim
         }
         out.world_yaw = ArmorEKF::normalizeAngle(blendedYawWorld() + getOmega() * clamped_dt);
         out.omega = getOmega();
-        out.geometry = geometry_;
+        // 模型几何 = 慢层几何 + 滤波器状态里的 l/h（见 effectiveChassisGeometry）
+        const ChassisGeometry geometry = effectiveChassisGeometry();
+        out.geometry = geometry;
 
         const cv::Vec3d world_center(center(0, 0), center(1, 0), center(2, 0));
         const std::array<ArmorPose, 4> world_poses =
-            chassisArmorPoses(world_center, out.world_yaw, geometry_);
+            chassisArmorPoses(world_center, out.world_yaw, geometry);
 
         // 世界系 → render 帧相机系：位置用 pointToCamera，方向用旋转矩阵。
         CameraPose pose = render_pose;
@@ -488,7 +506,7 @@ namespace auto_aim
 
     Vec<3> Tracker::blendedVelocity() const
     {
-        const Vec<9> state = ekf_.getState();
+        const auto state = ekf_.getState();
         Vec<3> a;
         a(0, 0) = state(1, 0);
         a(1, 0) = state(3, 0);

@@ -425,6 +425,11 @@ namespace auto_aim
 
         /// @brief 第 plate 块板的刚体姿态（**世界系**：板心 + 三轴）。
         ArmorPose armorPose(int plate) const;
+        /// @brief 生效中的底盘几何 = 慢层几何 + 滤波器状态里的 l/h（重投影用）。
+        ChassisGeometry effectiveChassisGeometry() const;
+        /// @brief 滤波器状态里的分组长短轴：l = 前后组半径差、h = 前后组高度差（向上为正）。
+        double groupRadiusDelta() const { return ekf_.groupRadiusDelta(); }
+        double groupHeightDelta() const { return ekf_.groupHeightDelta(); }
         /// @brief 第 plate 块板的**半宽/半高**（米，相机系投影用；与 PnP 同一组标定值）。
         double armorHalfWidth(int plate) const { return geometry_.halfWidth(plate); }
         double armorHalfHeight() const { return geometry_.half_height; }

@@ -22,6 +22,8 @@ namespace auto_aim {
 // The four armor plates are distributed on a circle in the x-z plane.
 class ArmorEKF {
 public:
+    /// 状态维数：9 个运动量 + l(半径差) + h(高度差)。新量追加在末尾，索引 0..8 不变。
+    static constexpr int kStateDim = 11;
     struct Config {
         double R = 0.21;
         double process_acc = 1.0;
@@ -35,6 +37,10 @@ public:
         double process_acc_speed_ref = 0.28;   // 米/秒，速度尺度
         double process_acc_max = 40.0;         // 上限，防止速度估计野值时爆掉
         double process_omega = 2.0;
+        /// l/h（分组长短轴）的过程噪声方差与初始方差（见 kStateDim 注释）。
+        double process_geometry = 4e-7;
+        double geometry_delta_max = 0.15;   // |l|,|h| 硬边界（m），防跑飞
+        double P_geometry = 2.5e-3;    // 初始 σ=5cm，允许从 0 收敛到真实差值
         // IESEKF（上科大 2026 §5B.5）：更新内迭代次数。每次用**更新后的状态**
         // 重新线性化观测函数，再更新一次；收敛后相当于在真值附近展开，比只在
         // 先验处展开一次更准。代价是 2-5 倍的更新计算（相对整条链可忽略）。
@@ -81,6 +87,22 @@ public:
         const double v = cfg_.plate_distance[static_cast<std::size_t>(plate)];
         return v > 0.0 ? v : cfg_.R;
     }
+    /// @brief 该块板（1,3 = 前后组）是否受 l/h 影响（sp_vision_25 的 use_l_h）。
+    static bool usesGroupDelta(int plate) { return plate == 1 || plate == 3; }
+    /// @brief **l/h 生效后**该板的回转半径：R_plate + (前后组 ? l : 0)。
+    double effectiveRadius(int plate) const {
+        const double r = plateRadius(plate);
+        return usesGroupDelta(plate) ? r + x_(9, 0) : r;
+    }
+    /// @brief **l/h 生效后**该板的竖直偏置（世界系 y 向下；h 向上为正 ⇒ 前后组 − h）。
+    double effectiveYOffset(int plate) const {
+        const int p = std::max(0, std::min(3, plate));
+        const double off = cfg_.armor_y_offsets[static_cast<std::size_t>(p)];
+        return usesGroupDelta(plate) ? off - x_(10, 0) : off;
+    }
+    double groupRadiusDelta() const { return x_(9, 0); }
+    double groupHeightDelta() const { return x_(10, 0); }
+
     /// @brief 逐板回转半径（在线慢层用；不动状态/协方差）。
     void setPlateDistance(const std::array<double, 4>& distances) {
         cfg_.plate_distance = distances;
@@ -93,9 +115,9 @@ public:
     }
 
     void reset() {
-        x_ = Vec<9>();
-        P_ = Matrix<9, 9>();
-        for (int i = 0; i < 9; ++i) P_(i, i) = 1.0;
+        x_ = Vec<kStateDim>();
+        P_ = Matrix<kStateDim, kStateDim>();
+        for (int i = 0; i < kStateDim; ++i) P_(i, i) = 1.0;
         initialized_ = false;
     }
 
@@ -130,26 +152,27 @@ public:
         x_(4, 0) = 0.0;
         x_(5, 0) = 1.0;
         x_(6, 0) = 0.0;
-        for (int i = 0; i < 9; ++i) {
-            for (int j = 0; j < 9; ++j) P_(i, j) = 0.0;
+        for (int i = 0; i < kStateDim; ++i) {
+            for (int j = 0; j < kStateDim; ++j) P_(i, j) = 0.0;
         }
         P_(0, 0) = 1e-2; P_(2, 2) = 1e-2; P_(7, 7) = 1e-2;
         P_(1, 1) = 1.0;  P_(3, 3) = 1.0;  P_(8, 8) = 1.0;
         P_(4, 4) = 0.4; P_(5, 5) = 0.4;
         P_(6, 6) = 100.0;
+        P_(9, 9) = cfg_.P_geometry; P_(10, 10) = cfg_.P_geometry;
         initialized_ = true;
     }
 
     void initAt(const Vec<3>& center, double yaw) {
-        x_ = Vec<9>();
+        x_ = Vec<kStateDim>();
         x_(0, 0) = center(0, 0);
         x_(2, 0) = center(1, 0);
         x_(7, 0) = center(2, 0);
         x_(4, 0) = std::sin(yaw);
         x_(5, 0) = std::cos(yaw);
 
-        for (int i = 0; i < 9; ++i) {
-            for (int j = 0; j < 9; ++j) P_(i, j) = 0.0;
+        for (int i = 0; i < kStateDim; ++i) {
+            for (int j = 0; j < kStateDim; ++j) P_(i, j) = 0.0;
         }
         P_(0, 0) = 0.01; P_(2, 2) = 0.02; P_(7, 7) = 0.01;
         P_(1, 1) = 1.0;  P_(3, 3) = 1.0;  P_(8, 8) = 1.0;
@@ -173,13 +196,14 @@ public:
         x_(4, 0) = 0.0;
         x_(5, 0) = 1.0;
         x_(6, 0) = 0.0;
-        for (int i = 0; i < 9; ++i) {
-            for (int j = 0; j < 9; ++j) P_(i, j) = 0.0;
+        for (int i = 0; i < kStateDim; ++i) {
+            for (int j = 0; j < kStateDim; ++j) P_(i, j) = 0.0;
         }
         P_(0, 0) = 0.1; P_(2, 2) = 0.1; P_(7, 7) = 0.1;
         P_(1, 1) = 1.0; P_(3, 3) = 1.0; P_(8, 8) = 1.0;
         P_(4, 4) = 0.4; P_(5, 5) = 0.4;
         P_(6, 6) = 100.0;
+        P_(9, 9) = cfg_.P_geometry; P_(10, 10) = cfg_.P_geometry;
         initialized_ = true;
     }
 
@@ -198,9 +222,12 @@ public:
         const double cos_new = cos_theta * cos_delta - sin_theta * sin_delta;
         x_(4, 0) = sin_new;
         x_(5, 0) = cos_new;
+        // l/h 是几何量，给硬边界（防跑飞；正常应在 ±5cm 内）
+        x_(9, 0) = std::clamp(x_(9, 0), -cfg_.geometry_delta_max, cfg_.geometry_delta_max);
+        x_(10, 0) = std::clamp(x_(10, 0), -cfg_.geometry_delta_max, cfg_.geometry_delta_max);
 
-        Matrix<9, 9> F;
-        for (int i = 0; i < 9; ++i) F(i, i) = 1.0;
+        Matrix<kStateDim, kStateDim> F;
+        for (int i = 0; i < kStateDim; ++i) F(i, i) = 1.0;
         F(0, 1) = dt; F(2, 3) = dt; F(7, 8) = dt;
         F(4, 4) = cos_delta; F(4, 5) = sin_delta; F(4, 6) = cos_new * dt;
         F(5, 4) = -sin_delta; F(5, 5) = cos_delta; F(5, 6) = -sin_new * dt;
@@ -247,7 +274,7 @@ public:
         if (observation.plate_id < 0 || observation.plate_id >= 4) return inf;
         const YpdObservation predicted = predictYpd(observation.plate_id);
         const Vec<4> residual = ypdResidual(observation, predicted);
-        const Matrix<4, 9> jacobian = ypdJacobian(observation.plate_id);
+        const Matrix<4, kStateDim> jacobian = ypdJacobian(observation.plate_id);
 
         Matrix<4, 4> noise;
         noise(0, 0) = std::max(observation.yaw_noise, 1e-8);
@@ -299,7 +326,7 @@ public:
 
         std::vector<YpdObservation> accepted;
         std::vector<Vec<4>> residuals;
-        std::vector<Matrix<4, 9>> jacobians;
+        std::vector<Matrix<4, kStateDim>> jacobians;
         accepted.reserve(observations.size());
         residuals.reserve(observations.size());
         jacobians.reserve(observations.size());
@@ -315,7 +342,7 @@ public:
 
             const YpdObservation predicted = predictYpd(observation.plate_id);
             const Vec<4> residual = ypdResidual(observation, predicted);
-            const Matrix<4, 9> jacobian = ypdJacobian(observation.plate_id);
+            const Matrix<4, kStateDim> jacobian = ypdJacobian(observation.plate_id);
             Matrix<4, 4> noise;
             noise(0, 0) = std::max(observation.yaw_noise, 1e-8);
             noise(1, 1) = std::max(observation.pitch_noise, 1e-8);
@@ -364,12 +391,12 @@ public:
         // 迭代 1 次（k=0，x_k=x_prior）退化为标准 EKF。协方差只在最后用最后一次
         // 的 K/H 做一次 Joseph 更新（避免迭代中重复收缩 P）。
         const int iterations = std::max(1, cfg_.iekf_iterations);
-        const Vec<9> x_prior = x_;
-        const Matrix<9, 9> P_prior = P_;
+        const Vec<kStateDim> x_prior = x_;
+        const Matrix<kStateDim, kStateDim> P_prior = P_;
         std::vector<std::vector<double>> H(
-            measurement_dim, std::vector<double>(9, 0.0));
+            measurement_dim, std::vector<double>(kStateDim, 0.0));
         std::vector<double> residual(measurement_dim, 0.0);
-        std::vector<std::vector<double>> gain(9, std::vector<double>(measurement_dim, 0.0));
+        std::vector<std::vector<double>> gain(kStateDim, std::vector<double>(measurement_dim, 0.0));
         bool update_ok = false;
 
         for (int iteration = 0; iteration < iterations; ++iteration) {
@@ -380,18 +407,18 @@ public:
                 const YpdObservation& observation = accepted[observation_index];
                 const YpdObservation predicted = predictYpd(observation.plate_id);
                 Vec<4> innovation_residual = ypdResidual(observation, predicted);
-                const Matrix<4, 9> jacobian = ypdJacobian(observation.plate_id);
+                const Matrix<4, kStateDim> jacobian = ypdJacobian(observation.plate_id);
                 if (iteration > 0) {
-                    Vec<9> delta;
-                    for (int i = 0; i < 9; ++i) delta(i, 0) = x_(i, 0) - x_prior(i, 0);
+                    Vec<kStateDim> delta;
+                    for (int i = 0; i < kStateDim; ++i) delta(i, 0) = x_(i, 0) - x_prior(i, 0);
                     const Vec<4> linearized = jacobian * delta;
                     for (int row = 0; row < 4; ++row) {
                         innovation_residual(row, 0) += linearized(row, 0);
                     }
                 }
                 for (int row = 0; row < 4; ++row) {
-                    H[row_offset + row] = std::vector<double>(9, 0.0);
-                    for (int column = 0; column < 9; ++column) {
+                    H[row_offset + row] = std::vector<double>(kStateDim, 0.0);
+                    for (int column = 0; column < kStateDim; ++column) {
                         H[row_offset + row][column] = jacobian(row, column);
                     }
                     residual[row_offset + row] = innovation_residual(row, 0);
@@ -403,8 +430,8 @@ public:
             for (int row = 0; row < measurement_dim; ++row) {
                 for (int column = 0; column < measurement_dim; ++column) {
                     double value = 0.0;
-                    for (int state_row = 0; state_row < 9; ++state_row) {
-                        for (int state_column = 0; state_column < 9; ++state_column) {
+                    for (int state_row = 0; state_row < kStateDim; ++state_row) {
+                        for (int state_column = 0; state_column < kStateDim; ++state_column) {
                             value += H[row][state_row] * P_prior(state_row, state_column) *
                                 H[column][state_column];
                         }
@@ -418,18 +445,18 @@ public:
             if (!invertDynamic(innovation, innovation_inverse)) return 0.0;
 
             std::vector<std::vector<double>> state_measurement_covariance(
-                9, std::vector<double>(measurement_dim, 0.0));
-            for (int state_row = 0; state_row < 9; ++state_row) {
+                kStateDim, std::vector<double>(measurement_dim, 0.0));
+            for (int state_row = 0; state_row < kStateDim; ++state_row) {
                 for (int measurement = 0; measurement < measurement_dim; ++measurement) {
                     double value = 0.0;
-                    for (int state_column = 0; state_column < 9; ++state_column) {
+                    for (int state_column = 0; state_column < kStateDim; ++state_column) {
                         value += P_prior(state_row, state_column) * H[measurement][state_column];
                     }
                     state_measurement_covariance[state_row][measurement] = value;
                 }
             }
 
-            for (int state_row = 0; state_row < 9; ++state_row) {
+            for (int state_row = 0; state_row < kStateDim; ++state_row) {
                 for (int output_measurement = 0; output_measurement < measurement_dim;
                      ++output_measurement) {
                     double value = 0.0;
@@ -444,7 +471,7 @@ public:
             }
 
             // x_{k+1} = x_prior + K·r_k（从先验出发，而不是在上一次结果上累加）。
-            for (int state_row = 0; state_row < 9; ++state_row) {
+            for (int state_row = 0; state_row < kStateDim; ++state_row) {
                 double value = x_prior(state_row, 0);
                 for (int measurement = 0; measurement < measurement_dim; ++measurement) {
                     value += gain[state_row][measurement] * residual[measurement];
@@ -456,22 +483,22 @@ public:
         if (!update_ok) return 0.0;
 
         std::vector<std::vector<double>> transform(
-            9, std::vector<double>(9, 0.0));
-        for (int row = 0; row < 9; ++row) {
+            kStateDim, std::vector<double>(kStateDim, 0.0));
+        for (int row = 0; row < kStateDim; ++row) {
             transform[row][row] = 1.0;
-            for (int column = 0; column < 9; ++column) {
+            for (int column = 0; column < kStateDim; ++column) {
                 for (int measurement = 0; measurement < measurement_dim; ++measurement) {
                     transform[row][column] -= gain[row][measurement] * H[measurement][column];
                 }
             }
         }
 
-        std::vector<std::vector<double>> covariance(9, std::vector<double>(9, 0.0));
-        for (int row = 0; row < 9; ++row) {
-            for (int column = 0; column < 9; ++column) {
+        std::vector<std::vector<double>> covariance(kStateDim, std::vector<double>(kStateDim, 0.0));
+        for (int row = 0; row < kStateDim; ++row) {
+            for (int column = 0; column < kStateDim; ++column) {
                 double value = 0.0;
-                for (int i = 0; i < 9; ++i) {
-                    for (int j = 0; j < 9; ++j) {
+                for (int i = 0; i < kStateDim; ++i) {
+                    for (int j = 0; j < kStateDim; ++j) {
                         value += transform[row][i] * P_(i, j) * transform[column][j];
                     }
                 }
@@ -479,8 +506,8 @@ public:
             }
         }
 
-        for (int row = 0; row < 9; ++row) {
-            for (int column = 0; column < 9; ++column) {
+        for (int row = 0; row < kStateDim; ++row) {
+            for (int column = 0; column < kStateDim; ++column) {
                 double value = 0.0;
                 for (int measurement = 0; measurement < measurement_dim; ++measurement) {
                     value += gain[row][measurement] * noise_diagonal[measurement] *
@@ -490,8 +517,8 @@ public:
             }
         }
 
-        for (int row = 0; row < 9; ++row) {
-            for (int column = 0; column < 9; ++column) {
+        for (int row = 0; row < kStateDim; ++row) {
+            for (int column = 0; column < kStateDim; ++column) {
                 P_(row, column) = covariance[row][column];
             }
             if (P_(row, row) < cfg_.P_min) P_(row, row) = cfg_.P_min;
@@ -542,7 +569,7 @@ public:
         predicted(1, 0) = x_(2, 0) + cfg_.armor_y_offsets[plate_id];
         predicted(2, 0) = x_(7, 0) + plateRadius(plate_id) * sin_total;
 
-        Matrix<3, 9> H;
+        Matrix<3, kStateDim> H;
         // theta is represented by [sin(theta), cos(theta)] in the state, so
         // the position Jacobian must be taken with respect to those variables.
         H(0, 0) = 1.0; H(0, 4) = -plateRadius(plate_id) * sin_plate;
@@ -572,14 +599,14 @@ public:
         // it contaminates the estimate.
         if (distance_sq > nis_threshold) return 0.0;
 
-        Matrix<9, 3> K = P_ * H.transpose() * S_inv;
+        Matrix<kStateDim, 3> K = P_ * H.transpose() * S_inv;
         x_ = x_ + K * residual;
 
-        Matrix<9, 9> I;
-        for (int i = 0; i < 9; ++i) I(i, i) = 1.0;
-        Matrix<9, 9> IKH = I - K * H;
+        Matrix<kStateDim, kStateDim> I;
+        for (int i = 0; i < kStateDim; ++i) I(i, i) = 1.0;
+        Matrix<kStateDim, kStateDim> IKH = I - K * H;
         P_ = IKH * P_ * IKH.transpose() + K * R * K.transpose();
-        for (int i = 0; i < 9; ++i) {
+        for (int i = 0; i < kStateDim; ++i) {
             if (P_(i, i) < cfg_.P_min) P_(i, i) = cfg_.P_min;
         }
 
@@ -605,7 +632,7 @@ public:
         const double residual_angle = normalizeAngle(observed_angle - predicted_angle);
 
         // d(atan2(s, c)) / ds = c, d(atan2(s, c)) / dc = -s.
-        Matrix<1, 9> H;
+        Matrix<1, kStateDim> H;
         H(0, 4) = cos_total;
         H(0, 5) = -sin_total;
 
@@ -616,16 +643,16 @@ public:
         const double nis = residual_angle * residual_angle / innovation_variance;
         if (nis > nis_threshold) return 0.0;
 
-        const Matrix<9, 1> K = P_ * H.transpose() * (1.0 / innovation_variance);
-        for (int i = 0; i < 9; ++i) {
+        const Matrix<kStateDim, 1> K = P_ * H.transpose() * (1.0 / innovation_variance);
+        for (int i = 0; i < kStateDim; ++i) {
             x_(i, 0) += K(i, 0) * residual_angle;
         }
 
-        Matrix<9, 9> I;
-        for (int i = 0; i < 9; ++i) I(i, i) = 1.0;
-        const Matrix<9, 9> IKH = I - K * H;
+        Matrix<kStateDim, kStateDim> I;
+        for (int i = 0; i < kStateDim; ++i) I(i, i) = 1.0;
+        const Matrix<kStateDim, kStateDim> IKH = I - K * H;
         P_ = IKH * P_ * IKH.transpose() + K * K.transpose() * noise;
-        for (int i = 0; i < 9; ++i) {
+        for (int i = 0; i < kStateDim; ++i) {
             if (P_(i, i) < cfg_.P_min) P_(i, i) = cfg_.P_min;
         }
 
@@ -655,7 +682,7 @@ public:
             return 0.0;
         }
 
-        Matrix<1, 9> H;
+        Matrix<1, kStateDim> H;
         H(0, 6) = 1.0;
 
         const Matrix<1, 1> S = H * P_ * H.transpose();
@@ -666,15 +693,15 @@ public:
         const double nis = residual * residual / innovation_variance;
         if (nis > nis_threshold) return 0.0;
 
-        const Matrix<9, 1> K =
+        const Matrix<kStateDim, 1> K =
             P_ * H.transpose() * (1.0 / innovation_variance);
-        for (int i = 0; i < 9; ++i) {
+        for (int i = 0; i < kStateDim; ++i) {
             x_(i, 0) += K(i, 0) * residual;
         }
 
-        Matrix<9, 9> I;
-        for (int i = 0; i < 9; ++i) I(i, i) = 1.0;
-        const Matrix<9, 9> IKH = I - K * H;
+        Matrix<kStateDim, kStateDim> I;
+        for (int i = 0; i < kStateDim; ++i) I(i, i) = 1.0;
+        const Matrix<kStateDim, kStateDim> IKH = I - K * H;
         P_ = IKH * P_ * IKH.transpose() + K * K.transpose() * noise;
         return std::exp(-0.5 * nis);
     }
@@ -684,7 +711,7 @@ public:
         double nis_threshold = std::numeric_limits<double>::infinity()) {
         if (!initialized_) return 0.0;
 
-        Matrix<3, 9> H;
+        Matrix<3, kStateDim> H;
         H(0, 0) = 1.0;
         H(1, 2) = 1.0;
         H(2, 7) = 1.0;
@@ -706,12 +733,12 @@ public:
         }
         if (distance_sq > nis_threshold) return 0.0;
 
-        Matrix<9, 3> K = P_ * H.transpose() * S_inv;
+        Matrix<kStateDim, 3> K = P_ * H.transpose() * S_inv;
         x_ = x_ + K * residual;
 
-        Matrix<9, 9> I;
-        for (int i = 0; i < 9; ++i) I(i, i) = 1.0;
-        Matrix<9, 9> IKH = I - K * H;
+        Matrix<kStateDim, kStateDim> I;
+        for (int i = 0; i < kStateDim; ++i) I(i, i) = 1.0;
+        Matrix<kStateDim, kStateDim> IKH = I - K * H;
         P_ = IKH * P_ * IKH.transpose() + K * R_noise * K.transpose();
 
         const double norm = std::sqrt(x_(4, 0) * x_(4, 0) + x_(5, 0) * x_(5, 0));
@@ -722,7 +749,7 @@ public:
         return std::exp(-0.5 * distance_sq);
     }
 
-    Vec<9> getState() const { return x_; }
+    Vec<kStateDim> getState() const { return x_; }
 
     // 局部拟合器（小陀螺 θ/ω 拟合）的强观测注入。
     //
@@ -755,7 +782,7 @@ public:
         if (!initialized_ || !std::isfinite(omega)) return;
         x_(6, 0) = omega;
         P_(6, 6) = std::max(cfg_.P_min, covariance);
-        for (int i = 0; i < 9; ++i) {
+        for (int i = 0; i < kStateDim; ++i) {
             if (i == 6) continue;
             P_(i, 6) = 0.0;
             P_(6, i) = 0.0;
@@ -805,9 +832,9 @@ public:
         const double cos_theta = x_(5, 0);
 
         Vec<3> position;
-        position(0, 0) = x_(0, 0) + plateRadius(plate_id) * (cos_theta * cos_plate - sin_theta * sin_plate);
-        position(1, 0) = x_(2, 0) + cfg_.armor_y_offsets[plate_id];
-        position(2, 0) = x_(7, 0) + plateRadius(plate_id) * (sin_theta * cos_plate + cos_theta * sin_plate);
+        position(0, 0) = x_(0, 0) + effectiveRadius(plate_id) * (cos_theta * cos_plate - sin_theta * sin_plate);
+        position(1, 0) = x_(2, 0) + effectiveYOffset(plate_id);
+        position(2, 0) = x_(7, 0) + effectiveRadius(plate_id) * (sin_theta * cos_plate + cos_theta * sin_plate);
         return position;
     }
 
@@ -815,9 +842,9 @@ public:
     Vec<3> centerFromPlate(const Vec<3>& observation, int plate_id) const {
         const double angle = getYaw() + angleForPlate(plate_id);
         Vec<3> center;
-        center(0, 0) = observation(0, 0) - plateRadius(plate_id) * std::cos(angle);
-        center(1, 0) = observation(1, 0) - cfg_.armor_y_offsets[plate_id];
-        center(2, 0) = observation(2, 0) - plateRadius(plate_id) * std::sin(angle);
+        center(0, 0) = observation(0, 0) - effectiveRadius(plate_id) * std::cos(angle);
+        center(1, 0) = observation(1, 0) - effectiveYOffset(plate_id);
+        center(2, 0) = observation(2, 0) - effectiveRadius(plate_id) * std::sin(angle);
         return center;
     }
 
@@ -873,7 +900,7 @@ private:
         return residual;
     }
 
-    Matrix<4, 9> ypdJacobian(int plate_id) const {
+    Matrix<4, kStateDim> ypdJacobian(int plate_id) const {
         const double plate_angle = angleForPlate(plate_id);
         const double cos_plate = std::cos(plate_angle);
         const double sin_plate = std::sin(plate_angle);
@@ -882,10 +909,15 @@ private:
 
         const double sin_armor = sin_theta * cos_plate + cos_theta * sin_plate;
         const double cos_armor = cos_theta * cos_plate - sin_theta * sin_plate;
-        const double radius = plateRadius(plate_id);
+        const double radius = effectiveRadius(plate_id);
         const double px = x_(0, 0) + radius * cos_armor;
-        const double py = x_(2, 0) + cfg_.armor_y_offsets[plate_id];
+        const double py = x_(2, 0) + effectiveYOffset(plate_id);
         const double pz = x_(7, 0) + radius * sin_armor;
+        // l/h 对位置的偏导（只作用于 {1,3} 组；h 向上为正、y 向下 ⇒ ∂py/∂h = −1）
+        const double group = usesGroupDelta(plate_id) ? 1.0 : 0.0;
+        const double dpx_dl = group * cos_armor;
+        const double dpz_dl = group * sin_armor;
+        const double dpy_dh = -group;
 
         const double horizontal_sq = px * px + pz * pz;
         const double horizontal = std::sqrt(horizontal_sq);
@@ -900,7 +932,7 @@ private:
         const double dpz_ds = radius * cos_plate;
         const double dpz_dc = radius * sin_plate;
 
-        Matrix<4, 9> jacobian;
+        Matrix<4, kStateDim> jacobian;
         if (horizontal_sq > 1e-12) {
             const double dyaw_dpx = pz / horizontal_sq;
             const double dyaw_dpz = -px / horizontal_sq;
@@ -908,6 +940,7 @@ private:
             jacobian(0, 7) = dyaw_dpz;
             jacobian(0, 4) = dyaw_dpx * dpx_ds + dyaw_dpz * dpz_ds;
             jacobian(0, 5) = dyaw_dpx * dpx_dc + dyaw_dpz * dpz_dc;
+            jacobian(0, 9) = dyaw_dpx * dpx_dl + dyaw_dpz * dpz_dl;
 
             const double dpitch_dpx = -py * px / (distance_sq * horizontal);
             const double dpitch_dpz = -py * pz / (distance_sq * horizontal);
@@ -917,6 +950,8 @@ private:
             jacobian(1, 7) = dpitch_dpz;
             jacobian(1, 4) = dpitch_dpx * dpx_ds + dpitch_dpz * dpz_ds;
             jacobian(1, 5) = dpitch_dpx * dpx_dc + dpitch_dpz * dpz_dc;
+            jacobian(1, 9) = dpitch_dpx * dpx_dl + dpitch_dpz * dpz_dl;
+            jacobian(1, 10) = dpitch_dpy * dpy_dh;
         }
 
         const double ddistance_dpx = px / distance;
@@ -927,6 +962,8 @@ private:
         jacobian(2, 7) = ddistance_dpz;
         jacobian(2, 4) = ddistance_dpx * dpx_ds + ddistance_dpz * dpz_ds;
         jacobian(2, 5) = ddistance_dpx * dpx_dc + ddistance_dpz * dpz_dc;
+        jacobian(2, 9) = ddistance_dpx * dpx_dl + ddistance_dpz * dpz_dl;
+        jacobian(2, 10) = ddistance_dpy * dpy_dh;
 
         const double angle_norm_sq = sin_theta * sin_theta + cos_theta * cos_theta;
         if (angle_norm_sq > 1e-12) {
@@ -997,7 +1034,7 @@ private:
         const double dt3 = dt2 * dt;
         const double dt4 = dt3 * dt;
 
-        Q_ = Matrix<9, 9>();
+        Q_ = Matrix<kStateDim, kStateDim>();
         const int position_idx[3] = {0, 2, 7};
         const int velocity_idx[3] = {1, 3, 8};
         for (int k = 0; k < 3; ++k) {
@@ -1007,6 +1044,10 @@ private:
         Q_(p, v) = dt3 / 2.0 * qa;
         Q_(v, p) = dt3 / 2.0 * qa;
         Q_(v, v) = dt2 * qa;
+        // l/h：机械常数，但允许缓慢收敛（每步一个很小的方差）。取 4e-7 → 1s(70步)
+        // 后 P 增长 ~3e-5，σ≈5mm，足够跟上机械偏差又不会被运动滞后带跑。
+        Q_(9, 9) = cfg_.process_geometry;
+        Q_(10, 10) = cfg_.process_geometry;
     }
 
     // theta is represented by [sin(theta), cos(theta)]. Map the same
@@ -1041,9 +1082,9 @@ private:
     Config cfg_;
     double cfg_dt_ = 0.01;
     bool initialized_ = false;
-    Vec<9> x_;
-    Matrix<9, 9> P_;
-    Matrix<9, 9> Q_;
+    Vec<kStateDim> x_;
+    Matrix<kStateDim, kStateDim> P_;
+    Matrix<kStateDim, kStateDim> Q_;
 };
 
 } // namespace auto_aim

@@ -70,7 +70,7 @@ namespace auto_aim
     bool Tracker::stateDiverged() const
     {
         if (!ekf_.isInit()) return true;
-        const Vec<9> state = ekf_.getState();
+        const auto state = ekf_.getState();
         const double speed = std::sqrt(state(1, 0) * state(1, 0) + state(3, 0) * state(3, 0) +
                                        state(8, 0) * state(8, 0));
         const double yaw_rate = std::abs(state(6, 0));
