@@ -287,6 +287,10 @@ namespace auto_aim
         double geometry_learn_max_step = 0.004;   // 单帧最大 4 mm
         double geometry_learn_max_error = 0.05;   // 残差 > 5 cm 当异常，不学
         double geometry_learn_range = 0.08;       // 相对初值最多学 ±8 cm
+        // 只在**低速/静止**时学几何：高转速下状态有滞后，而"哪一组板被观测"与滞后相关，
+        // 残差里会出现按组分的系统项，学习器会把它误当成"矩形底盘"（仿真正圆靶实测：
+        // 5 rad/s 下学出 +1.7cm 的假组间差）。几何是慢量，只在 |ω| 小于此值时学即可。
+        double geometry_learn_max_omega = 1.0;    // rad/s；<=0 表示不限
         // 逐板**高度**学习默认关：在 hard_plate_constraint 下，"板高"与"车心 y"完全
         // 不可分（硬钉把车心 y 钉在观测板上），观测到的竖直残差里还混着靶车真实的
         // 上下运动 —— 开着的实测结果是它自己随机游走，模型整体被抬/压下去几十 px。

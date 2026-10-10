@@ -394,58 +394,83 @@ namespace auto_aim
         // ---- 硬约束：构造用的那块板一定是**离相机最近**的那块 ----------------
         // 车心必须比它更远（画面上更靠上）。违反 = 模型的径向/相位翻了 180°
         // （PnP 法向翻号或关联到对面板）→ 把 yaw 翻回来再摆。
-        // ---- 观测慢收敛：底盘几何自己学（必须在硬钉之前，硬钉会清零残差）----
-        if (cfg_.geometry_learn && ekf_.isInit() && !accepted_pairs.empty()) {
-            bool geometry_changed = false;
+        // ---- 观测慢收敛：底盘几何自己学（**按组**，sp_vision 的 l/h 思路）---------
+        // sp_vision_25 的 Target 状态里显式带两个几何量：
+        //     l = r2 − r1（前后 vs 左右两组的**半径差**）
+        //     h = z2 − z1（两组的**高度差**）
+        // 并且它们在线估计。这非常关键，因为：
+        //   · 我们的模型原来四块板**完全等价** ⇒ "yaw 只在模 90° 有意义"，
+        //     板号/相位因此不可观 —— 换板跳变、90° 等价解的病根都在这里；
+        //   · 一旦前后组与左右组的半径/高度不同，90° 旋转不再等价，
+        //     板号与 yaw 立刻变得可观；
+        //   · "重投影远近不对" = 前后板的真实半径与左右板不同，而我们用一个 R 画四块板。
+        // 做法：在**硬钉之前**量"观测板心 − 模型板心"，按组（{0,2} 与 {1,3}）取平均，
+        // 径向分量低通进该组半径、竖直分量低通进该组高度；**均值**仍锚定在拟合器的 R 上
+        // （只有组间差是可观的）。
+        if (cfg_.geometry_learn && ekf_.isInit() && !accepted_pairs.empty() &&
+            !(cfg_.geometry_learn_max_omega > 0.0 &&
+              cfg_.geometry_learn_max_omega < 3.0 &&
+              std::abs(getOmega()) > cfg_.geometry_learn_max_omega)) {
+            double sum_radial[2] = {0.0, 0.0};
+            double sum_vertical[2] = {0.0, 0.0};
+            int count[2] = {0, 0};
             for (const auto& [plate, armor_index] : accepted_pairs) {
+                const int group = (plate == 1 || plate == 3) ? 1 : 0;   // 1/3=前后组
                 const Vec<3> observed = toVec(valid_pairs[armor_index].home.tvec);
                 const Vec<3> modeled = ekf_.armorPosition(plate);
                 const double phase = ekf_.getYaw() + ArmorEKF::angleForPlate(plate);
-                // 径向（水平）上的残差 → 该板的回转距离
                 const double radial_error =
                     (observed(0, 0) - modeled(0, 0)) * std::cos(phase) +
                     (observed(2, 0) - modeled(2, 0)) * std::sin(phase);
-                // 竖直残差（world y 向下）→ 该板的高度（模型里向上为正 → 取负）
                 const double vertical_error = observed(1, 0) - modeled(1, 0);
                 if (std::abs(radial_error) < cfg_.geometry_learn_max_error) {
-                    const double step = std::clamp(cfg_.geometry_learn_gain * radial_error,
-                                                   -cfg_.geometry_learn_max_step,
-                                                   cfg_.geometry_learn_max_step);
-                    if (std::abs(step) > 1e-7) {
+                    sum_radial[group] += radial_error;
+                    ++count[group];
+                }
+                if (cfg_.geometry_learn_height &&
+                    std::abs(vertical_error) < cfg_.geometry_learn_max_error) {
+                    sum_vertical[group] += -vertical_error;   // 模型里向上为正
+                }
+            }
+            bool geometry_changed = false;
+            for (int g = 0; g < 2; ++g) {
+                if (count[g] == 0) continue;
+                const double step = std::clamp(
+                    cfg_.geometry_learn_gain * (sum_radial[g] / count[g]),
+                    -cfg_.geometry_learn_max_step, cfg_.geometry_learn_max_step);
+                if (std::abs(step) > 1e-7) {
+                    for (int plate = g; plate < 4; plate += 2) {   // g=0→{0,2}, g=1→{1,3}
                         const double base = cfg_.plate_distance[plate] > 0.05
                             ? cfg_.plate_distance[plate] : cfg_.armor_radius;
                         geometry_.plate_distance[plate] = std::clamp(
                             geometry_.plate_distance[plate] + step,
                             base - cfg_.geometry_learn_range, base + cfg_.geometry_learn_range);
-                        geometry_changed = true;
                     }
+                    geometry_changed = true;
                 }
-                if (cfg_.geometry_learn_height &&
-                    std::abs(vertical_error) < cfg_.geometry_learn_max_error) {
-                    const double step = std::clamp(-cfg_.geometry_learn_gain * vertical_error,
-                                                   -cfg_.geometry_learn_max_step,
-                                                   cfg_.geometry_learn_max_step);
-                    if (std::abs(step) > 1e-7) {
-                        geometry_.plate_height[plate] = std::clamp(
-                            geometry_.plate_height[plate] + step, -0.10, 0.10);
+                if (cfg_.geometry_learn_height && count[g] > 0) {
+                    const double hstep = std::clamp(
+                        cfg_.geometry_learn_gain * (sum_vertical[g] / count[g]),
+                        -cfg_.geometry_learn_max_step, cfg_.geometry_learn_max_step);
+                    if (std::abs(hstep) > 1e-7) {
+                        for (int plate = g; plate < 4; plate += 2)
+                            geometry_.plate_height[plate] = std::clamp(
+                                geometry_.plate_height[plate] + hstep, -0.10, 0.10);
                         geometry_changed = true;
                     }
                 }
             }
             if (geometry_changed) {
-                // **尺度锚定**：只让学习器改"逐板差异"（矩形底盘），总尺度不动 ——
-                // 单板帧里"半径偏大"与"车心沿径向偏"不可分（实车 log 里 Rgeo 一路
-                // 涨到 clamp 就是这个耦合），尺度交给拟合器的弧段解（可观）。
+                // **尺度锚定**：只让学习器改"组间差"，总尺度不动（尺度由拟合器的弧段解给）。
                 double mean = 0.0;
                 for (double d : geometry_.plate_distance) mean += d;
                 mean /= 4.0;
-                double anchor = cfg_.armor_radius;
-                if (armor_radius_online_ > 0.0) anchor = armor_radius_online_;
-                for (std::size_t i = 0; i < geometry_.plate_distance.size(); ++i) {
+                const double anchor = armor_radius_online_ > 0.0 ? armor_radius_online_
+                                                                  : cfg_.armor_radius;
+                for (std::size_t i = 0; i < geometry_.plate_distance.size(); ++i)
                     geometry_.plate_distance[i] = std::clamp(
                         geometry_.plate_distance[i] + (anchor - mean),
                         anchor - cfg_.geometry_learn_range, anchor + cfg_.geometry_learn_range);
-                }
                 syncGeometryToEkf();
             }
         }

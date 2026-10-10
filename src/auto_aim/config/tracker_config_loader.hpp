@@ -226,6 +226,8 @@ namespace auto_aim
                 kalman["geometry_learn_max_error"].as<double>(cfg.geometry_learn_max_error);
             cfg.geometry_learn_range =
                 kalman["geometry_learn_range"].as<double>(cfg.geometry_learn_range);
+            cfg.geometry_learn_max_omega =
+                kalman["geometry_learn_max_omega"].as<double>(cfg.geometry_learn_max_omega);
             cfg.geometry_learn_height =
                 kalman["geometry_learn_height"].as<bool>(cfg.geometry_learn_height);
             cfg.position_nis_threshold =
