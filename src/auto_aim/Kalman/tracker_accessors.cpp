@@ -85,15 +85,58 @@ namespace auto_aim
     // 会把观测板的 roll 传染给另外三块板）。
     ArmorAxes Tracker::armorAxesCamera(int plate) const
     {
+        return armorAxesForYaw(ekf_.getYaw(), plate);
+    }
+
+    ArmorAxes Tracker::armorAxesForYaw(double world_yaw, int plate) const
+    {
         const int clamped = std::max(0, std::min(3, plate));
         const double plate_angle = ArmorEKF::normalizeAngle(
-            ekf_.getYaw() + ArmorEKF::angleForPlate(clamped));
+            world_yaw + ArmorEKF::angleForPlate(clamped));
         const cv::Vec3d radial_home(std::cos(plate_angle), 0.0, std::sin(plate_angle));
         const cv::Vec3d up_home(0.0, -1.0, 0.0);   // world y 向下 → 竖直向上是 −y
         const cv::Vec3d radial_camera = worldDirectionToCamera(radial_home);
         const cv::Vec3d up_camera = worldDirectionToCamera(up_home);
         return armorAxesFromRadial(radial_camera, up_camera,
                                    cfg_.armor_tilt_deg * CV_PI / 180.0);
+    }
+
+    // 输出模型：双模型权重生效后的中心/底速/yaw/ω，按 (v, ω) 外推 dt 秒后摆四块板。
+    // 与 getEstimatedArmorPositions()（纯整车 EKF、不外推）的区别正是这两点：
+    //   ① 用**输出口径**的状态（plate_model_weight_>0 时中心/yaw 来自板模型反推），
+    //      这样画出来的模型和瞄点/选板用的是同一套几何，不会"框在我这儿、瞄在那儿"；
+    //   ② 外推到"现在"，不再把观测延迟显示成模型相位滞后。
+    Tracker::OutputModel Tracker::predictOutputModel(double dt) const
+    {
+        OutputModel out;
+        if (state_ == TrackerState::LOST || !ekf_.isInit()) return out;
+        const double clamped_dt = std::max(0.0, std::min(dt, 0.30));
+
+        const Vec<3> center_now = blendedCenter();
+        const Vec<3> velocity = blendedVelocity();
+        const double omega = getOmega();
+        const double yaw0 = blendedYawWorld();
+        const double radius = cfg_.armor_radius;
+
+        out.omega = omega;
+        out.radius = radius;
+        out.world_yaw = ArmorEKF::normalizeAngle(yaw0 + omega * clamped_dt);
+        Vec<3> center = center_now;
+        if (cfg_.model_lead_center) {
+            for (int i = 0; i < 3; ++i) center(i, 0) += velocity(i, 0) * clamped_dt;
+        }
+        out.center = worldToCamera(center);
+
+        for (int plate = 0; plate < 4; ++plate) {
+            const double phase = out.world_yaw + ArmorEKF::angleForPlate(plate);
+            Vec<3> position = center;
+            position(0, 0) += radius * std::cos(phase);
+            position(1, 0) += cfg_.armor_y_offsets[plate];
+            position(2, 0) += radius * std::sin(phase);
+            out.positions[plate] = worldToCamera(position);
+        }
+        out.valid = true;
+        return out;
     }
 
     double Tracker::getYaw() const

@@ -27,7 +27,6 @@ namespace app
         if (
             tracker.getState() != auto_aim::TrackerState::LOST &&
             tracker.getTargetCenter().rows == 3) {
-            const auto estimated_positions = tracker.getEstimatedArmorPositions();
             const bool has_observation = tracker.hasObservation();
             const int observed_plate = has_observation
                 ? tracker.getLastObservedPlateId() : -1;
@@ -41,12 +40,18 @@ namespace app
             // 传染给另外三块板（"模型自带 pitch"）。
             const double half_width = tracker.getArmorHalfWidth(large_armor);
             const double half_height = tracker.getArmorHalfHeight();
+            // 模型口径与 real_runner 一致：输出状态（双模型权重生效后）而非纯整车 EKF。
+            // 这里没有"当前帧时刻"，所以 dt=0；要按观测延迟外推请用
+            // predictOutputModel(age)（real_runner 就是这么画的）。
+            const auto model = tracker.predictOutputModel(0.0);
 
             for (int plate = 0; plate < 4; ++plate) {
-                const auto_aim::ArmorAxes axes = tracker.armorAxesCamera(plate);
+                if (!model.valid || model.positions[plate].rows != 3) continue;
+                const auto_aim::ArmorAxes axes =
+                    tracker.armorAxesForYaw(model.world_yaw, plate);
                 if (cv::norm(axes.tangent) < 1e-6 || cv::norm(axes.bar) < 1e-6) continue;
                 const auto corners = auto_aim::projectArmorCameraFrame(
-                    estimated_positions[plate], axes.tangent, axes.bar,
+                    model.positions[plate], axes.tangent, axes.bar,
                     half_width, half_height, camera_matrix, dist_coeffs);
                 if (corners.size() != 4) continue;
                 if (plate != observed_plate) {
@@ -71,7 +76,7 @@ namespace app
                             cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
             }
 
-            const auto center = tracker.getTargetCenter();
+            const auto center = model.valid ? model.center : tracker.getTargetCenter();
             cv::Point2f chassis_center;
             if (auto_aim::projectPoint(center, camera_matrix, dist_coeffs,
                                        chassis_center)) {

@@ -1,5 +1,6 @@
 #include "app/real_runner.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -1519,12 +1520,21 @@ int auto_aim::app::RealRunner::run()
         const bool model_visible = has_observation &&
                                    tracker.getState() == auto_aim::TrackerState::TRACKING;
         if (model_visible) {
-            const auto estimated_positions = tracker.getEstimatedArmorPositions();
+            // —— 重投影的时间基（这是"绿色框贴得住、模型跑飞"的主要来源）——
+            // 估计器状态停在**最后一次观测时刻**（曝光），而画面是"现在"。异步检测
+            // "曝光→到手"几十~一百多 ms，在 3 rad/s 自旋上就是 12~28° 相位差，
+            // 于是整车模型的四块板整体拖在真车后面。这里按 (底速, ω) 把**输出口径**
+            // 的状态外推到当前时刻再画（predictOutputModel），并用同一时刻的 yaw
+            // 造板姿态。控制/选板那条路已经由选择器按 estimate.age 补过，不要重复。
+            const double model_dt = std::max(0.0, std::min(observation_age, 0.20));
+            const auto model = tracker.predictOutputModel(model_dt);
             for (int plate = 0; plate < 4; ++plate) {
-                const auto_aim::ArmorAxes axes = tracker.armorAxesCamera(plate);
+                if (!model.valid || model.positions[plate].rows != 3) continue;
+                const auto_aim::ArmorAxes axes =
+                    tracker.armorAxesForYaw(model.world_yaw, plate);
                 if (cv::norm(axes.tangent) < 1e-6 || cv::norm(axes.bar) < 1e-6) continue;
                 const auto corners = auto_aim::projectArmorCameraFrame(
-                    estimated_positions[plate], axes.tangent, axes.bar, half_width,
+                    model.positions[plate], axes.tangent, axes.bar, half_width,
                     half_height, auto_aim::CAMERA_MATRIX, auto_aim::DIST_COEFFS);
                 if (corners.size() != 4) continue;
                 // 四块板**一视同仁**：都画成底盘模型的一部分（同一个颜色、同一套 ID）。
@@ -1557,8 +1567,9 @@ int auto_aim::app::RealRunner::run()
                 }
             }
 
+            // 红点 = 底盘中心，也画在外推后的时刻（和上面四块板同一个时刻）。
             cv::Point2f chassis_center;
-            if (auto_aim::projectPoint(tracker.getTargetCenter(),
+            if (auto_aim::projectPoint(model.center,
                                        auto_aim::CAMERA_MATRIX,
                                        auto_aim::DIST_COEFFS, chassis_center)) {
                 cv::circle(image, chassis_center, 4, cv::Scalar(0, 0, 255), -1);
@@ -1700,6 +1711,11 @@ int auto_aim::app::RealRunner::run()
                       << "deg(闸门拦下 " << fire_gate_blocked.load(std::memory_order_relaxed)
                       << ")"
                       << ", fire=" << (outcome.fire ? 1 : 0) << ", reproj=" << reprojection_px
+                      // 模型口径：R 是模型用的回转半径（online=被拟合器慢层改过），
+                      // model_age 是重投影外推到"现在"用的时间（=观测延迟）。
+                      << ", R=" << tracker.getArmorRadius()
+                      << (tracker.armorRadiusOnline() ? "(online)" : "(cfg)")
+                      << ", model_age=" << observation_age * 1000.0 << "ms"
                       << ", send=" << sent_yaw_now.load(std::memory_order_relaxed) * 180.0 / CV_PI
                       << "/" << sent_pitch_now.load(std::memory_order_relaxed) * 180.0 / CV_PI
                       << "deg（我们下发, mode=" << sent_mode_now.load(std::memory_order_relaxed)

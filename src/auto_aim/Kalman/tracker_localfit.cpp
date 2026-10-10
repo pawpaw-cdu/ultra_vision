@@ -288,6 +288,19 @@ namespace auto_aim
             conv, cfg_.local_fit.yaw_noise, cfg_.local_fit.omega_noise,
             std::numeric_limits<double>::infinity());
 
+        // 可选：用拟合器慢层的 R 在线改回转半径（use_fit_radius，默认关）。
+        // 配置里写死 0.25、实际 0.20~0.21 —— 这 4~5 cm 会 1:1 变成四块板的径向偏差，
+        // 拟合器已经在弧段上把这个量算出来了（sim 真值 0.210 / 在线 0.200），
+        // 按"限幅 + 低通"跟上去即可。半径是几何量，改它不动状态/协方差。
+        if (cfg_.local_fit.use_fit_radius && std::isfinite(fit->R) &&
+            fit->R > 0.10 && fit->R < 0.50)
+        {
+            const double step = std::clamp(fit->R - cfg_.armor_radius,
+                                           -cfg_.local_fit.radius_max_step,
+                                           cfg_.local_fit.radius_max_step);
+            setArmorRadius(cfg_.armor_radius + cfg_.local_fit.radius_alpha * step);
+        }
+
         // 可选：把拟合出的**旋转中心**也当观测（also_update_center，默认关）。
         // 单板工况下模型中心只能靠"钉在观测板上"得到，擦边/正面观测的 PnP 位置误差
         // （实测 ±0.15 m）会 1:1 进模型中心 —— 自旋时整台车的重投影框被单块板拖着跑，

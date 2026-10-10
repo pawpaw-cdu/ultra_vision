@@ -73,6 +73,12 @@ namespace auto_aim
                 lf["also_update_center"].as<bool>(cfg.local_fit.also_update_center);
             cfg.local_fit.center_noise =
                 lf["center_noise"].as<double>(cfg.local_fit.center_noise);
+            cfg.local_fit.use_fit_radius =
+                lf["use_fit_radius"].as<bool>(cfg.local_fit.use_fit_radius);
+            cfg.local_fit.radius_alpha =
+                lf["radius_alpha"].as<double>(cfg.local_fit.radius_alpha);
+            cfg.local_fit.radius_max_step =
+                lf["radius_max_step"].as<double>(cfg.local_fit.radius_max_step);
         }
 
         if (const YAML::Node rotation = tracker["rotation_rate"]) {
@@ -114,6 +120,9 @@ namespace auto_aim
             cfg.default_dt = kalman["default_dt"].as<double>(cfg.default_dt);
             cfg.armor_radius =
                 kalman["armor_radius"].as<double>(cfg.armor_radius);
+            // 重投影模型外推（时间基）是否连中心一起按底速平移；见 TrackerConfig 注释。
+            cfg.model_lead_center =
+                kalman["model_lead_center"].as<bool>(cfg.model_lead_center);
             cfg.y_noise_mult =
                 kalman["y_noise_mult"].as<double>(cfg.y_noise_mult);
             cfg.p_cov_min = kalman["p_cov_min"].as<double>(cfg.p_cov_min);

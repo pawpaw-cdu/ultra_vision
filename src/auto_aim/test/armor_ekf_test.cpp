@@ -335,6 +335,74 @@ int main()
 
     // ---- 装甲板模型（双模型低速档，上科大 2026 §9.4.4）----------------------
     {
+        // ---- 在线回转半径 + 输出模型外推 -----------------------------------
+        // 这两条是"重投影整车模型"的口径：
+        //   · 半径：配置写死 0.25、实测/拟合器给 0.20~0.21 → 在线改半径必须只动几何，
+        //     不能把滤波器 reset 掉（不然每次更新半径都丢跟踪）；
+        //   · 外推：估计器状态停在观测时刻，画模型要按 (底速, ω) 推到当前帧时刻，
+        //     否则自旋时整台模型拖在真车后面（"绿色框贴得住、模型跑飞"）。
+        auto_aim::Tracker online_tracker(tracker_config);
+        for (int frame = 0; frame <= 30; ++frame) {
+            const double time = frame * tracker_dt;
+            online_tracker.update(std::vector<auto_aim::Armor>{
+                makeTrackerArmor(tracker_center_z, 0.0, true_omega, time,
+                                 tracker_plate_id, radius)}, time);
+        }
+        const auto before_radius = online_tracker.predictOutputModel(0.0);
+        passed &= expect(before_radius.valid &&
+                             std::abs(before_radius.radius - tracker_config.armor_radius) < 1e-9,
+                         "output model must use the configured armor radius by default");
+
+        online_tracker.setArmorRadius(0.185);
+        passed &= expect(std::abs(online_tracker.getArmorRadius() - 0.185) < 1e-9,
+                         "setArmorRadius must update the tracker geometry");
+        passed &= expect(online_tracker.getState() == auto_aim::TrackerState::TRACKING,
+                         "changing the radius must not reset the filter (state must stay TRACKING)");
+        const auto after_radius = online_tracker.predictOutputModel(0.0);
+        passed &= expect(after_radius.valid, "output model must stay valid after setArmorRadius");
+        for (int plate = 0; plate < 4; ++plate) {
+            const double dx = after_radius.positions[plate].at<double>(0) -
+                              after_radius.center.at<double>(0);
+            const double dy = after_radius.positions[plate].at<double>(1) -
+                              after_radius.center.at<double>(1);
+            const double dz = after_radius.positions[plate].at<double>(2) -
+                              after_radius.center.at<double>(2);
+            const double plate_radius = std::sqrt(dx * dx + dy * dy + dz * dz);
+            passed &= expect(std::abs(plate_radius - 0.185) < 1e-6,
+                             "modeled plate must sit on the new armor radius");
+        }
+
+        // 外推：yaw 前进 ω·dt，四块板绕模型中心刚性旋转同一个角
+        constexpr double extrapolate_dt = 0.08;
+        const auto m0 = online_tracker.predictOutputModel(0.0);
+        const auto m1 = online_tracker.predictOutputModel(extrapolate_dt);
+        const double yaw_step = auto_aim::ArmorEKF::normalizeAngle(
+            m1.world_yaw - m0.world_yaw);
+        passed &= expect(std::abs(yaw_step - m0.omega * extrapolate_dt) < 0.02,
+                         "continuity: output model yaw must advance by omega*dt");
+        const double phi = m0.omega * extrapolate_dt;
+        for (int plate = 0; plate < 4; ++plate) {
+            const double dx = m0.positions[plate].at<double>(0) - m0.center.at<double>(0);
+            const double dy = m0.positions[plate].at<double>(1) - m0.center.at<double>(1);
+            const double dz = m0.positions[plate].at<double>(2) - m0.center.at<double>(2);
+            const double ex = m0.center.at<double>(0) + dx * std::cos(phi) - dz * std::sin(phi);
+            const double ey = m0.center.at<double>(1) + dy;
+            const double ez = m0.center.at<double>(2) + dx * std::sin(phi) + dz * std::cos(phi);
+            const double err = std::sqrt(
+                std::pow(m1.positions[plate].at<double>(0) - ex, 2) +
+                std::pow(m1.positions[plate].at<double>(1) - ey, 2) +
+                std::pow(m1.positions[plate].at<double>(2) - ez, 2));
+            passed &= expect(err < 0.01,
+                             "continuity: plates must rotate rigidly with the extrapolated chassis");
+        }
+        const auto axes = online_tracker.armorAxesForYaw(m1.world_yaw, 1);
+        passed &= expect(std::abs(cv::norm(axes.normal) - 1.0) < 1e-9 &&
+                             std::abs(axes.normal.dot(axes.bar)) < 1e-9,
+                         "armorAxesForYaw must return an orthonormal rigid pose");
+    }
+
+    // ---- 装甲板模型（双模型低速档，上科大 2026 §9.4.4）----------------------
+    {
         auto_aim::PlateEKF::Config plate_config;
         plate_config.process_acc = 50.0;
         plate_config.process_yaw_acc = 100.0;

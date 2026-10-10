@@ -204,7 +204,11 @@ namespace auto_aim
                 });
 
             estimate_recorder_ = std::make_unique<auto_aim::app::CsvSink>(
-                "ULTRA_VISION_ESTIMATE_CSV", "x,y,z,color,distance,time_us,plate_id\n");
+                // 这是**重投影模型**（画面上那四个 E 框）的口径：输出状态按观测延迟外推
+                // 到当前帧时刻后的四块板心（相机系）。model_dt/yaw/omega/radius 是为了
+                // 让每行自描述 —— 想回放"不外推"的滤波器原始状态时用得到。
+                "ULTRA_VISION_ESTIMATE_CSV",
+                "x,y,z,color,distance,time_us,plate_id,model_dt,yaw,omega,radius\n");
 
             // 模型构造（重投影整车轮廓）用的装甲板安装倾角：**仿真靶没有 15° 支架**
             // （灯条在板坐标系里绝对竖直），所以默认 0；要和局部拟合器的 α 保持一致，
@@ -533,19 +537,31 @@ namespace auto_aim
             if (*estimate_recorder_ &&
                 tracker.getState() != auto_aim::TrackerState::LOST &&
                 tracker.getState() != auto_aim::TrackerState::DETECTING) {
-                const auto estimated_positions = tracker.getEstimatedArmorPositions();
-                estimate_recorder_->stream() << std::fixed << std::setprecision(6);
-                for (int plate = 0; plate < 4; ++plate) {
-                    if (estimated_positions[plate].rows != 3 ||
-                        estimated_positions[plate].cols != 1) {
-                        continue;
+                // 落盘的是**重投影模型**（= 画面上看到的整车轮廓），所以要和画图同口径：
+                // 输出口径的状态 + 按观测延迟外推到当前帧时刻。这样"estimate.csv vs truth"
+                // 量出来的就是"操作员看到的模型离真车多远"，而不是"滤波器状态停留在哪个
+                // 过去的时刻"—— 后者会把几十~一百多 ms 的观测延迟算成模型误差。
+                const double model_dt = std::max(
+                    0.0, std::min(auto_aim::StandardClock::secondsFromUs(frame_local_timestamp_us_) -
+                                      tracker.lastObservationTime(), 0.20));
+                const auto model = tracker.predictOutputModel(model_dt);
+                if (model.valid) {
+                    estimate_recorder_->stream() << std::fixed << std::setprecision(6);
+                    for (int plate = 0; plate < 4; ++plate) {
+                        if (model.positions[plate].rows != 3 ||
+                            model.positions[plate].cols != 1) {
+                            continue;
+                        }
+                        const double x = model.positions[plate].at<double>(0);
+                        const double y = model.positions[plate].at<double>(1);
+                        const double z = model.positions[plate].at<double>(2);
+                        estimate_recorder_->stream() << x << ',' << y << ',' << z << ",0,"
+                                          << std::sqrt(x * x + y * y + z * z) << ','
+                                          << frame_local_timestamp_us_ << ',' << plate
+                                          // 自描述：外推用的 dt、当时的 yaw/ω、模型半径
+                                          << ',' << model_dt << ',' << model.world_yaw << ','
+                                          << model.omega << ',' << model.radius << '\n';
                     }
-                    const double x = estimated_positions[plate].at<double>(0);
-                    const double y = estimated_positions[plate].at<double>(1);
-                    const double z = estimated_positions[plate].at<double>(2);
-                    estimate_recorder_->stream() << x << ',' << y << ',' << z << ",0,"
-                                      << std::sqrt(x * x + y * y + z * z) << ','
-                                      << frame_local_timestamp_us_ << ',' << plate << '\n';
                 }
             }
         }

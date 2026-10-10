@@ -63,6 +63,14 @@ public:
         buildQ();
     }
 
+    /// @brief 只改回转半径（在线慢层用）。**不动状态/协方差** —— 半径是几何量，
+    ///        换一个值只是让 armorPosition() 把板摆在别的半径上，
+    ///        不需要（也不能）像 setConfig 那样 reset()，否则每次更新半径都丢跟踪。
+    void setArmorRadius(double radius) {
+        if (radius > 0.05 && radius < 1.0) cfg_.R = radius;
+    }
+    double armorRadius() const { return cfg_.R; }
+
     void reset() {
         x_ = Vec<9>();
         P_ = Matrix<9, 9>();

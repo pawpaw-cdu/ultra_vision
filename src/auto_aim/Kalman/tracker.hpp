@@ -87,6 +87,14 @@ namespace auto_aim
         // 拟合中心是**整段弧**的最小二乘解，抖动小一个量级，正好补这一路。
         bool also_update_center = false;
         double center_noise = 0.01;
+        // 用拟合器慢层的 R 在线更新回转半径（默认关，A/B 用）。
+        // 配置里 armor_radius=0.25 是"当年量的一个数"；拟合器在弧段上最小二乘出来的 R
+        // 是同一个物理量（仿真里真值 0.210、在线收敛到 0.200，实车 ≈0.20~0.24），
+        // 差这 4~5 cm 会 1:1 变成四块板的径向系统偏差。开启后按"限幅 + 一阶低通"
+        // 慢慢跟，避免单次拟合噪声把几何拽走。
+        bool use_fit_radius = false;
+        double radius_alpha = 0.25;      // 一阶低通系数（每次有效拟合最多跟 25%）
+        double radius_max_step = 0.02;   // 单次最大变化（m）
     };
 
     struct TrackerConfig {
@@ -160,6 +168,12 @@ namespace auto_aim
         // 板顶向车内倾 α；仿真靶没建这个支架 → 0）。模型构造（重投影整车轮廓）用它，
         // 局部拟合器的 slow α 是同一个物理量的在线估计。见 common/armor_geometry.hpp。
         double armor_tilt_deg = 15.0;
+        // 重投影模型外推时，**中心**是否也按底速平移（默认开）。
+        // 同一台仿真 A/B（3 rad/s、3 m、有真值）：只推 yaw → 旋转偏差 29.2°→11.7°、
+        // 中心 0.162 m；连中心也推 → 旋转 12.7°、中心 0.170 m（自旋上只差 8 mm，
+        // 因为小陀螺时底盘平移不可观测、v 被"硬钉 + 板绕中心转"污染），
+        // 但平移靶上它补的是 v·0.11 s ≈ 9 cm 的系统滞后，所以默认还是开。
+        bool model_lead_center = true;
         double y_noise_mult = 30.0;
         double p_cov_min = 1e-3;
         // 等效板面尺寸。**必须与探测器的点语义匹配**，而不是"标准装甲板
@@ -293,6 +307,31 @@ namespace auto_aim
         ///        重投影整车轮廓**只走这一个入口** —— 各调用点自己拿 yaw/竖直拼一套
         ///        是历史上三处模型长得不一样的根源（见 common/armor_geometry.hpp）。
         ArmorAxes armorAxesCamera(int plate) const;
+        /// @brief 按给定**世界系底盘 yaw**构造第 plate 块板的刚体姿态（相机系）。
+        ///        armorAxesCamera() 等价于 armorAxesForYaw(ekf_.getYaw(), plate)；
+        ///        外推模型（predictOutputModel）和提前点画框需要的是"那个时刻的 yaw"，
+        ///        所以把这一层单独开出来。
+        ArmorAxes armorAxesForYaw(double world_yaw, int plate) const;
+
+        /// @brief 输出模型：把**当前输出状态**（双模型权重生效后的中心/yaw/ω）按
+        ///        (底速, ω) 外推到 t+dt 的只读快照，全部在相机系。
+        ///        用途：**画重投影整车轮廓、算重投影残差**。为什么必须外推：
+        ///        估计器的状态停在"最后一次观测时刻"（曝光），而画面是"现在"；
+        ///        异步检测"曝光→到手"80~120 ms，在 3 rad/s 自旋上就是 12~28° 相位，
+        ///        画出来的整车模型会整体拖在真车后面 —— 现场"绿色框贴得住、
+        ///        模型跑飞"的最大单一来源。注意这只是**显示口径**：控制/选板那条路
+        ///        已经由选择器按 estimate.age 补偿过，不能重复补。
+        struct OutputModel
+        {
+            bool valid = false;
+            double world_yaw = 0.0;              // t+dt 的底盘 yaw（home 系）
+            double omega = 0.0;                  // rad/s（输出口径）
+            double radius = 0.0;                 // 用的回转半径（m）
+            cv::Mat center;                      // t+dt 的底盘中心（相机系）
+            std::array<cv::Mat, 4> positions{};  // t+dt 的四块板心（相机系）
+        };
+        OutputModel predictOutputModel(double dt) const;
+
         void setArmorTiltDeg(double degrees)
         {
             if (std::isfinite(degrees) && std::abs(degrees) < 60.0)
@@ -325,6 +364,18 @@ namespace auto_aim
         double getEkfOmega() const { return ekf_.getOmega(); }
         bool hasRotationRate() const { return rotation_rate_estimator_.valid(); }
         double getArmorRadius() const { return cfg_.armor_radius; }
+        /// @brief 在线改回转半径（局部拟合器慢层的 R）。同时改滤波器几何与 tracker 自己
+        ///        的几何（init/重捕、板模型反推中心都用 cfg_.armor_radius），保证"模型"
+        ///        与"初始化/关联"用的是同一个半径 —— 配置里写死 0.25、
+        ///        实测/在线估计是 0.20~0.21 的那 4~5 cm 系统性偏差就出在这里。
+        void setArmorRadius(double radius)
+        {
+            if (!(radius > 0.05 && radius < 1.0)) return;
+            cfg_.armor_radius = radius;
+            ekf_.setArmorRadius(radius);
+            if (std::isfinite(radius)) armor_radius_online_ = radius;
+        }
+        bool armorRadiusOnline() const { return armor_radius_online_ > 0.0; }
         /// @brief 板面等效尺寸（半宽/半高，米）。**与 PnP 用同一组标定值**：
         ///        重投影画出来的框、以及"模型 vs 检测"的像素误差都必须用这一组，
         ///        否则量出来的残差里混着"画框尺寸不对"的成分（历史上 overlay 里
@@ -401,6 +452,8 @@ namespace auto_aim
 
         TrackerConfig cfg_;
         ArmorEKF ekf_;
+        /// >0 表示半径已经被在线慢层改过（诊断/状态行用）。
+        double armor_radius_online_ = 0.0;
         PlateEKF plate_ekf_;                       // 双模型的装甲板模型
         double plate_model_last_timestamp_ = -1.0;
         double plate_model_weight_ = 0.0;
