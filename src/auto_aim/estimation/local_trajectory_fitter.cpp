@@ -1,6 +1,7 @@
 #include "estimation/local_trajectory_fitter.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 
@@ -170,6 +171,7 @@ namespace auto_aim
         const double t0 = observations.front().timestamp;
 
         double best_cost = std::numeric_limits<double>::infinity();
+        const auto multi_start_begin = std::chrono::steady_clock::now();
         // 多起点：ω 的符号/倍率 + 初相相位（相位初值若差 ~90° 会掉进"镜像/旋转"坏局部解）。
         for (double ph0 : { 0.0, 0.5 * M_PI, M_PI, -0.5 * M_PI })
         for (double w0 : { cfg.omega_init, -cfg.omega_init, 2.0 * cfg.omega_init,
@@ -210,6 +212,13 @@ namespace auto_aim
             {
                 problem.SetParameterLowerBound(vel, i, -3.0);
                 problem.SetParameterUpperBound(vel, i, 3.0);
+            }
+            // 总时间预算：超了就不再试新初值（NUC 上多起点会把单次拟合拖到几秒）。
+            if (std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                              multi_start_begin).count() >
+                    cfg.multi_start_budget_s &&
+                std::isfinite(best_cost)) {
+                break;
             }
             ceres::Solver::Options opt;
             opt.linear_solver_type = ceres::DENSE_QR;

@@ -15,6 +15,7 @@
 // 四板联合后 α 收敛到 15±1、R 进入 ±0.02。
 
 #include <array>
+#include <chrono>
 #include <vector>
 
 #include "common/types.hpp"
@@ -42,6 +43,11 @@ namespace auto_aim
         double omega_init = 3.0;        // 角速度初值（rad/s，多起点用）
         int omega_model_order = 1;      // 1=常 ω；2=带角加速度 β
         int max_iterations = 100;
+        // 多起点的**总时间预算**（秒）：多起点是 16 个初值 × 每个最多 max_solver_time_s，
+        // 在 NUC 上实测单次弧段拟合要 2.6~4.6s（fitms=），把 worker 占满、快层 ω 拿不到
+        // 新鲜结果。这里给整个多起点循环一个总预算：预算用完就不再试新初值，
+        // 直接用当前最好的解。慢层(R/α/h)本来就是秒级更新，够用。
+        double multi_start_budget_s = 0.35;
         bool use_huber = true;
         double huber_delta = 2.0;       // px
         // 慢层（α、R）硬边界与先验
