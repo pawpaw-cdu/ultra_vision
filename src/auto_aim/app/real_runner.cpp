@@ -1888,6 +1888,9 @@ int auto_aim::app::RealRunner::run()
                       << " geometry=" << tracker.localFitApplyGeometry()
                       << " age=" << tracker.localFitApplyAgeMs() << "ms"
                       << " fitms=" << tracker.localFitLastMs()
+                      // view=被选中那块板的视视角（度）：>graze_gate_deg 时该板的
+                      // PnP 径向/距离会被降权（只信 bearing）。调门限就看这个数。
+                      << " view=" << tracker.lastViewDeg()
                       << " ufr=" << (tracker.fitRadiusEnabled() ? 1 : 0)
                       << " lf=" << (tracker.localFitEnabled() ? 1 : 0)
                       // 逐板高度（cm，向上为正）——默认应恒为 0.0/0.0/0.0/0.0；

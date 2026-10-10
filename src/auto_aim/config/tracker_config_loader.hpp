@@ -191,6 +191,9 @@ namespace auto_aim
             // PnP 平面解 yaw 的可信门限（度）；0 = 关闭门控（见 TrackerConfig 注释）。
             cfg.pnp_yaw_trust_deg =
                 kalman["pnp_yaw_trust_deg"].as<double>(cfg.pnp_yaw_trust_deg);
+            cfg.graze_gate_deg = kalman["graze_gate_deg"].as<double>(cfg.graze_gate_deg);
+            cfg.graze_noise_scale =
+                kalman["graze_noise_scale"].as<double>(cfg.graze_noise_scale);
             cfg.nearest_plate_constraint =
                 kalman["nearest_plate_constraint"].as<bool>(cfg.nearest_plate_constraint);
             cfg.nearest_plate_margin_m =

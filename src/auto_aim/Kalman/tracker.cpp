@@ -317,6 +317,22 @@ namespace auto_aim
             // （bearing/距离），yaw 由 ω 外推 + 拟合器慢层提供。
             YpdObservation accepted = *observation;
             bool yaw_trusted = true;
+            // A3 擦边门控：视视角超门限 → 只信 bearing（radial/距离噪声放大）。
+            if (cfg_.graze_gate_deg > 0.0 && camera_fx_ > 1.0 && !armor.tvec.empty()) {
+                const double depth = std::max(0.3, std::abs(armor.tvec.at<double>(2)));
+                const double width = (armor.armor_type == auto_aim::large)
+                    ? cfg_.armor_large_width : cfg_.armor_small_width;
+                const double expected = std::max(1.0, width * camera_fx_ / depth);
+                const double sep = std::abs(armor.right.center.x - armor.left.center.x);
+                const double cos_view = std::clamp(sep / expected, 0.0, 1.0);
+                const double view_deg = std::acos(cos_view) * 180.0 / M_PI;
+                last_view_deg_ = view_deg;
+                if (view_deg > cfg_.graze_gate_deg) {
+                    accepted.distance_noise *= cfg_.graze_noise_scale;
+                    accepted.armor_yaw_noise = 1e3;
+                    yaw_trusted = false;
+                }
+            }
             if (cfg_.pnp_yaw_trust_deg > 0.0 && ekf_.isInit()) {
                 const double error = std::abs(ArmorEKF::normalizeAngle(
                     accepted.armor_yaw - ekf_.getPlateAngle(candidate.plate_id)));

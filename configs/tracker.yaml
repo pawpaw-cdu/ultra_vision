@@ -173,6 +173,13 @@ tracker:
     # ⚠ 默认关：第一版判据用了"到相机的距离"，±90° 的侧板距离本来就大于车心 →
     # 误触发、yaw 每帧翻 180°。现已改成**沿视轴深度**判据（见 tracker.cpp），
     # 但要在实车上单独 A/B 确认后再打开（配合 Tracker::nearestPlateFlips() 诊断）。
+    # A3 擦边门控（用在 EKF 量测上）：板越侧视，PnP 的**径向角/距离**越不可信
+    # （板被压扁、深度解退化），而**方位角**仍可靠。用 sep/(W·fx/depth)=cos(视角)
+    # 反推视视角，超门限就放大该板的 radial 与距离噪声（= 只信 bearing）。
+    # 依据：实车每帧两块板，被观测那块 reproj≈10px，**另外那块**差 100~270px（≈0.11m）
+    # —— 明显是擦边板的 PnP 把模型 yaw 拽歪。50° 是保守起点，可试 40/60。
+    graze_gate_deg: 50.0
+    graze_noise_scale: 100.0
     nearest_plate_constraint: false
     nearest_plate_margin_m: 0.05
     # ---- 观测慢收敛：底盘几何自己学（默认开）-----------------------------------

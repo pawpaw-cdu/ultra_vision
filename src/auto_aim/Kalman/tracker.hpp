@@ -286,6 +286,15 @@ namespace auto_aim
         // 违反 = 模型的径向翻了 180°（PnP 法向翻号、或关联到对面板）——
         // 这时把底盘 yaw 翻回来重摆，比让车心跑到板前面去要正确得多。
         bool nearest_plate_constraint = true;
+        // ---- A3 擦边门控（用在 EKF 量测上）-----------------------------------
+        // 板越侧视（越"擦边"），PnP 解出的**径向角(板朝向)**和**距离**越不可信
+        // （板被压扁、深度解退化），而**方位角(bearing)**仍然可靠。
+        // 用检测框的灯条间距反推视视角：sep/(W·fx/depth) = cos(视视角)；
+        // 超门限就放大该板的 radial 与距离噪声（等价于"只信 bearing"）。
+        // 实车依据：每帧两块板、被观测那块 reproj≈10px，**另外那块**差 100~270px
+        // （≈0.11m）—— 就是擦边板的 PnP 把模型 yaw 拽歪了。
+        double graze_gate_deg = 50.0;      // 0 = 关闭
+        double graze_noise_scale = 100.0;  // 距离噪声放大倍数
         double nearest_plate_margin_m = 0.05;   // 明显违反才翻（防抖）
         double position_nis_threshold = 7.815;
         double angle_nis_threshold = 3.841;
@@ -486,6 +495,7 @@ namespace auto_aim
         int localFitApplyGeometry() const { return local_fit_apply_geometry_; }
         double localFitApplyAgeMs() const { return local_fit_apply_age_ms_; }
         double localFitLastMs() const { return local_fit_last_ms_; }
+        double lastViewDeg() const { return last_view_deg_; }
         int localFitArcs() const { return static_cast<int>(local_fit_arcs_.size()); }
 
         /// @brief 收敛看门狗统计：触发次数 / 当前拒绝比例 / 是否收敛。
@@ -585,6 +595,8 @@ namespace auto_aim
         double local_fit_apply_age_ms_ = -1.0;
         /// 最近一次拟合（含慢层）耗时（ms）——低功耗机器上这是关键指标。
         double local_fit_last_ms_ = -1.0;
+        /// 被选中那块板的**视视角**（度，0=正对、90=完全侧视）。用于调 graze_gate_deg。
+        double last_view_deg_ = -1.0;
         /// 最后一次"往弧里累计灯条"的时间：worker 用它判断哪条弧还活着。
         double last_push_time_ = 0.0;
         int local_fit_applied_ = 0;
