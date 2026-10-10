@@ -290,8 +290,11 @@ namespace auto_aim
             std::lock_guard<std::mutex> lock(local_fit_mutex_);
             fit = latest_local_fit_;
         }
-        if (!fit || !fit->valid) return 0.0;
-        if (last_timestamp_ - fit->timestamp > cfg_.local_fit.max_result_age) return 0.0;
+        ++local_fit_apply_calls_;
+        if (!fit || !fit->valid) { ++local_fit_apply_no_fit_; return 0.0; }
+        const double age = last_timestamp_ - fit->timestamp;
+        local_fit_apply_age_ms_ = age * 1000.0;
+        if (age > cfg_.local_fit.max_result_age) { ++local_fit_apply_stale_; return 0.0; }
 
         // 相机系 → EKF 系：yaw 相差相机自身 yaw（相机系底盘 yaw → 世界系底盘 yaw）。
         LocalFitResult conv = *fit;
@@ -318,8 +321,10 @@ namespace auto_aim
         // 用它们在线收敛几何，比在 yaml 里写死一个 0.25（实测 0.20~0.21）靠谱得多，
         // 也是"四块板同高、矩形底盘"能被观测纠正的入口。半径/高度是几何量，
         // 改它们不动状态/协方差。
-        if (cfg_.local_fit.use_fit_radius)
+        if (cfg_.local_fit.use_fit_radius) {
             updateChassisFromFit(fit->R, fit->alpha, fit->h);
+            ++local_fit_apply_geometry_;
+        }
 
         // ---- 旋转中心先验：拟合器判出的运动状态决定"中心该不该动" ----------
         // 纯旋转 → 旋转中心物理上不变 → 把车心往拟合中心拉（强）；有平移 → 只轻拉。

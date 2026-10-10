@@ -462,6 +462,13 @@ namespace auto_aim
         /// 推给拟合器的灯条总数 / 拟合结果真正写进几何的次数（诊断用）。
         int localFitPushed() const { return local_fit_pushed_; }
         int localFitApplied() const { return local_fit_applied_; }
+        bool fitRadiusEnabled() const { return cfg_.local_fit.use_fit_radius; }
+        bool localFitEnabled() const { return cfg_.local_fit.enabled; }
+        int localFitApplyCalls() const { return local_fit_apply_calls_; }
+        int localFitApplyNoFit() const { return local_fit_apply_no_fit_; }
+        int localFitApplyStale() const { return local_fit_apply_stale_; }
+        int localFitApplyGeometry() const { return local_fit_apply_geometry_; }
+        double localFitApplyAgeMs() const { return local_fit_apply_age_ms_; }
         int localFitArcs() const { return static_cast<int>(local_fit_arcs_.size()); }
 
         /// @brief 收敛看门狗统计：触发次数 / 当前拒绝比例 / 是否收敛。
@@ -547,6 +554,12 @@ namespace auto_aim
         double local_fit_last_R_ = 0.0;
         int local_fit_last_bars_ = 0;
         int local_fit_pushed_ = 0;
+        // applyLatestLocalFit 的逐步计数（定位"拟合有结果但没生效"）
+        int local_fit_apply_calls_ = 0;
+        int local_fit_apply_no_fit_ = 0;
+        int local_fit_apply_stale_ = 0;
+        int local_fit_apply_geometry_ = 0;
+        double local_fit_apply_age_ms_ = -1.0;
         /// 最后一次"往弧里累计灯条"的时间：worker 用它判断哪条弧还活着。
         double last_push_time_ = 0.0;
         int local_fit_applied_ = 0;

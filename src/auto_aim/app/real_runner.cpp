@@ -1821,7 +1821,16 @@ int auto_aim::app::RealRunner::run()
                       // 若 push 在涨而 arcs 一直是 0/1 → 门控把它挡了；apply=0 → 时间基/老化。
                       << " push=" << tracker.localFitPushed()
                       << " arcs=" << tracker.localFitArcs()
-                      << " apply=" << tracker.localFitApplied()
+                      << " pub=" << tracker.localFitApplied()
+                      // 关键三个：calls=进入次数 nofit=没拿到有效结果 stale=太老被丢
+                      // geometry=真正写进几何的次数；ufr=use_fit_radius 开关；age=本次结果年龄
+                      << " calls=" << tracker.localFitApplyCalls()
+                      << " nofit=" << tracker.localFitApplyNoFit()
+                      << " stale=" << tracker.localFitApplyStale()
+                      << " geometry=" << tracker.localFitApplyGeometry()
+                      << " age=" << tracker.localFitApplyAgeMs() << "ms"
+                      << " ufr=" << (tracker.fitRadiusEnabled() ? 1 : 0)
+                      << " lf=" << (tracker.localFitEnabled() ? 1 : 0)
                       << ", np_flip=" << tracker.nearestPlateFlips()
                       << ", motion=" << static_cast<int>(tracker.lastMotion())
                       << "(0静/1转/2移/3转+移)"
