@@ -687,7 +687,13 @@ namespace auto_aim
         /// @param yaw_valid 这一帧的 PnP yaw（板法向=径向）是否可信（见 pnp_yaw_trust_deg）。
         ///        不可信时**不要**把它喂给差分测速器：差分正是放大量，翻解一次就会
         ///        推出一个假的 ω（现场"模型突然转/崩"的来源之一）。
-        void updateRotationRate(const Armor& armor, double timestamp, bool yaw_valid = true);
+        /// @param plate_id 观测板号。**关键**：喂给差分测速器的必须是"**底盘 yaw**"
+        ///        （灯条径向角 − 该板相位偏移），不能是灯条的绝对径向角 ——
+        ///        后者在**换板**时会天然跳 ±90°，被差分当成巨大的角速度
+        ///        （实车实测换板处 ω 飙到 ±7 rad/s、车心跟着跳 0.30~0.75m，
+        ///          而同板号时中心只抖 0.04m）。
+        void updateRotationRate(const Armor& armor, double timestamp, bool yaw_valid = true,
+                                int plate_id = -1);
 
         // ---- 局部拟合器状态 ------------------------------------------------------
         mutable std::mutex local_fit_mutex_;

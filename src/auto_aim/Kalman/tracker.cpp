@@ -108,7 +108,7 @@ namespace auto_aim
             lostUpdate();
             return false;
         }
-        updateRotationRate(home_armor, timestamp, yaw_trusted);
+        updateRotationRate(home_armor, timestamp, yaw_trusted, plate_id_);
 
         last_measurement_weight_ = measurement_weight;
         latest_armor_ = armor;
@@ -496,7 +496,8 @@ namespace auto_aim
             }
             ekf_.shiftCenter(observed - predicted);
         }
-        updateRotationRate(valid_pairs[best_armor_index].home, timestamp, best_yaw_trusted);
+        updateRotationRate(valid_pairs[best_armor_index].home, timestamp, best_yaw_trusted,
+                           plate_id_);
 
         // ---- 双模型：同步喂板模型（上科大 2026 §9.4.4）-----------------------
         // 观测 = 可见板的**世界系中心 + 板朝向（径向角）**。只并行运行，不参与输出；

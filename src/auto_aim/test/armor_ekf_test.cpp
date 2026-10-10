@@ -463,10 +463,11 @@ int main()
         // 断言只钉"门控到底治了什么"：**差分测速**不该被翻解污染。
         // （模型/板号的绝对正确性在"构造板一定最近"的硬约束与关联用例里验；
         //  单板 + yaw 完全不可用时，相位本身就有 90° 不确定性，不该在这里断言。）
-        passed &= expect(guarded.omega_error < 0.30,
-                         "yaw trust gate must keep the differenced omega clean under PnP yaw flips");
-        passed &= expect(naive.omega_error > guarded.omega_error + 0.10,
-                         "without the gate, flipped PnP yaw must visibly corrupt the omega estimate");
+        // 注意：自从差分测速改喂"底盘 yaw"（灯条径向角 − 该板相位偏移）之后，
+        // 翻解对 ω 的污染本身就小多了 —— 两条路都能守住 ω。所以这里只断言
+        // "ω 不被翻解带坏"，不再要求 naive 更差（那条旧断言已不成立）。
+        passed &= expect(guarded.omega_error < 0.30 && naive.omega_error < 0.30,
+                         "differenced omega must stay clean under flipped PnP yaw (chassis-yaw input)");
         std::cout << "yaw-flip: guarded med/max_plate_err=" << guarded.median_plate_error << "/"
                   << guarded.max_plate_error
                   << " omega_err=" << guarded.omega_error

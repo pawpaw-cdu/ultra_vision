@@ -253,12 +253,18 @@ namespace auto_aim
         return std::atan2(radial(2, 0), radial(0, 0));
     }
 
-    void Tracker::updateRotationRate(const Armor& armor, double timestamp, bool yaw_valid)
+    void Tracker::updateRotationRate(const Armor& armor, double timestamp, bool yaw_valid,
+                                     int plate_id)
     {
         if (!yaw_valid) return;
         const auto radial_angle = armorRadialAngle(armor);
-        if (!radial_angle ||
-            !rotation_rate_estimator_.update(*radial_angle, timestamp)) {
+        if (!radial_angle) return;
+        // **底盘 yaw** = 灯条径向角 − 该板相位偏移。换板时径向角跳 ±90°，
+        // 减掉各自的相位偏移之后输入是连续的 —— 差分才代表真实转速。
+        const double chassis_yaw = ArmorEKF::normalizeAngle(
+            *radial_angle - ArmorEKF::angleForPlate(
+                (plate_id >= 0 && plate_id <= 3) ? plate_id : 0));
+        if (!rotation_rate_estimator_.update(chassis_yaw, timestamp)) {
             // One unusable sample must not erase a rate the filter already
             // holds. Halving omega here used to make a single dropped frame
             // (or a plate switch) look like the chassis had stopped spinning.
