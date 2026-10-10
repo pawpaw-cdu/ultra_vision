@@ -707,6 +707,10 @@ int auto_aim::app::RealRunner::run()
     double model_fit_max = 0.0;
     int model_fit_n = 0;
     // "最差那个检测"的细节（每条秒更新一次）：像素误差 + 三维误差(m) + 类型/PnP 距离/宽度/板号
+    double trusted_fit_sum = 0.0;
+    double trusted_fit_max = 0.0;
+    int trusted_fit_n = 0;
+    int ignored_dets = 0;
     double worst_det_dist = -1.0;
     double worst_det_err3d = -1.0;
     double worst_det_pxw = -1.0;
@@ -1693,7 +1697,31 @@ int auto_aim::app::RealRunner::run()
                         const double d = cv::norm(model_px[plate] - detected_center);
                         if (d < best) { best = d; best_plate = plate; }
                     }
+                    // 反推这块检测的视视角（与 Tracker 的 graze 门控同一算法）：
+                    // sep/(W·fx/depth)=cos(视角)。擦边板（>门限）的 PnP 距离不可信
+                    // （实测框宽 31~43px ↔ 视角 ~70°、3D 误差 0.2~0.7m 全是它自己的
+                    // 距离噪声），我们已把它排除出 EKF；指标也不该把它算成"模型错"。
+                    const double det_dist = std::sqrt(
+                        armor.tvec.at<double>(0) * armor.tvec.at<double>(0) +
+                        armor.tvec.at<double>(1) * armor.tvec.at<double>(1) +
+                        armor.tvec.at<double>(2) * armor.tvec.at<double>(2));
+                    const double det_width_m = (armor.armor_type == auto_aim::large)
+                        ? pnp_geometry.large_width : pnp_geometry.small_width;
+                    const double det_fx = CAMERA_MATRIX.at<double>(0, 0);
+                    const double det_expected =
+                        std::max(1.0, det_width_m * det_fx / std::max(0.3, det_dist));
+                    const double det_sep = cv::norm(armor.left.center - armor.right.center);
+                    const double det_view_deg = std::acos(std::clamp(
+                        det_sep / det_expected, 0.0, 1.0)) * 180.0 / M_PI;
+                    const bool trusted = det_view_deg <= 50.0;
                     if (best < 1e17) {
+                        if (trusted) {
+                            trusted_fit_sum += best;
+                            ++trusted_fit_n;
+                            trusted_fit_max = std::max(trusted_fit_max, best);
+                        } else {
+                            ++ignored_dets;
+                        }
                         model_fit_sum += best;
                         ++model_fit_n;
                         // 记录"最差那个检测"的细节：像素误差 + **三维**误差（米）+
@@ -1885,6 +1913,11 @@ int auto_aim::app::RealRunner::run()
                       << ", model_fit="
                       << (model_fit_n > 0 ? model_fit_sum / model_fit_n : -1.0) << "/"
                       << (model_fit_n > 0 ? model_fit_max : -1.0) << "px(n=" << model_fit_n << ")"
+                      // trusted = 只用"视角<=50°"的可信检测统计的 model_fit（擦边板
+                      // 的 PnP 距离是噪声，不该算成模型误差）；ig=被忽略的擦边检测条数。
+                      << " trusted=" << (trusted_fit_n > 0 ? trusted_fit_sum / trusted_fit_n : -1.0)
+                      << "/" << (trusted_fit_n > 0 ? trusted_fit_max : -1.0)
+                      << "px(n=" << trusted_fit_n << ") ig=" << ignored_dets
                       // 最差那个检测：3D=到最近模型板的三维误差(m) type=大/小 d=PnP距离
                       // pxw=检测框宽度 px plate=最近模型板号
                       << " worst(3D=" << worst_det_err3d << "m d=" << worst_det_dist
@@ -1973,6 +2006,10 @@ int auto_aim::app::RealRunner::run()
             model_fit_sum = 0.0;
             model_fit_max = 0.0;
             model_fit_n = 0;
+            trusted_fit_sum = 0.0;
+            trusted_fit_max = 0.0;
+            trusted_fit_n = 0;
+            ignored_dets = 0;
             worst_det_dist = -1.0;
             worst_det_err3d = -1.0;
             worst_det_pxw = -1.0;
