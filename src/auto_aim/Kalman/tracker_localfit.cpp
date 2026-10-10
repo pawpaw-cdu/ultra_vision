@@ -8,6 +8,8 @@
 #include <fstream>
 #include <limits>
 
+#include <opencv2/calib3d.hpp>
+
 #include "Kalman/tracker.hpp"
 
 namespace auto_aim
@@ -103,6 +105,21 @@ namespace auto_aim
             o.timestamp = t;
             o.u_top = bar.top.x;    o.v_top = bar.top.y;
             o.u_bot = bar.bottom.x; o.v_bot = bar.bottom.y;
+            // 拟合器按**针孔**重投影，喂进来的端点必须先去畸变（实车强畸变不补偿会让重投影
+            // 系统性偏差、离光心越远越大；仿真 dist=0 时这步等价于不变）。
+            if (camera_dist_valid_ && camera_intrinsics_valid_)
+            {
+                const cv::Mat K = (cv::Mat_<double>(3, 3) << camera_fx_, 0.0, camera_cx_,
+                                   0.0, camera_fy_, camera_cy_, 0.0, 0.0, 1.0);
+                const std::vector<cv::Point2f> in{ bar.top, bar.bottom };
+                std::vector<cv::Point2f> out;
+                cv::undistortPoints(in, out, K, camera_dist_, cv::noArray(), K);
+                if (out.size() == 2)
+                {
+                    o.u_top = out[0].x; o.v_top = out[0].y;
+                    o.u_bot = out[1].x; o.v_bot = out[1].y;
+                }
+            }
             o.armor_id = pid;
             o.bar_offset = offset;
             o.confidence = 1.0;

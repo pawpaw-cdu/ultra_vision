@@ -140,6 +140,13 @@ namespace auto_aim
         camera_intrinsics_valid_ = true;
     }
 
+    void Tracker::setCameraDistortion(const cv::Mat& dist_coeffs)
+    {
+        camera_dist_ = dist_coeffs.clone();
+        camera_dist_valid_ = !camera_dist_.empty() &&
+                             (camera_dist_.rows * camera_dist_.cols) >= 4;
+    }
+
     Armor Tracker::toWorld(const Armor& armor) const
     {
         if (!armor.solve_result || armor.tvec.empty()) return armor;

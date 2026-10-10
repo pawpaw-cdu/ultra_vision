@@ -329,6 +329,9 @@ namespace auto_aim
         ///        setCameraPose() 提供，两处必须同一时刻。
         void setCameraIntrinsics(double fx, double fy, double cx, double cy);
         bool hasCameraIntrinsics() const { return camera_intrinsics_valid_; }
+        /// @brief 镜头畸变系数（实车必填）。拟合器是**纯针孔重投影**，喂进去的灯条端点
+        ///        必须先去畸变，否则实车强畸变下重投影会有系统性偏差（离光心越远越大）。
+        void setCameraDistortion(const cv::Mat& dist_coeffs);
 
         // ---- 局部拟合器接入（小陀螺 θ/ω；默认关闭）--------------------------------
         // 数据流（提示词 §十一）：每帧把灯条端点推进缓冲 → 低频异步拟合 →
@@ -403,6 +406,8 @@ namespace auto_aim
         int accepted_observations_ = 0;
         CameraPose camera_pose_;
         bool camera_intrinsics_valid_ = false;
+        cv::Mat camera_dist_;            // 镜头畸变系数（可为空 = 无畸变）
+        bool camera_dist_valid_ = false;
         double camera_fx_ = 0.0;
         double camera_fy_ = 0.0;
         double camera_cx_ = 0.0;

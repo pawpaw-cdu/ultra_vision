@@ -571,6 +571,8 @@ int auto_aim::app::RealRunner::run()
                                     camera_matrix.at<double>(1, 1),
                                     camera_matrix.at<double>(0, 2),
                                     camera_matrix.at<double>(1, 2));
+        // 局部拟合器要按针孔重投影：把镜头畸变给 Tracker，push 灯条端点时先去畸变。
+        if (dist_coeffs.rows * dist_coeffs.cols >= 4) tracker.setCameraDistortion(dist_coeffs);
     }
 
 #ifdef ULTRA_VISION_HAVE_LOCAL_FIT
