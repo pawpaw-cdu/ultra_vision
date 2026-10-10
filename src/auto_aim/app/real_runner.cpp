@@ -165,6 +165,16 @@ int auto_aim::app::RealRunner::run()
     // C 板回传 yaw 的符号（configs/serial.yaml 的 yaw_sign）。2026-09-28 实测这台车的
     // 编码器 yaw 正方向与本项目约定（正 yaw = 右转）相反，配置里填了 -1；手眼标定工具
     // 读的是同一个键，两边必须一致，否则瞄准会在 yaw 上镜像。
+    // 相机 pitch 的符号（**实车标定项**，默认 +1）。
+    // world↔camera 的约定 cameraToBaseRotation() 是按**仿真器（Bevy）**的
+    // R_home_camera = R_y(-yaw)·R_x(pitch) 推出来的；真机下位机的 pitch 正方向
+    // 不一定同相。符号错了**不影响被观测那块板**（硬钉 + 同一姿态反变换自洽），
+    // 但其余三块板会随深度整体错位（越远错得越多）—— 画面上就是"前后关系反了"。
+    // 判定方法看状态行的 model_fit（模型对**所有**检测的解释度），见下面的用法注释。
+    const double pitch_sign = [] {
+        const char* v = std::getenv("ULTRA_VISION_PITCH_SIGN");
+        return (v != nullptr && std::atof(v) < 0.0) ? -1.0 : 1.0;
+    }();
     const double yaw_sign =
         (serial_file["serial"] ? serial_file["serial"]["yaw_sign"].as<double>(1.0) : 1.0) < 0.0
             ? -1.0
@@ -680,6 +690,12 @@ int auto_aim::app::RealRunner::run()
     // 无目标时的心跳计时（见下发处注释）
     auto last_heartbeat = std::chrono::steady_clock::now();
     int processed_frames = 0;
+    // 模型解释度：每个**检测**框中心到最近一块模型板投影中心的像素距离。
+    // 被硬钉那块永远≈0，所以这个数主要反映"另外几块板对不对" —— 也就是
+    // 底盘模型/姿态约定对不对（正确时典型值 ≲10 px，约定错了会几十上百 px）。
+    double model_fit_sum = 0.0;
+    double model_fit_max = 0.0;
+    int model_fit_n = 0;
     auto report_time = std::chrono::steady_clock::now();
     // ------------------- 3.5 实时曲线（和仿真 node_sim 同一套组件）----------
     // 硬件上一直缺的正是这个：图像框只能说明"这一帧对上了"，而"命令 vs 回传、
@@ -841,7 +857,7 @@ int auto_aim::app::RealRunner::run()
         io::ImuSample frame_imu;
         if (gimbal.imuAt(exposure_time, frame_imu)) {
             camera_pose.yaw = yaw_sign * frame_imu.yaw;
-            camera_pose.pitch = frame_imu.pitch;
+            camera_pose.pitch = pitch_sign * frame_imu.pitch;
             camera_pose.valid = true;
             camera_pose.timestamp_valid = true;
             if (use_imu_world_frame) {
@@ -856,7 +872,7 @@ int auto_aim::app::RealRunner::run()
         } else {
             // 没有姿态历史可查（刚启动/串口刚接上）：退回最新值，并在状态行里看 src_age
             camera_pose.yaw = yaw_sign * gimbal_state.yaw;
-            camera_pose.pitch = gimbal_state.pitch;
+            camera_pose.pitch = pitch_sign * gimbal_state.pitch;
             camera_pose.valid = gimbal_state.valid;
             camera_pose.timestamp_valid = gimbal_state.valid;
         }
@@ -872,7 +888,7 @@ int auto_aim::app::RealRunner::run()
             io::ImuSample now_imu;
             if (gimbal.imuAt(std::chrono::steady_clock::now(), now_imu)) {
                 render_pose.yaw = yaw_sign * now_imu.yaw;
-                render_pose.pitch = now_imu.pitch;
+                render_pose.pitch = pitch_sign * now_imu.pitch;
                 render_pose.valid = true;
                 if (use_imu_world_frame) {
                     const double w = now_imu.w, x = now_imu.x, y = now_imu.y, z = now_imu.z;
@@ -884,7 +900,7 @@ int auto_aim::app::RealRunner::run()
                 }
             } else if (gimbal_state.valid) {
                 render_pose.yaw = yaw_sign * gimbal_state.yaw;
-                render_pose.pitch = gimbal_state.pitch;
+                render_pose.pitch = pitch_sign * gimbal_state.pitch;
             }
         }
 
@@ -1594,6 +1610,42 @@ int auto_aim::app::RealRunner::run()
                 }
             }
 
+            // ---- 模型解释度：模型 vs **本帧所有检测**（不只被硬钉那块）----------
+            // 被钉住的那块板永远重合（pin 之后又用同一姿态反变换回来），所以"底盘模型
+            // 和姿态约定对不对"只能看另外几块：把四个模型板心投到图上，再跟每个检测框
+            // 中心比最近距离。正确时典型 ≲10 px；姿态约定（pitch 符号 / 世界系约定）
+            // 错了会几十~上百 px，而 reproj 仍然很小 —— 这正是"被观测板贴得住、
+            // 另外三块板飞了"的直接度量。
+            if (model.valid && !armors.empty()) {
+                std::array<cv::Point2f, 4> model_px{};
+                std::array<bool, 4> model_px_ok{};
+                for (int plate = 0; plate < 4; ++plate) {
+                    const auto& pose = model.poses[plate];
+                    const cv::Mat plate_center =
+                        (cv::Mat_<double>(3, 1) << pose.center[0], pose.center[1], pose.center[2]);
+                    model_px_ok[plate] = auto_aim::projectPoint(
+                        plate_center, auto_aim::CAMERA_MATRIX, auto_aim::DIST_COEFFS,
+                        model_px[plate]) && pose.center[2] > 0.3;
+                }
+                for (const auto& armor : armors) {
+                    if (!armor.solve_result || armor.tvec.rows != 3) continue;
+                    const cv::Point2f detected_center =
+                        0.25f * (armor.left.top + armor.left.bottom + armor.right.top +
+                                 armor.right.bottom);
+                    double best = 1e18;
+                    for (int plate = 0; plate < 4; ++plate) {
+                        if (!model_px_ok[plate]) continue;
+                        best = std::min(best, static_cast<double>(cv::norm(model_px[plate] -
+                                                                          detected_center)));
+                    }
+                    if (best < 1e17) {
+                        model_fit_sum += best;
+                        model_fit_max = std::max(model_fit_max, best);
+                        ++model_fit_n;
+                    }
+                }
+            }
+
             // 红点 = 底盘中心，也画在外推后的时刻（和上面四块板同一个时刻）。
             const cv::Mat center_mat = (cv::Mat_<double>(3, 1) << model.center_camera[0],
                                         model.center_camera[1], model.center_camera[2]);
@@ -1742,6 +1794,12 @@ int auto_aim::app::RealRunner::run()
                       << ", fire=" << (outcome.fire ? 1 : 0) << ", reproj=" << reprojection_px
                       // 模型口径：R 是模型用的回转半径（online=被拟合器慢层改过），
                       // model_age 是重投影外推到"现在"用的时间（=观测延迟）。
+                      // 模型解释度（对**所有**检测，不只被钉那块）：med/max px。
+                      // 调 ULTRA_VISION_PITCH_SIGN 时就看这个数（取小者），
+                      // 照片上表现为"背面那块板被画高还是画低"。
+                      << ", model_fit="
+                      << (model_fit_n > 0 ? model_fit_sum / model_fit_n : -1.0) << "/"
+                      << (model_fit_n > 0 ? model_fit_max : -1.0) << "px(n=" << model_fit_n << ")"
                       << ", R=" << tracker.getArmorRadius()
                       << (tracker.armorRadiusOnline() ? "(online)" : "(cfg)")
                       << ", model_age=" << observation_age * 1000.0 << "ms"
@@ -1777,6 +1835,9 @@ int auto_aim::app::RealRunner::run()
             std::cout << std::endl;
             report_time = now;
             processed_frames = 0;
+            model_fit_sum = 0.0;
+            model_fit_max = 0.0;
+            model_fit_n = 0;
         }
     }
 

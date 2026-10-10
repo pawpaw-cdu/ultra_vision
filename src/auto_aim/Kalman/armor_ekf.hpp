@@ -12,6 +12,7 @@
 
 #include "Kalman/linalg.hpp"   // Matrix / Vec（从本文件抽出）
 #include "Kalman/ypd_observation.hpp"
+#include "common/chassis_model.hpp"   // armorPhaseOffset（板相位约定，滤波器/模型同源）
 #include "common/types.hpp"    // LocalFitResult（局部拟合器输出）
 
 namespace auto_aim {
@@ -93,7 +94,10 @@ public:
     }
 
     static double angleForPlate(int plate_id) {
-        return (1 - plate_id) * 3.14159265358979323846 / 2.0;
+        // 与底盘模型（common/chassis_model.hpp 的 armorPhaseOffset）**同一个约定**：
+        // k=1 在 0°（正面）、k=0 在 +90°、k=2 在 −90°、k=3 在 180°。两处必须一致，
+        // 否则"滤波器摆的板"和"画出来的板"会差 90°/180°。
+        return armorPhaseOffset(plate_id);
     }
 
     static double normalizeAngle(double angle) {
