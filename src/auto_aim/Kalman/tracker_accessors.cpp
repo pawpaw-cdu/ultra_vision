@@ -77,6 +77,25 @@ namespace auto_aim
         return positions;
     }
 
+    // 第 plate 块板的刚体姿态（相机系）。径向直接由滤波器的 yaw + 板相位给出
+    // （和 armorPosition() 用的完全是同一个相位，所以板心与姿态必然自洽）；
+    // 车体竖直 = 世界系竖直转到相机系（EKF 的 world y 向下 → up = −y）；
+    // 灯条方向再由安装倾角 α 定死。这样"板心 + 切向 + 灯条方向"三件套把板定死，
+    // 不需要借任何观测板的东西（老 overlay 拿观测板 PnP 的 rvec 当整车竖直，
+    // 会把观测板的 roll 传染给另外三块板）。
+    ArmorAxes Tracker::armorAxesCamera(int plate) const
+    {
+        const int clamped = std::max(0, std::min(3, plate));
+        const double plate_angle = ArmorEKF::normalizeAngle(
+            ekf_.getYaw() + ArmorEKF::angleForPlate(clamped));
+        const cv::Vec3d radial_home(std::cos(plate_angle), 0.0, std::sin(plate_angle));
+        const cv::Vec3d up_home(0.0, -1.0, 0.0);   // world y 向下 → 竖直向上是 −y
+        const cv::Vec3d radial_camera = worldDirectionToCamera(radial_home);
+        const cv::Vec3d up_camera = worldDirectionToCamera(up_home);
+        return armorAxesFromRadial(radial_camera, up_camera,
+                                   cfg_.armor_tilt_deg * CV_PI / 180.0);
+    }
+
     double Tracker::getYaw() const
     {
         if (plate_model_weight_ > 0.0) {

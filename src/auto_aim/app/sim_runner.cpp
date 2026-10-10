@@ -206,6 +206,18 @@ namespace auto_aim
             estimate_recorder_ = std::make_unique<auto_aim::app::CsvSink>(
                 "ULTRA_VISION_ESTIMATE_CSV", "x,y,z,color,distance,time_us,plate_id\n");
 
+            // 模型构造（重投影整车轮廓）用的装甲板安装倾角：**仿真靶没有 15° 支架**
+            // （灯条在板坐标系里绝对竖直），所以默认 0；要和局部拟合器的 α 保持一致，
+            // 于是 ULTRA_VISION_LOCAL_FIT_ALPHA_DEG 也当作这里的默认值
+            // （ULTRA_VISION_ARMOR_TILT_DEG 可单独覆盖，做"倾角画错会怎样"的对照）。
+            {
+                const char* tilt_env = std::getenv("ULTRA_VISION_ARMOR_TILT_DEG");
+                const char* alpha_env = std::getenv("ULTRA_VISION_LOCAL_FIT_ALPHA_DEG");
+                const double tilt = tilt_env != nullptr ? std::atof(tilt_env)
+                                   : (alpha_env != nullptr ? std::atof(alpha_env) : 0.0);
+                pipeline_->tracker().setArmorTiltDeg(tilt);
+            }
+
 #ifdef ULTRA_VISION_HAVE_LOCAL_FIT
             if (track_cfg.local_fit.enabled) {
                 auto_aim::LocalTrajectoryFitConfig fcfg;

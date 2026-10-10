@@ -287,6 +287,20 @@ if(ULTRA_VISION_BUILD_TESTS)
   target_link_libraries(pnp_yaw_refine_test PRIVATE ${OpenCV_LIBS})
   add_test(NAME pnp_yaw_refine_test COMMAND pnp_yaw_refine_test)
 
+  # 模型构造（整车轮廓重投影）的几何自检：装甲板刚体姿态 + 15° 安装倾角。
+  # 把"模型构造 == 局部拟合器的车辆系几何"钉成恒等式，并回归掉历史三个坑
+  # （世界系 yaw 造切向 / 观测板 rvec 当竖直 / 丢 tangent.y）。纯头文件，无额外依赖。
+  add_executable(armor_geometry_test
+      test/armor_geometry_test.cpp
+  )
+  target_include_directories(armor_geometry_test PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}
+      ${CMAKE_SOURCE_DIR}
+      ${OpenCV_INCLUDE_DIRS}
+  )
+  target_link_libraries(armor_geometry_test PRIVATE ${OpenCV_LIBS})
+  add_test(NAME armor_geometry_test COMMAND armor_geometry_test)
+
   # 下位机协议层自检：CRC16 标准值 / 43B+29B 字节布局 / 打包解析往返 / 非法帧。
   # 真机"连上但不动"最常见的三个原因（CRC 口径、结构体 padding、帧长）都在这里钉死。
   add_executable(gimbal_protocol_test

@@ -4,6 +4,7 @@
 #include <array>
 #include <deque>
 #include <chrono>
+#include <cmath>
 #include <atomic>
 #include <functional>
 #include <mutex>
@@ -17,6 +18,7 @@
 #include "estimation/rotation_rate_estimator.hpp"
 #include "armor_ekf.hpp"
 #include "plate_ekf.hpp"
+#include "common/armor_geometry.hpp"
 #include "common/types.hpp"
 
 namespace auto_aim
@@ -154,6 +156,10 @@ namespace auto_aim
 
         // Parameters of the circular armor EKF.
         double armor_radius = 0.21;
+        // 装甲板安装倾角（**现场事实**：真机灯条装在 15° 支架上，灯条不是世界竖直，
+        // 板顶向车内倾 α；仿真靶没建这个支架 → 0）。模型构造（重投影整车轮廓）用它，
+        // 局部拟合器的 slow α 是同一个物理量的在线估计。见 common/armor_geometry.hpp。
+        double armor_tilt_deg = 15.0;
         double y_noise_mult = 30.0;
         double p_cov_min = 1e-3;
         // 等效板面尺寸。**必须与探测器的点语义匹配**，而不是"标准装甲板
@@ -282,6 +288,17 @@ namespace auto_aim
         std::array<double, 3> getTargetCenterWorldArray() const;
         std::array<double, 3> getTargetVelocityWorld() const;
         std::array<cv::Mat, 4> getEstimatedArmorPositions() const;
+        /// @brief 第 plate 块板的**刚体姿态**（相机系：法向/切向/灯条方向），
+        ///        含装甲板安装倾角（cfg_.armor_tilt_deg，真机 15°、仿真 0°）。
+        ///        重投影整车轮廓**只走这一个入口** —— 各调用点自己拿 yaw/竖直拼一套
+        ///        是历史上三处模型长得不一样的根源（见 common/armor_geometry.hpp）。
+        ArmorAxes armorAxesCamera(int plate) const;
+        void setArmorTiltDeg(double degrees)
+        {
+            if (std::isfinite(degrees) && std::abs(degrees) < 60.0)
+                cfg_.armor_tilt_deg = degrees;
+        }
+        double getArmorTiltDeg() const { return cfg_.armor_tilt_deg; }
         double getYaw() const;
         double getYawWorld() const { return ekf_.getYaw(); }
         // The EKF owns the rate state: the external estimator is only one of
@@ -308,6 +325,15 @@ namespace auto_aim
         double getEkfOmega() const { return ekf_.getOmega(); }
         bool hasRotationRate() const { return rotation_rate_estimator_.valid(); }
         double getArmorRadius() const { return cfg_.armor_radius; }
+        /// @brief 板面等效尺寸（半宽/半高，米）。**与 PnP 用同一组标定值**：
+        ///        重投影画出来的框、以及"模型 vs 检测"的像素误差都必须用这一组，
+        ///        否则量出来的残差里混着"画框尺寸不对"的成分（历史上 overlay 里
+        ///        写死过 0.0675/0.0275，和 configs 的 0.1315/0.060 不是一套）。
+        double getArmorHalfWidth(bool large_armor) const
+        {
+            return 0.5 * (large_armor ? cfg_.armor_large_width : cfg_.armor_small_width);
+        }
+        double getArmorHalfHeight() const { return 0.5 * cfg_.armor_height; }
         double getLastMeasurementWeight() const { return last_measurement_weight_; }
 
         /// @brief 收敛看门狗统计：触发次数 / 当前拒绝比例 / 是否收敛。

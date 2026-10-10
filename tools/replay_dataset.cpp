@@ -354,33 +354,15 @@ int main(int argc, char* argv[])
             if (state_now != auto_aim::TrackerState::LOST && pipeline.tracker().hasObservation()) {
                 const int plate = pipeline.tracker().getLastObservedPlateId();
                 const auto& armor = pipeline.tracker().getLastObservedArmor();
-                const double half_w =
-                    (armor.armor_type == auto_aim::large ? source_cfg.pnp.large_width
-                                                        : source_cfg.pnp.small_width) * 0.5;
-                const double half_h = source_cfg.pnp.height * 0.5;
+                const double half_w = pipeline.tracker().getArmorHalfWidth(
+                    armor.armor_type == auto_aim::large);
+                const double half_h = pipeline.tracker().getArmorHalfHeight();
                 const auto positions = pipeline.tracker().getEstimatedArmorPositions();
-                // 和 node.cpp 同一口径：世界系的切向/竖直先转到相机系再画（世界 y 向下，
-                // "向上" = (0,-1,0)）。不做这一步就会把板掰一个≈相机-板 pitch 夹角。
-                                const auto to_camera = [&](const cv::Vec3d& v) {
-                    return pipeline.tracker().worldDirectionToCamera(v);
-                };
-                // 竖直用**世界系**竖直（和 node.cpp 同口径；观测板的 roll 不该传染给模型）
-                const cv::Vec3d vertical_cam = to_camera(cv::Vec3d(0.0, 1.0, 0.0));
-                // 和 node.cpp 同一套画法：切向 = 竖直 × 径向（都在相机系里用模型几何算，
-                // 不用 getYaw()——那是相机系 yaw，拿去造世界系切向会把板画扁）
-                const cv::Mat center_mat2 = pipeline.tracker().getTargetCenter();
-                const cv::Vec3d center_cam2(center_mat2.at<double>(0), center_mat2.at<double>(1),
-                                            center_mat2.at<double>(2));
-                cv::Vec3d radial = cv::Vec3d(positions[plate]) - center_cam2;
-                const double radial_norm = cv::norm(radial);
-                if (radial_norm < 1e-6) return {};
-                radial /= radial_norm;
-                cv::Vec3d tangent_cam = vertical_cam.cross(radial);
-                if (cv::norm(tangent_cam) < 1e-6) return {};
-                tangent_cam /= cv::norm(tangent_cam);
-                // 竖直用**世界系**竖直（和 node.cpp 同口径；观测板的 roll 不该传染给模型）
+                // 模型姿态与板尺寸都从 tracker 取（单一来源，见 common/armor_geometry.hpp）：
+                // 过去这里自己拿"世界竖直 × 径向"造切向，漏掉真机 15° 安装倾角。
+                const auto_aim::ArmorAxes axes = pipeline.tracker().armorAxesCamera(plate);
                 const auto corners = auto_aim::projectArmorCameraFrame(
-                    positions[plate], tangent_cam, vertical_cam, half_w, half_h, camera_matrix,
+                    positions[plate], axes.tangent, axes.bar, half_w, half_h, camera_matrix,
                     dist_coeffs);
                 if (corners.size() == 4) {
                     // 顺便量"模型四角 vs 识别四角"的**尺寸比**：模型用的是配置里的板尺寸，

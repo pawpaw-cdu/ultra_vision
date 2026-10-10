@@ -571,6 +571,15 @@ int auto_aim::app::RealRunner::run()
     // tracker.setCameraPose() before update() is the only change needed to run
     // the same estimator in the gimbal/world frame once that feedback exists.
     auto_aim::Tracker& tracker = pipeline.tracker();   // 估计器归流水线所有
+    // 装甲板安装倾角：默认取 configs/tracker.yaml 的 pnp.armor_pitch_deg（真机 15°），
+    // 现场可覆盖（换车/换支架要重标）。重投影整车轮廓与局部拟合器的 slow α 用同一个数。
+    {
+        const char* tilt_env = std::getenv("ULTRA_VISION_ARMOR_TILT_DEG");
+        if (tilt_env != nullptr) tracker.setArmorTiltDeg(std::atof(tilt_env));
+        std::cout << "[geometry] armor tilt = " << tracker.getArmorTiltDeg()
+                  << " deg（板面尺寸 " << tracker.getArmorHalfWidth(false) * 2.0 << "x"
+                  << tracker.getArmorHalfHeight() * 2.0 << " m，与 PnP 同源）" << std::endl;
+    }
     // UV 观测（cfg.uv_observation）用：真实相机的内参在一次运行里固定。
     if (camera_matrix.rows == 3 && camera_matrix.cols == 3) {
         tracker.setCameraIntrinsics(camera_matrix.at<double>(0, 0),
@@ -1496,13 +1505,11 @@ int auto_aim::app::RealRunner::run()
         const double half_width =
             (large_armor ? pnp_geometry.large_width : pnp_geometry.small_width) * 0.5;
         const double half_height = pnp_geometry.height * 0.5;
-        // 画模型板用的切向/竖直**都取自世界系**（模型本身就是这么定义的：plates 竖直、
-        // 沿 world 的 ±y 排列），再用 tracker.worldDirectionToCamera() 转到相机系。
-        // 曾经这里用 verticalAxisFromObservation()（观测板局部 z）当竖直 —— 那会把**观测板
-        // 自身的 roll/摆歪**传染给整个模型，看起来就是"模型自带 pitch"；后来换成世界竖直
-        // 之所以"更不对"，是因为当时 worldToCamera() 还是坏的（只旋转不减平移）✗。
-        const cv::Vec3d world_up(0.0, 1.0, 0.0);   // EKF 的 world 系 y 向下，(0,1,0) 即"向下"，
-                                                   // 取反只是把板上下翻转（矩形对称，无影响）
+        // 模型板的姿态**只走 Tracker::armorAxesCamera()**（相机系的 法向/切向/灯条方向），
+        // 它由"滤波器 yaw + 板相位 + 车体竖直 + 装甲板安装倾角"一次算出来：
+        //   · 板心与姿态同源（都用 ekf_.getYaw() + angleForPlate(plate)），不会互相打架；
+        //   · 带真机 15° 安装倾角（灯条是斜的），不再是"世界竖直的矩形"；
+        //   · 不再有三处调用点各写一套（overlay/replay 过去就各错一点）。
 
         // 模型对**已观测那块板**的重投影误差（像素）——这是判断"估计是否自洽"最直接的量：
         // 如果模型连刚刚观测到的那块板都投影不回识别框上，那问题在估计/坐标系，而不是板尺寸。
@@ -1513,27 +1520,11 @@ int auto_aim::app::RealRunner::run()
                                    tracker.getState() == auto_aim::TrackerState::TRACKING;
         if (model_visible) {
             const auto estimated_positions = tracker.getEstimatedArmorPositions();
-            const auto to_camera = [&tracker](const cv::Vec3d& v) {
-                return tracker.worldDirectionToCamera(v);
-            };
-            // 画模型板的切向/竖直**全部在相机系里用模型自身几何算**：
-            //   竖直 = 世界系竖直转到相机系（模型就是"板竖直、沿 world ±y 排列"定义的）
-            //   径向 = normalize(模型板位置 − 模型中心)；切向 = 竖直 × 径向
-            // 注意：**不要**用 tracker.getYaw() 去造世界系切向 —— 它返回的是**相机系** yaw，
-            // 配世界系的 angleForPlate 会把板画扁（实测宽比 7.2 倍、重投影 90 px 就是这么来的）。
-            const cv::Vec3d vertical_axis_cam = to_camera(cv::Vec3d(0.0, 1.0, 0.0));
-            const cv::Mat center_mat = tracker.getTargetCenter();
-            const cv::Vec3d center_cam(center_mat.at<double>(0), center_mat.at<double>(1),
-                                       center_mat.at<double>(2));
             for (int plate = 0; plate < 4; ++plate) {
-                cv::Vec3d radial = cv::Vec3d(estimated_positions[plate]) - center_cam;
-                if (cv::norm(radial) < 1e-6) continue;
-                radial /= cv::norm(radial);
-                cv::Vec3d tangent_cam = vertical_axis_cam.cross(radial);
-                if (cv::norm(tangent_cam) < 1e-6) continue;
-                tangent_cam /= cv::norm(tangent_cam);
+                const auto_aim::ArmorAxes axes = tracker.armorAxesCamera(plate);
+                if (cv::norm(axes.tangent) < 1e-6 || cv::norm(axes.bar) < 1e-6) continue;
                 const auto corners = auto_aim::projectArmorCameraFrame(
-                    estimated_positions[plate], tangent_cam, vertical_axis_cam, half_width,
+                    estimated_positions[plate], axes.tangent, axes.bar, half_width,
                     half_height, auto_aim::CAMERA_MATRIX, auto_aim::DIST_COEFFS);
                 if (corners.size() != 4) continue;
                 // 四块板**一视同仁**：都画成底盘模型的一部分（同一个颜色、同一套 ID）。

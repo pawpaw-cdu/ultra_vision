@@ -13,6 +13,7 @@
 #include <opencv2/opencv.hpp>
 
 #include "Kalman/armor_ekf.hpp"
+#include "common/armor_geometry.hpp"
 
 namespace auto_aim
 {
@@ -45,39 +46,37 @@ namespace auto_aim
         return true;
     }
 
-    // Armor plates are flat and tangent to the chassis circle, so the plate
-    // outline is built from the radial phase and a shared vertical axis.
+    // Armor plates are flat rigid bodies tangent to the chassis circle. The plate
+    // outline is built in the **plate frame** (tangent × bar axis × normal) and the
+    // three axes must all live in the same frame as `center` (normally the camera
+    // frame). 用 common/armor_geometry.hpp 的 ArmorAxes 造轴，别在这里另起一套。
     //
-    // **坐标系必须统一**：`center` 是相机系的点，所以切向和竖直轴也必须是**相机系**的向量。
-    // 曾经这里用世界系的 yaw 直接造 tangent(-sin, 0, cos)、又用相机系的 vertical_axis 造竖直，
-    // 结果是"相机一有 pitch，画出来的板就被掰了一个≈相机-板 pitch 夹角的角度"（模型像在
-    // 斜坡上）；仿真里姿态≈0 所以看不出来。现在把世界系的切向/竖直显式传进来，或由调用方
-    // 用 tracker.worldToCameraVector() 转好再传。
+    // 历史坑（都会被这个版本消掉）：
+    //   ① 用世界系 yaw 造切向 → 相机一有 pitch，画出来的板就被掰一个角度；
+    //   ② 竖直轴取"世界竖直"→ 漏掉真机装甲板的 15° 安装倾角（灯条其实是斜的）；
+    //   ③ 角点组装时只把竖直轴的 y 分量加进 y、把切向的 y 分量丢了 →
+    //      相机有 pitch 时四角在 y 上系统性错位（≈ tangent.y·half_width）。
+    //      现在三轴都是三维向量，`center + t·u + v·w` 一次算完，没有特例。
     inline std::vector<cv::Point2f> projectArmorCameraFrame(
-        const cv::Mat& center, const cv::Vec3d& tangent, const cv::Vec3d& vertical_axis,
+        const cv::Mat& center, const cv::Vec3d& tangent, const cv::Vec3d& bar_axis,
         double half_width, double half_height, const cv::Mat& camera_matrix,
         const cv::Mat& dist_coeffs)
     {
         if (center.rows != 3 || center.cols != 1) return {};
 
-        const double cx = center.at<double>(0);
-        const double cy = center.at<double>(1);
-        const double cz = center.at<double>(2);
+        const cv::Vec3d plate_center(center.at<double>(0), center.at<double>(1),
+                                     center.at<double>(2));
+        ArmorAxes axes;
+        axes.tangent = tangent;
+        axes.bar = bar_axis;
+        const std::vector<cv::Vec3d> corners =
+            armorCorners(plate_center, axes, half_width, half_height);
 
-        const std::vector<cv::Point3f> object_points = {
-            cv::Point3f(cx - tangent[0] * half_width - vertical_axis[0] * half_height,
-                        cy - vertical_axis[1] * half_height,
-                        cz - tangent[2] * half_width - vertical_axis[2] * half_height),
-            cv::Point3f(cx - tangent[0] * half_width + vertical_axis[0] * half_height,
-                        cy + vertical_axis[1] * half_height,
-                        cz - tangent[2] * half_width + vertical_axis[2] * half_height),
-            cv::Point3f(cx + tangent[0] * half_width + vertical_axis[0] * half_height,
-                        cy + vertical_axis[1] * half_height,
-                        cz + tangent[2] * half_width + vertical_axis[2] * half_height),
-            cv::Point3f(cx + tangent[0] * half_width - vertical_axis[0] * half_height,
-                        cy - vertical_axis[1] * half_height,
-                        cz + tangent[2] * half_width - vertical_axis[2] * half_height)
-        };
+        std::vector<cv::Point3f> object_points;
+        object_points.reserve(corners.size());
+        for (const auto& p : corners)
+            object_points.emplace_back(static_cast<float>(p[0]), static_cast<float>(p[1]),
+                                       static_cast<float>(p[2]));
 
         std::vector<cv::Point2f> image_points;
         cv::projectPoints(object_points, cv::Mat::zeros(3, 1, CV_64F),
@@ -86,17 +85,17 @@ namespace auto_aim
         return image_points;
     }
 
-    /// @brief 旧接口（按世界系 yaw 造切向）——**只在相机姿态接近 0 时正确**，
-    ///        相机有 pitch 时会把板画歪（≈相机-板 pitch 夹角）。新代码请用
-    ///        projectArmorCameraFrame() 并自己把切向/竖直转到相机系。
+    /// @brief 旧接口（按世界系 yaw 造切向、竖直轴由调用方给）——**只在相机姿态
+    ///        接近 0 时正确**，且无法表达 15° 安装倾角。保留仅为兼容老工具，
+    ///        新代码请用 Tracker::armorAxesCamera() + projectArmorCameraFrame()。
     inline std::vector<cv::Point2f> projectArmor(
-        const cv::Mat& center, int plate_id, double yaw, const cv::Vec3d& vertical_axis,
+        const cv::Mat& center, int plate_id, double yaw, const cv::Vec3d& bar_axis,
         double half_width, double half_height, const cv::Mat& camera_matrix,
         const cv::Mat& dist_coeffs)
     {
         const double total_angle = yaw + ArmorEKF::angleForPlate(plate_id);
         const cv::Vec3d tangent(-std::sin(total_angle), 0.0, std::cos(total_angle));
-        return projectArmorCameraFrame(center, tangent, vertical_axis, half_width, half_height,
+        return projectArmorCameraFrame(center, tangent, bar_axis, half_width, half_height,
                                        camera_matrix, dist_coeffs);
     }
 } // namespace auto_aim

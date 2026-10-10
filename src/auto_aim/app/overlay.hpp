@@ -28,36 +28,26 @@ namespace app
             tracker.getState() != auto_aim::TrackerState::LOST &&
             tracker.getTargetCenter().rows == 3) {
             const auto estimated_positions = tracker.getEstimatedArmorPositions();
-            const double yaw = tracker.getYaw();
             const bool has_observation = tracker.hasObservation();
             const int observed_plate = has_observation
                 ? tracker.getLastObservedPlateId() : -1;
 
             const bool large_armor = has_observation &&
                 tracker.getLastObservedArmor().armor_type == auto_aim::large;
-            const double half_width = large_armor ? 0.1125 : 0.0675;
-            const double half_height = 0.0275;
-            cv::Vec3d vertical_axis(0.0, 1.0, 0.0);
-            if (has_observation && !tracker.getLastObservedArmor().rvec.empty()) {
-                cv::Mat rotation;
-                cv::Rodrigues(tracker.getLastObservedArmor().rvec, rotation);
-                const cv::Mat local_vertical = (cv::Mat_<double>(3, 1) << 0.0, 0.0, 1.0);
-                const cv::Mat camera_vertical = rotation * local_vertical;
-                cv::Vec3d candidate(
-                    camera_vertical.at<double>(0),
-                    camera_vertical.at<double>(1),
-                    camera_vertical.at<double>(2));
-                const double norm = cv::norm(candidate);
-                if (norm > 0.5 && std::abs(candidate[1]) > 0.7) {
-                    vertical_axis = candidate / norm;
-                }
-            }
+            // 尺寸和姿态都从 tracker 取（单一来源）：半宽/半高与 PnP 同一组标定值，
+            // 姿态走 armorAxesCamera()（相机系的三轴 + 15° 安装倾角）。
+            // 老代码在 overlay 里写死过 0.0675/0.0275，并且拿**观测板 PnP 的 rvec**
+            // 当所有板的竖直 —— 前者让残差里混着尺寸误差，后者把观测板的 roll
+            // 传染给另外三块板（"模型自带 pitch"）。
+            const double half_width = tracker.getArmorHalfWidth(large_armor);
+            const double half_height = tracker.getArmorHalfHeight();
 
             for (int plate = 0; plate < 4; ++plate) {
-                const auto corners = auto_aim::projectArmor(
-                    estimated_positions[plate], plate, yaw, vertical_axis,
-                    half_width, half_height,
-                    camera_matrix, dist_coeffs);
+                const auto_aim::ArmorAxes axes = tracker.armorAxesCamera(plate);
+                if (cv::norm(axes.tangent) < 1e-6 || cv::norm(axes.bar) < 1e-6) continue;
+                const auto corners = auto_aim::projectArmorCameraFrame(
+                    estimated_positions[plate], axes.tangent, axes.bar,
+                    half_width, half_height, camera_matrix, dist_coeffs);
                 if (corners.size() != 4) continue;
                 if (plate != observed_plate) {
                     auto_aim::drawQuad(image, corners, cv::Scalar(255, 220, 0), 1);
@@ -115,10 +105,18 @@ namespace app
                     selected_center_camera[2]);
                 const double selected_half_width =
                     last_decision.armor_id == observed_plate && large_armor
-                    ? 0.1125 : 0.0675;
-                const auto selected_corners = auto_aim::projectArmor(
-                    selected_center, last_decision.armor_id,
-                    tracker.worldToCameraYaw(last_decision.predicted_yaw), vertical_axis,
+                    ? tracker.getArmorHalfWidth(true) : tracker.getArmorHalfWidth(false);
+                // 提前点那块板用的是**决策里的预测 yaw**（打到的那一刻的相位），
+                // 所以姿态由预测相位重建，而不是读当前状态。
+                const double predicted_plate_angle = last_decision.predicted_yaw +
+                    ArmorEKF::angleForPlate(last_decision.armor_id);
+                const auto_aim::ArmorAxes selected_axes = auto_aim::armorAxesFromRadial(
+                    tracker.worldDirectionToCamera(cv::Vec3d(
+                        std::cos(predicted_plate_angle), 0.0, std::sin(predicted_plate_angle))),
+                    tracker.worldDirectionToCamera(cv::Vec3d(0.0, -1.0, 0.0)),
+                    tracker.getArmorTiltDeg() * CV_PI / 180.0);
+                const auto selected_corners = auto_aim::projectArmorCameraFrame(
+                    selected_center, selected_axes.tangent, selected_axes.bar,
                     selected_half_width, half_height,
                     camera_matrix, dist_coeffs);
                 auto_aim::drawQuad(image, selected_corners,

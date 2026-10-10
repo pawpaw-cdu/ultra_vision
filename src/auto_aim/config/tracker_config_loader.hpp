@@ -196,6 +196,10 @@ namespace auto_aim
             cfg.armor_large_width =
                 pnp["large_width"].as<double>(cfg.armor_large_width);
             cfg.armor_height = pnp["height"].as<double>(cfg.armor_height);
+            // 装甲板安装倾角（真机 15° 支架；仿真靶 0°）。模型构造/重投影用它 ——
+            // 与局部拟合器的 slow α 是同一个物理量（见 common/armor_geometry.hpp）。
+            cfg.armor_tilt_deg =
+                pnp["armor_pitch_deg"].as<double>(cfg.armor_tilt_deg);
             // UV 的板高没单独配就直接跟 PnP 走：这两处必须是同一个几何量，
             // 否则"重投影的模型"和"观测的角点"不是一回事，残差会带模型偏差。
             if (!tracker["kalman"]["uv_armor_height"]) {
