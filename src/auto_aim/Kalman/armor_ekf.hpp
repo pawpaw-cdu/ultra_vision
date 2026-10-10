@@ -38,8 +38,14 @@ public:
         double process_acc_max = 40.0;         // 上限，防止速度估计野值时爆掉
         double process_omega = 2.0;
         /// l/h（分组长短轴）的过程噪声方差与初始方差（见 kStateDim 注释）。
-        double process_geometry = 4e-7;
-        double geometry_delta_max = 0.15;   // |l|,|h| 硬边界（m），防跑飞
+        // l/h 的过程噪声与硬边界。实车实测（model9.csv）：真实两组深度差只有 ~2.3cm，
+        // 但状态 l 在"l ↔ 车心/深度"的耦合里被过拟合推到 −8.6cm（每帧 PnP 位置噪声
+        // ±12cm，滤波器能拿 l 去凑），把重投影带坏。所以：
+        //   · 过程噪声放慢到 1e-7（1s≈1700步 → σ≈1.3cm，只跟真正的机械偏差）；
+        //   · 硬边界收到 ±5cm（机器人前后/左右半径差不可能更大）。
+        // 这样 l/h 只做"缓慢的几何修正"，不会去追观测噪声。
+        double process_geometry = 1e-7;
+        double geometry_delta_max = 0.05;   // |l|,|h| 硬边界（m）
         double P_geometry = 2.5e-3;    // 初始 σ=5cm，允许从 0 收敛到真实差值
         // IESEKF（上科大 2026 §5B.5）：更新内迭代次数。每次用**更新后的状态**
         // 重新线性化观测函数，再更新一次；收敛后相当于在真值附近展开，比只在
