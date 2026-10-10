@@ -32,6 +32,10 @@ namespace auto_aim
         ekf_cfg.armor_y_offsets = cfg_.armor_y_offsets;
         ekf_.setConfig(ekf_cfg);
 
+        // 底盘慢层几何的初值（真机 15° 支架 / 逐板半径 / 板面尺寸），
+        // 之后由局部拟合器慢层或在线慢收敛修改。见 common/chassis_model.hpp。
+        syncGeometryFromConfig();
+
         // 双模型的板模型（并行运行，见 TrackerConfig::plate_model_enabled）
         PlateEKF::Config plate_cfg;
         plate_cfg.process_acc = cfg_.plate_model_process_acc;

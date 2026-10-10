@@ -235,6 +235,7 @@ namespace auto_aim
         out.omega = f.omega;
         out.alpha = alpha_fixed;
         out.R = R_fixed;
+        out.h = f.h;
         out.reprojection_rmse_px = f.rmse_px;
         out.quality = std::exp(-f.rmse_px / std::max(0.1, config_.huber_delta));
         out.num_bars = static_cast<int>(observations.size());
@@ -320,6 +321,7 @@ namespace auto_aim
         out.omega = f.omega;
         out.alpha = slow_alpha_;
         out.R = slow_R_;
+        out.h = f.h;
         out.reprojection_rmse_px = f.rmse_px;
         out.quality = std::exp(-f.rmse_px / std::max(0.1, config_.huber_delta));
         out.num_bars = static_cast<int>(observations.size());

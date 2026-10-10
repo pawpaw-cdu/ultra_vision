@@ -209,6 +209,24 @@ namespace auto_aim
             // 与局部拟合器的 slow α 是同一个物理量（见 common/armor_geometry.hpp）。
             cfg.armor_tilt_deg =
                 pnp["armor_pitch_deg"].as<double>(cfg.armor_tilt_deg);
+            // 逐板回转距离 + 大/小板标记（真车是**矩形**底盘：前后 ≠ 左右）。
+            // 不给就用 kalman.armor_radius 当圆（仿真靶）。见 common/chassis_model.hpp。
+            if (const YAML::Node dist = pnp["plate_distance"]) {
+                if (dist.size() == 4) {
+                    for (std::size_t i = 0; i < 4; ++i)
+                        cfg.plate_distance[i] = dist[i].as<double>(0.0);
+                } else {
+                    std::cerr << "Ignoring pnp.plate_distance: 需要 4 个数" << std::endl;
+                }
+            }
+            if (const YAML::Node large = pnp["plate_large"]) {
+                if (large.size() == 4) {
+                    for (std::size_t i = 0; i < 4; ++i)
+                        cfg.plate_large[i] = large[i].as<bool>(false);
+                } else {
+                    std::cerr << "Ignoring pnp.plate_large: 需要 4 个 bool" << std::endl;
+                }
+            }
             // UV 的板高没单独配就直接跟 PnP 走：这两处必须是同一个几何量，
             // 否则"重投影的模型"和"观测的角点"不是一回事，残差会带模型偏差。
             if (!tracker["kalman"]["uv_armor_height"]) {

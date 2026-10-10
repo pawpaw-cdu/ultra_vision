@@ -335,12 +335,11 @@ int main()
 
     // ---- 装甲板模型（双模型低速档，上科大 2026 §9.4.4）----------------------
     {
-        // ---- 在线回转半径 + 输出模型外推 -----------------------------------
-        // 这两条是"重投影整车模型"的口径：
-        //   · 半径：配置写死 0.25、实测/拟合器给 0.20~0.21 → 在线改半径必须只动几何，
-        //     不能把滤波器 reset 掉（不然每次更新半径都丢跟踪）；
-        //   · 外推：估计器状态停在观测时刻，画模型要按 (底速, ω) 推到当前帧时刻，
-        //     否则自旋时整台模型拖在真车后面（"绿色框贴得住、模型跑飞"）。
+        // ---- 底盘模型：慢层几何 + 输出口径 + 外推 + 渲染姿态 ----------------
+        // 这组断言盯的正是真机上"四块板高度不统一/底盘不对"的三个来源：
+        //   · 半径（配置 0.25 / 实测 0.20~0.21）——在线改半径只动几何，不能 reset 滤波器；
+        //   · 矩形底盘（前后距离 ≠ 左右距离）+ 四块板**同一高度** + 15° 安装倾角；
+        //   · 重投影必须外推到"被显示那一帧"（观测延迟在 3 rad/s 上是 10~30°）。
         auto_aim::Tracker online_tracker(tracker_config);
         for (int frame = 0; frame <= 30; ++frame) {
             const double time = frame * tracker_dt;
@@ -348,25 +347,30 @@ int main()
                 makeTrackerArmor(tracker_center_z, 0.0, true_omega, time,
                                  tracker_plate_id, radius)}, time);
         }
-        const auto before_radius = online_tracker.predictOutputModel(0.0);
+        auto_aim::CameraPose identity_pose;   // invalid → 用 tracker 内部姿态（无姿态=单位阵）
+        const auto before_radius = online_tracker.modelAt(0.0, identity_pose);
         passed &= expect(before_radius.valid &&
-                             std::abs(before_radius.radius - tracker_config.armor_radius) < 1e-9,
-                         "output model must use the configured armor radius by default");
+                             std::abs(before_radius.geometry.meanDistance() -
+                                      tracker_config.armor_radius) < 1e-9,
+                         "chassis model must use the configured radius by default");
+        passed &= expect(std::abs(before_radius.geometry.armor_pitch -
+                                  tracker_config.armor_tilt_deg * kPi / 180.0) < 1e-9,
+                         "chassis model must use the configured armor pitch (15 deg default)");
 
         online_tracker.setArmorRadius(0.185);
         passed &= expect(std::abs(online_tracker.getArmorRadius() - 0.185) < 1e-9,
                          "setArmorRadius must update the tracker geometry");
         passed &= expect(online_tracker.getState() == auto_aim::TrackerState::TRACKING,
                          "changing the radius must not reset the filter (state must stay TRACKING)");
-        const auto after_radius = online_tracker.predictOutputModel(0.0);
-        passed &= expect(after_radius.valid, "output model must stay valid after setArmorRadius");
+        const auto after_radius = online_tracker.modelAt(0.0, identity_pose);
+        passed &= expect(after_radius.valid, "chassis model must stay valid after setArmorRadius");
         for (int plate = 0; plate < 4; ++plate) {
-            const double dx = after_radius.positions[plate].at<double>(0) -
-                              after_radius.center.at<double>(0);
-            const double dy = after_radius.positions[plate].at<double>(1) -
-                              after_radius.center.at<double>(1);
-            const double dz = after_radius.positions[plate].at<double>(2) -
-                              after_radius.center.at<double>(2);
+            const double dx = after_radius.poses[plate].center[0] -
+                              after_radius.center_camera[0];
+            const double dy = after_radius.poses[plate].center[1] -
+                              after_radius.center_camera[1];
+            const double dz = after_radius.poses[plate].center[2] -
+                              after_radius.center_camera[2];
             const double plate_radius = std::sqrt(dx * dx + dy * dy + dz * dz);
             passed &= expect(std::abs(plate_radius - 0.185) < 1e-6,
                              "modeled plate must sit on the new armor radius");
@@ -374,31 +378,57 @@ int main()
 
         // 外推：yaw 前进 ω·dt，四块板绕模型中心刚性旋转同一个角
         constexpr double extrapolate_dt = 0.08;
-        const auto m0 = online_tracker.predictOutputModel(0.0);
-        const auto m1 = online_tracker.predictOutputModel(extrapolate_dt);
+        const auto m0 = online_tracker.modelAt(0.0, identity_pose);
+        const auto m1 = online_tracker.modelAt(extrapolate_dt, identity_pose);
         const double yaw_step = auto_aim::ArmorEKF::normalizeAngle(
             m1.world_yaw - m0.world_yaw);
         passed &= expect(std::abs(yaw_step - m0.omega * extrapolate_dt) < 0.02,
-                         "continuity: output model yaw must advance by omega*dt");
+                         "continuity: chassis model yaw must advance by omega*dt");
         const double phi = m0.omega * extrapolate_dt;
         for (int plate = 0; plate < 4; ++plate) {
-            const double dx = m0.positions[plate].at<double>(0) - m0.center.at<double>(0);
-            const double dy = m0.positions[plate].at<double>(1) - m0.center.at<double>(1);
-            const double dz = m0.positions[plate].at<double>(2) - m0.center.at<double>(2);
-            const double ex = m0.center.at<double>(0) + dx * std::cos(phi) - dz * std::sin(phi);
-            const double ey = m0.center.at<double>(1) + dy;
-            const double ez = m0.center.at<double>(2) + dx * std::sin(phi) + dz * std::cos(phi);
+            const double dx = m0.poses[plate].center[0] - m0.center_camera[0];
+            const double dy = m0.poses[plate].center[1] - m0.center_camera[1];
+            const double dz = m0.poses[plate].center[2] - m0.center_camera[2];
+            const double ex = m0.center_camera[0] + dx * std::cos(phi) - dz * std::sin(phi);
+            const double ey = m0.center_camera[1] + dy;
+            const double ez = m0.center_camera[2] + dx * std::sin(phi) + dz * std::cos(phi);
             const double err = std::sqrt(
-                std::pow(m1.positions[plate].at<double>(0) - ex, 2) +
-                std::pow(m1.positions[plate].at<double>(1) - ey, 2) +
-                std::pow(m1.positions[plate].at<double>(2) - ez, 2));
+                std::pow(m1.poses[plate].center[0] - ex, 2) +
+                std::pow(m1.poses[plate].center[1] - ey, 2) +
+                std::pow(m1.poses[plate].center[2] - ez, 2));
             passed &= expect(err < 0.01,
                              "continuity: plates must rotate rigidly with the extrapolated chassis");
         }
-        const auto axes = online_tracker.armorAxesForYaw(m1.world_yaw, 1);
-        passed &= expect(std::abs(cv::norm(axes.normal) - 1.0) < 1e-9 &&
-                             std::abs(axes.normal.dot(axes.bar)) < 1e-9,
-                         "armorAxesForYaw must return an orthonormal rigid pose");
+
+        // ---- 矩形底盘 + 同一高度 + 板面带 15° 倾角 --------------------------
+        // 真车不是"四块板在一个圆上"：前后距离 ≠ 左右距离，板心同一高度。
+        // 这条是最小回归：每块板必须落在自己那条半径/高度上，姿态绕自身切线倾 α。
+        auto_aim::ChassisGeometry rect;
+        rect.plate_distance = {{0.28, 0.22, 0.28, 0.22}};
+        rect.plate_height = {{0.01, 0.01, 0.01, 0.01}};
+        rect.armor_pitch = 15.0 * kPi / 180.0;
+        rect.plate_large = {{false, true, false, true}};
+        online_tracker.setChassisGeometry(rect);
+        const auto rect_model = online_tracker.modelAt(0.0, identity_pose);
+        passed &= expect(rect_model.valid, "rectangular chassis model must be valid");
+        for (int plate = 0; plate < 4; ++plate) {
+            const double px = rect_model.poses[plate].center[0] - rect_model.center_camera[0];
+            const double py = rect_model.poses[plate].center[1] - rect_model.center_camera[1];
+            const double pz = rect_model.poses[plate].center[2] - rect_model.center_camera[2];
+            const double horizontal = std::sqrt(px * px + pz * pz);
+            passed &= expect(std::abs(horizontal - rect.distance(plate)) < 1e-6,
+                             "rectangular chassis: each plate sits on its own distance");
+            passed &= expect(std::abs(py + rect.height(plate)) < 1e-6,
+                             "chassis plates share the configured height (world y points down)");
+            const double phase = rect_model.world_yaw + auto_aim::armorPhaseOffset(plate);
+            const cv::Vec3d radial(std::cos(phase), 0.0, std::sin(phase));
+            passed &= expect(std::abs(rect_model.poses[plate].axes.bar.dot(radial) +
+                                      std::sin(rect.armor_pitch)) < 1e-9,
+                             "bar axis leans inward by exactly the armor pitch");
+        }
+        passed &= expect(std::abs(online_tracker.armorHalfWidth(1) - rect.large_half_width) < 1e-12 &&
+                             std::abs(online_tracker.armorHalfWidth(0) - rect.small_half_width) < 1e-12,
+                         "plate size follows the per-plate large/small flag");
     }
 
     // ---- 装甲板模型（双模型低速档，上科大 2026 §9.4.4）----------------------

@@ -83,57 +83,140 @@ namespace auto_aim
     // 灯条方向再由安装倾角 α 定死。这样"板心 + 切向 + 灯条方向"三件套把板定死，
     // 不需要借任何观测板的东西（老 overlay 拿观测板 PnP 的 rvec 当整车竖直，
     // 会把观测板的 roll 传染给另外三块板）。
-    ArmorAxes Tracker::armorAxesCamera(int plate) const
+    void Tracker::syncGeometryFromConfig()
     {
-        return armorAxesForYaw(ekf_.getYaw(), plate);
+        // 慢层几何的初值全部来自配置（此后只由拟合器慢层/在线慢收敛修改）：
+        //   · 半径：kalman.armor_radius（真机 0.25，仿真 0.21；矩形底盘可逐板配）
+        //   · 安装倾角：pnp.armor_pitch_deg（真机 15°）
+        //   · 板心高度：0（相对车心；由拟合器的 h 在线收敛）
+        //   · 板面尺寸：pnp.small_width/large_width/height（**与 PnP 同一组**）
+        for (std::size_t i = 0; i < geometry_.plate_distance.size(); ++i) {
+            // 逐板距离配了就用它（真车矩形底盘），否则四块都用 armor_radius（圆）。
+            const double configured = cfg_.plate_distance[i];
+            geometry_.plate_distance[i] =
+                configured > 0.05 ? configured : cfg_.armor_radius;
+        }
+        geometry_.plate_large = cfg_.plate_large;
+        for (auto& h : geometry_.plate_height) h = 0.0;
+        geometry_.armor_pitch = cfg_.armor_tilt_deg * CV_PI / 180.0;
+        geometry_.small_half_width = 0.5 * cfg_.armor_small_width;
+        geometry_.large_half_width = 0.5 * cfg_.armor_large_width;
+        geometry_.half_height = 0.5 * cfg_.armor_height;
+        ekf_.setPlateDistance(geometry_.plate_distance);
     }
 
-    ArmorAxes Tracker::armorAxesForYaw(double world_yaw, int plate) const
+    void Tracker::setChassisGeometry(const ChassisGeometry& geometry)
     {
-        const int clamped = std::max(0, std::min(3, plate));
-        const double plate_angle = ArmorEKF::normalizeAngle(
-            world_yaw + ArmorEKF::angleForPlate(clamped));
-        const cv::Vec3d radial_home(std::cos(plate_angle), 0.0, std::sin(plate_angle));
-        const cv::Vec3d up_home(0.0, -1.0, 0.0);   // world y 向下 → 竖直向上是 −y
-        const cv::Vec3d radial_camera = worldDirectionToCamera(radial_home);
-        const cv::Vec3d up_camera = worldDirectionToCamera(up_home);
-        return armorAxesFromRadial(radial_camera, up_camera,
-                                   cfg_.armor_tilt_deg * CV_PI / 180.0);
+        geometry_ = geometry;
+        if (geometry_.meanDistance() > 0.05 && geometry_.meanDistance() < 1.0) {
+            cfg_.armor_radius = geometry_.meanDistance();
+            ekf_.setArmorRadius(cfg_.armor_radius);
+        }
+        ekf_.setPlateDistance(geometry_.plate_distance);
+        cfg_.armor_tilt_deg = geometry_.armor_pitch * 180.0 / CV_PI;
     }
 
-    // 输出模型：双模型权重生效后的中心/底速/yaw/ω，按 (v, ω) 外推 dt 秒后摆四块板。
-    // 与 getEstimatedArmorPositions()（纯整车 EKF、不外推）的区别正是这两点：
-    //   ① 用**输出口径**的状态（plate_model_weight_>0 时中心/yaw 来自板模型反推），
-    //      这样画出来的模型和瞄点/选板用的是同一套几何，不会"框在我这儿、瞄在那儿"；
-    //   ② 外推到"现在"，不再把观测延迟显示成模型相位滞后。
-    Tracker::OutputModel Tracker::predictOutputModel(double dt) const
+    void Tracker::updateChassisFromFit(double radius, double armor_pitch_rad, double height_up)
     {
-        OutputModel out;
+        const double alpha = std::clamp(cfg_.local_fit.radius_alpha, 0.01, 1.0);
+        const double max_step = std::max(1e-4, cfg_.local_fit.radius_max_step);
+        bool changed = false;
+        if (std::isfinite(radius) && radius > 0.10 && radius < 0.50) {
+            const double step = std::clamp(radius - geometry_.meanDistance(), -max_step, max_step);
+            const double target = geometry_.meanDistance() + alpha * step;
+            for (auto& d : geometry_.plate_distance) d = target;
+            cfg_.armor_radius = target;
+            ekf_.setArmorRadius(target);
+            armor_radius_online_ = target;
+            changed = true;
+        }
+        if (std::isfinite(armor_pitch_rad) && std::abs(armor_pitch_rad) < 1.0) {
+            const double step = std::clamp(armor_pitch_rad - geometry_.armor_pitch,
+                                           -0.02, 0.02);
+            geometry_.armor_pitch += alpha * step;
+            cfg_.armor_tilt_deg = geometry_.armor_pitch * 180.0 / CV_PI;
+            changed = true;
+        }
+        // 板心高度：拟合器的 h 是"板心在车辆系里相对旋转中心的高度"，向上为正，
+        // 与 geometry.plate_height 同号。四块板**同一高度**（真机事实）。
+        if (std::isfinite(height_up) && std::abs(height_up) < 0.5) {
+            const double mean = 0.25 * (geometry_.plate_height[0] + geometry_.plate_height[1] +
+                                        geometry_.plate_height[2] + geometry_.plate_height[3]);
+            const double step = std::clamp(height_up - mean, -0.02, 0.02);
+            const double target = mean + alpha * step;
+            for (auto& h : geometry_.plate_height) h = target;
+            changed = true;
+        }
+        if (changed) ekf_.setPlateDistance(geometry_.plate_distance);
+    }
+
+    ArmorPose Tracker::armorPose(int plate) const
+    {
+        Vec<3> center = ekf_.getCenter();
+        if (plate_model_weight_ > 0.0) center = blendedCenter();
+        const double yaw = blendedYawWorld();
+        return chassisArmorPose(cv::Vec3d(center(0, 0), center(1, 0), center(2, 0)), yaw,
+                                geometry_, plate);
+    }
+
+    // 重投影模型：输出口径的状态 → 按 (底速, ω) 外推到 dt → 整体变换到 render_pose 帧。
+    // 与 getEstimatedArmorPositions()（纯整车 EKF、不外推、用内部旧姿态变换）的区别：
+    //   ① 用输出口径状态（plate_model_weight_>0 时中心/yaw 来自板模型反推），
+    //      画出来的模型和瞄点/选板是同一套几何；
+    //   ② 外推到被显示那一帧的时刻，不再把观测延迟显示成模型相位滞后；
+    //   ③ 用**被显示那一帧的姿态**做世界→相机变换，云台动过也不会整片歪。
+    Tracker::ModelSnapshot Tracker::modelAt(double dt, const CameraPose& render_pose) const
+    {
+        ModelSnapshot out;
         if (state_ == TrackerState::LOST || !ekf_.isInit()) return out;
-        const double clamped_dt = std::max(0.0, std::min(dt, 0.30));
+        double clamped_dt = std::max(0.0, std::min(dt, 0.30));
+        // 未收敛（刚入靶/刚重捕：ω 还不可信）或 ω 明显是野值时**不外推** ——
+        // 用一个错的 ω 乘 0.1~0.2 s 会把模型甩到几十米外（实测初始化那几帧就是这样）。
+        // 与选择器"未收敛时不用 ω 做提前量"是同一条规则。
+        if (!watchdogStats().converged || !std::isfinite(getOmega()) ||
+            std::abs(getOmega()) > 20.0) {
+            clamped_dt = 0.0;
+        }
 
-        const Vec<3> center_now = blendedCenter();
+        Vec<3> center = blendedCenter();
         const Vec<3> velocity = blendedVelocity();
-        const double omega = getOmega();
-        const double yaw0 = blendedYawWorld();
-        const double radius = cfg_.armor_radius;
-
-        out.omega = omega;
-        out.radius = radius;
-        out.world_yaw = ArmorEKF::normalizeAngle(yaw0 + omega * clamped_dt);
-        Vec<3> center = center_now;
         if (cfg_.model_lead_center) {
             for (int i = 0; i < 3; ++i) center(i, 0) += velocity(i, 0) * clamped_dt;
         }
-        out.center = worldToCamera(center);
+        out.world_yaw = ArmorEKF::normalizeAngle(blendedYawWorld() + getOmega() * clamped_dt);
+        out.omega = getOmega();
+        out.geometry = geometry_;
 
+        const cv::Vec3d world_center(center(0, 0), center(1, 0), center(2, 0));
+        const std::array<ArmorPose, 4> world_poses =
+            chassisArmorPoses(world_center, out.world_yaw, geometry_);
+
+        // 世界系 → render 帧相机系：位置用 pointToCamera，方向用旋转矩阵。
+        CameraPose pose = render_pose;
+        if (!pose.valid) pose = camera_pose_;   // 没给姿态就退回内部存的（仿真无姿态时是单位阵）
+        const Matrix<3, 3> world_to_camera = tracker_detail::cameraToWorldRotation(pose).transpose();
+        cv::Matx33d rotation;
+        for (int r = 0; r < 3; ++r) {
+            for (int c = 0; c < 3; ++c) rotation(r, c) = world_to_camera(r, c);
+        }
+        const Vec<3> camera_center = tracker_detail::pointToCamera(pose, center);
+        const cv::Vec3d camera_pos(camera_center(0, 0), camera_center(1, 0), camera_center(2, 0));
+        out.center_camera = camera_pos;
+
+        // 板心：世界系板心逐点变换（注意不是"车心变换 + 再加偏移"，两者等价但前者不易错）。
         for (int plate = 0; plate < 4; ++plate) {
-            const double phase = out.world_yaw + ArmorEKF::angleForPlate(plate);
-            Vec<3> position = center;
-            position(0, 0) += radius * std::cos(phase);
-            position(1, 0) += cfg_.armor_y_offsets[plate];
-            position(2, 0) += radius * std::sin(phase);
-            out.positions[plate] = worldToCamera(position);
+            ArmorPose world_pose = world_poses[static_cast<std::size_t>(plate)];
+            Vec<3> world;
+            world(0, 0) = world_pose.center[0];
+            world(1, 0) = world_pose.center[1];
+            world(2, 0) = world_pose.center[2];
+            const Vec<3> camera = tracker_detail::pointToCamera(pose, world);
+            ArmorPose camera_pose_out;
+            camera_pose_out.center = cv::Vec3d(camera(0, 0), camera(1, 0), camera(2, 0));
+            camera_pose_out.axes.normal = rotation * world_pose.axes.normal;
+            camera_pose_out.axes.tangent = rotation * world_pose.axes.tangent;
+            camera_pose_out.axes.bar = rotation * world_pose.axes.bar;
+            out.poses[static_cast<std::size_t>(plate)] = camera_pose_out;
         }
         out.valid = true;
         return out;

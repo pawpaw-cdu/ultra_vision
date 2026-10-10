@@ -577,9 +577,13 @@ int auto_aim::app::RealRunner::run()
     {
         const char* tilt_env = std::getenv("ULTRA_VISION_ARMOR_TILT_DEG");
         if (tilt_env != nullptr) tracker.setArmorTiltDeg(std::atof(tilt_env));
+        const auto& geom0 = tracker.chassisGeometry();
         std::cout << "[geometry] armor tilt = " << tracker.getArmorTiltDeg()
-                  << " deg（板面尺寸 " << tracker.getArmorHalfWidth(false) * 2.0 << "x"
-                  << tracker.getArmorHalfHeight() * 2.0 << " m，与 PnP 同源）" << std::endl;
+                  << " deg, plate_distance = ";
+        for (int plate = 0; plate < 4; ++plate)
+            std::cout << (plate ? "," : "") << geom0.distance(plate);
+        std::cout << " m, plate_size = " << geom0.small_half_width * 2.0 << "x"
+                  << geom0.half_height * 2.0 << " m（与 PnP 同源）" << std::endl;
     }
     // UV 观测（cfg.uv_observation）用：真实相机的内参在一次运行里固定。
     if (camera_matrix.rows == 3 && camera_matrix.cols == 3) {
@@ -859,6 +863,30 @@ int auto_aim::app::RealRunner::run()
         camera_pose.timestamp = observation_time;
         frame_age_seconds = frame_age;
         ++processed_frames;
+
+        // 渲染用的相机姿态：与 camera_pose 同源，但取**当前这一拍**的云台角
+        // （被显示的那张图就是刚到手的新帧）。观测姿态只用于把观测映射进世界系；
+        // 画模型必须用当前姿态，否则云台在观测延迟里动过的角度会整片加到模型上。
+        auto_aim::CameraPose render_pose = camera_pose;
+        {
+            io::ImuSample now_imu;
+            if (gimbal.imuAt(std::chrono::steady_clock::now(), now_imu)) {
+                render_pose.yaw = yaw_sign * now_imu.yaw;
+                render_pose.pitch = now_imu.pitch;
+                render_pose.valid = true;
+                if (use_imu_world_frame) {
+                    const double w = now_imu.w, x = now_imu.x, y = now_imu.y, z = now_imu.z;
+                    render_pose.base_to_world = {{
+                        {{1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)}},
+                        {{2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)}},
+                        {{2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)}},
+                    }};
+                }
+            } else if (gimbal_state.valid) {
+                render_pose.yaw = yaw_sign * gimbal_state.yaw;
+                render_pose.pitch = gimbal_state.pitch;
+            }
+        }
 
         // ------------------- 6.5 估计 → 选板 → 瞄准 → 开火 -------------------
         // 全部交给共用流水线：真机和仿真跑的是同一份决策代码。
@@ -1501,16 +1529,13 @@ int auto_aim::app::RealRunner::run()
         }
         const int observed_plate =
             has_observation ? tracker.getLastObservedPlateId() : -1;
+        // 尺寸不再在这里拼：每块板的半宽由底盘几何按"大板/小板"给（tracker.armorHalfWidth）。
         const bool large_armor =
             has_observation && observed_armor.armor_type == auto_aim::large;
-        const double half_width =
-            (large_armor ? pnp_geometry.large_width : pnp_geometry.small_width) * 0.5;
-        const double half_height = pnp_geometry.height * 0.5;
-        // 模型板的姿态**只走 Tracker::armorAxesCamera()**（相机系的 法向/切向/灯条方向），
-        // 它由"滤波器 yaw + 板相位 + 车体竖直 + 装甲板安装倾角"一次算出来：
-        //   · 板心与姿态同源（都用 ekf_.getYaw() + angleForPlate(plate)），不会互相打架；
-        //   · 带真机 15° 安装倾角（灯条是斜的），不再是"世界竖直的矩形"；
-        //   · 不再有三处调用点各写一套（overlay/replay 过去就各错一点）。
+        // 模型板的姿态/位置**只走 Tracker::modelAt()**（common/chassis_model.hpp 的唯一构造
+        // 入口）：底盘慢层几何（逐板距离/同高/15° 倾角/板面尺寸）+ 快层状态（车心/yaw/ω），
+        // 外推到被显示那一帧、并用**那一帧的相机姿态**变换。以前三处调用点各写一套，
+        // 还混用世界系/相机系向量，真机上就表现成"四块板高度不统一、底盘不对"。
 
         // 模型对**已观测那块板**的重投影误差（像素）——这是判断"估计是否自洽"最直接的量：
         // 如果模型连刚刚观测到的那块板都投影不回识别框上，那问题在估计/坐标系，而不是板尺寸。
@@ -1520,22 +1545,24 @@ int auto_aim::app::RealRunner::run()
         const bool model_visible = has_observation &&
                                    tracker.getState() == auto_aim::TrackerState::TRACKING;
         if (model_visible) {
-            // —— 重投影的时间基（这是"绿色框贴得住、模型跑飞"的主要来源）——
+            // —— 重投影的时间基 ——
             // 估计器状态停在**最后一次观测时刻**（曝光），而画面是"现在"。异步检测
             // "曝光→到手"几十~一百多 ms，在 3 rad/s 自旋上就是 12~28° 相位差，
             // 于是整车模型的四块板整体拖在真车后面。这里按 (底速, ω) 把**输出口径**
-            // 的状态外推到当前时刻再画（predictOutputModel），并用同一时刻的 yaw
-            // 造板姿态。控制/选板那条路已经由选择器按 estimate.age 补过，不要重复。
+            // 的状态外推到被显示那一帧，并用**那一帧的相机姿态**做世界→相机变换
+            // （真机云台在延迟期间会动/漂，用观测时刻的姿态画整片模型都是歪的）。
+            // 控制/选板那条路已由选择器按 estimate.age 补过，不要重复补。
             const double model_dt = std::max(0.0, std::min(observation_age, 0.20));
-            const auto model = tracker.predictOutputModel(model_dt);
+            const auto model = tracker.modelAt(model_dt, render_pose);
             for (int plate = 0; plate < 4; ++plate) {
-                if (!model.valid || model.positions[plate].rows != 3) continue;
-                const auto_aim::ArmorAxes axes =
-                    tracker.armorAxesForYaw(model.world_yaw, plate);
-                if (cv::norm(axes.tangent) < 1e-6 || cv::norm(axes.bar) < 1e-6) continue;
+                if (!model.valid) continue;
+                const auto_aim::ArmorPose& pose = model.poses[plate];
+                const cv::Mat center_mat = (cv::Mat_<double>(3, 1) << pose.center[0],
+                                            pose.center[1], pose.center[2]);
                 const auto corners = auto_aim::projectArmorCameraFrame(
-                    model.positions[plate], axes.tangent, axes.bar, half_width,
-                    half_height, auto_aim::CAMERA_MATRIX, auto_aim::DIST_COEFFS);
+                    center_mat, pose.axes.tangent, pose.axes.bar,
+                    tracker.armorHalfWidth(plate), tracker.armorHalfHeight(),
+                    auto_aim::CAMERA_MATRIX, auto_aim::DIST_COEFFS);
                 if (corners.size() != 4) continue;
                 // 四块板**一视同仁**：都画成底盘模型的一部分（同一个颜色、同一套 ID）。
                 // 已观测那块额外算一次"模型 vs 检测"的像素距离（reproj），用来判断估计
@@ -1568,8 +1595,10 @@ int auto_aim::app::RealRunner::run()
             }
 
             // 红点 = 底盘中心，也画在外推后的时刻（和上面四块板同一个时刻）。
+            const cv::Mat center_mat = (cv::Mat_<double>(3, 1) << model.center_camera[0],
+                                        model.center_camera[1], model.center_camera[2]);
             cv::Point2f chassis_center;
-            if (auto_aim::projectPoint(model.center,
+            if (auto_aim::projectPoint(center_mat,
                                        auto_aim::CAMERA_MATRIX,
                                        auto_aim::DIST_COEFFS, chassis_center)) {
                 cv::circle(image, chassis_center, 4, cv::Scalar(0, 0, 255), -1);

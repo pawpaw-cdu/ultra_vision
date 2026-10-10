@@ -541,26 +541,31 @@ namespace auto_aim
                 // 输出口径的状态 + 按观测延迟外推到当前帧时刻。这样"estimate.csv vs truth"
                 // 量出来的就是"操作员看到的模型离真车多远"，而不是"滤波器状态停留在哪个
                 // 过去的时刻"—— 后者会把几十~一百多 ms 的观测延迟算成模型误差。
+                // 外推到**被显示那一帧的曝光时刻**（不是"到手时刻"）：dt 与渲染姿态
+                // 都必须对应那张图，否则云台/目标在那段延迟里的运动会被算成模型误差。
                 const double model_dt = std::max(
-                    0.0, std::min(auto_aim::StandardClock::secondsFromUs(frame_local_timestamp_us_) -
+                    0.0, std::min(auto_aim::StandardClock::secondsFromUs(
+                                      frame_source_timestamp_us_) -
                                       tracker.lastObservationTime(), 0.20));
-                const auto model = tracker.predictOutputModel(model_dt);
+                auto_aim::CameraPose frame_pose;
+                frame_pose.valid = true;
+                frame_pose.yaw = frame_gimbal_yaw_;
+                frame_pose.pitch = frame_gimbal_pitch_;
+                const auto model = tracker.modelAt(model_dt, frame_pose);
                 if (model.valid) {
                     estimate_recorder_->stream() << std::fixed << std::setprecision(6);
                     for (int plate = 0; plate < 4; ++plate) {
-                        if (model.positions[plate].rows != 3 ||
-                            model.positions[plate].cols != 1) {
-                            continue;
-                        }
-                        const double x = model.positions[plate].at<double>(0);
-                        const double y = model.positions[plate].at<double>(1);
-                        const double z = model.positions[plate].at<double>(2);
+                        const auto& pose = model.poses[plate];
+                        const double x = pose.center[0];
+                        const double y = pose.center[1];
+                        const double z = pose.center[2];
                         estimate_recorder_->stream() << x << ',' << y << ',' << z << ",0,"
                                           << std::sqrt(x * x + y * y + z * z) << ','
                                           << frame_local_timestamp_us_ << ',' << plate
                                           // 自描述：外推用的 dt、当时的 yaw/ω、模型半径
                                           << ',' << model_dt << ',' << model.world_yaw << ','
-                                          << model.omega << ',' << model.radius << '\n';
+                                          << model.omega << ',' << model.geometry.meanDistance()
+                                          << '\n';
                     }
                 }
             }

@@ -19,6 +19,7 @@
 #include "armor_ekf.hpp"
 #include "plate_ekf.hpp"
 #include "common/armor_geometry.hpp"
+#include "common/chassis_model.hpp"
 #include "common/types.hpp"
 
 namespace auto_aim
@@ -190,6 +191,12 @@ namespace auto_aim
         double armor_small_width = 0.1315;
         double armor_large_width = 0.221;
         double armor_height = 0.060;
+        // 逐板回转距离（米）。空/0 = 四块都用 armor_radius（圆，仿真靶就是圆）；
+        // 真车矩形底盘写"前后一个值、左右另一个值"，例如 [0.28,0.22,0.28,0.22]。
+        // 板号约定：0=+90°、1=0°（正面）、2=−90°、3=180°。
+        std::array<double, 4> plate_distance{{0.0, 0.0, 0.0, 0.0}};
+        // 哪几块是大装甲板（真机常前后大、左右小；仿真靶四块一样）。影响画框宽度。
+        std::array<bool, 4> plate_large{{false, false, false, false}};
         double angle_measure_noise = 0.04;
         double bearing_measure_noise = 0.0025;
         double pitch_measure_noise = 0.005;
@@ -306,36 +313,55 @@ namespace auto_aim
         ///        含装甲板安装倾角（cfg_.armor_tilt_deg，真机 15°、仿真 0°）。
         ///        重投影整车轮廓**只走这一个入口** —— 各调用点自己拿 yaw/竖直拼一套
         ///        是历史上三处模型长得不一样的根源（见 common/armor_geometry.hpp）。
-        ArmorAxes armorAxesCamera(int plate) const;
-        /// @brief 按给定**世界系底盘 yaw**构造第 plate 块板的刚体姿态（相机系）。
-        ///        armorAxesCamera() 等价于 armorAxesForYaw(ekf_.getYaw(), plate)；
-        ///        外推模型（predictOutputModel）和提前点画框需要的是"那个时刻的 yaw"，
-        ///        所以把这一层单独开出来。
-        ArmorAxes armorAxesForYaw(double world_yaw, int plate) const;
+        // ---- 底盘模型（重投影的唯一来源）------------------------------------
+        /// @brief 当前**慢层几何**（四块板的距离/高度、安装倾角、板面尺寸）。
+        ///        真车是矩形底盘：前后距离 ≠ 左右距离、前后大板左右小板；
+        ///        仿真靶是圆 + 四块同尺寸。见 common/chassis_model.hpp。
+        const ChassisGeometry& chassisGeometry() const { return geometry_; }
+        /// @brief 直接写入慢层几何（会同步到 EKF 的逐板半径）。
+        void setChassisGeometry(const ChassisGeometry& geometry);
+        /// @brief 用局部拟合器慢层的输出更新几何（R / 安装倾角 α / 板心高度 h）。
+        ///        h 是"板心相对车心的高度，向上为正"。带限幅 + 一阶低通，不 reset 滤波器。
+        void updateChassisFromFit(double radius, double armor_pitch_rad, double height_up);
+        /// @brief 把世界系几何参数（板面尺寸）同步成与 PnP 同一组标定值。
+        void syncGeometryFromConfig();
 
-        /// @brief 输出模型：把**当前输出状态**（双模型权重生效后的中心/yaw/ω）按
-        ///        (底速, ω) 外推到 t+dt 的只读快照，全部在相机系。
-        ///        用途：**画重投影整车轮廓、算重投影残差**。为什么必须外推：
-        ///        估计器的状态停在"最后一次观测时刻"（曝光），而画面是"现在"；
-        ///        异步检测"曝光→到手"80~120 ms，在 3 rad/s 自旋上就是 12~28° 相位，
-        ///        画出来的整车模型会整体拖在真车后面 —— 现场"绿色框贴得住、
-        ///        模型跑飞"的最大单一来源。注意这只是**显示口径**：控制/选板那条路
-        ///        已经由选择器按 estimate.age 补偿过，不能重复补。
-        struct OutputModel
+        /// @brief 第 plate 块板的刚体姿态（**世界系**：板心 + 三轴）。
+        ArmorPose armorPose(int plate) const;
+        /// @brief 第 plate 块板的**半宽/半高**（米，相机系投影用；与 PnP 同一组标定值）。
+        double armorHalfWidth(int plate) const { return geometry_.halfWidth(plate); }
+        double armorHalfHeight() const { return geometry_.half_height; }
+
+        /// @brief 重投影模型快照：把**输出口径**状态（双模型权重生效后的中心/yaw/ω）
+        ///        按 (底速, ω) 外推 dt 秒，再整体变换到 **render_pose 那一帧的相机系**。
+        ///        这是"画重投影整车轮廓 / 算重投影残差"的**唯一**入口：
+        ///          · dt 与 render_pose 必须对应**被显示那一帧的曝光时刻**
+        ///            （异步检测的曝光→到手有几十~一百多 ms，3 rad/s 上就是 10~30°；
+        ///             用观测时刻的状态去画 = 模型整体拖在真车后面）；
+        ///          · 姿态也必须是被显示那一帧的姿态 —— 用观测时刻的姿态画，
+        ///            云台一动模型就整片歪掉（真机踩过：仿真云台不动看不出来）。
+        ///        所有板心/三轴都在 render_pose 相机系里，直接拿去做针孔投影即可。
+        struct ModelSnapshot
         {
             bool valid = false;
-            double world_yaw = 0.0;              // t+dt 的底盘 yaw（home 系）
-            double omega = 0.0;                  // rad/s（输出口径）
-            double radius = 0.0;                 // 用的回转半径（m）
-            cv::Mat center;                      // t+dt 的底盘中心（相机系）
-            std::array<cv::Mat, 4> positions{};  // t+dt 的四块板心（相机系）
+            double world_yaw = 0.0;                       // 外推后的底盘 yaw（home 系）
+            double omega = 0.0;                           // rad/s
+            ChassisGeometry geometry;                     // 用的慢层几何
+            cv::Vec3d center_camera{0.0, 0.0, 0.0};       // 车心（render 相机系）
+            std::array<ArmorPose, 4> poses{};             // 四块板（render 相机系）
         };
-        OutputModel predictOutputModel(double dt) const;
+        ModelSnapshot modelAt(double dt, const CameraPose& render_pose) const;
+        /// @brief 便捷版：用 tracker 内部存的姿态（= 最后一次观测时刻的姿态）渲染。
+        ///        只在"渲染的就是那一帧"时才对；真机请用 modelAt(dt, 当前帧姿态)。
+        ModelSnapshot modelAt(double dt) const { return modelAt(dt, camera_pose_); }
 
         void setArmorTiltDeg(double degrees)
         {
             if (std::isfinite(degrees) && std::abs(degrees) < 60.0)
+            {
                 cfg_.armor_tilt_deg = degrees;
+                geometry_.armor_pitch = degrees * CV_PI / 180.0;
+            }
         }
         double getArmorTiltDeg() const { return cfg_.armor_tilt_deg; }
         double getYaw() const;
@@ -364,27 +390,19 @@ namespace auto_aim
         double getEkfOmega() const { return ekf_.getOmega(); }
         bool hasRotationRate() const { return rotation_rate_estimator_.valid(); }
         double getArmorRadius() const { return cfg_.armor_radius; }
-        /// @brief 在线改回转半径（局部拟合器慢层的 R）。同时改滤波器几何与 tracker 自己
-        ///        的几何（init/重捕、板模型反推中心都用 cfg_.armor_radius），保证"模型"
-        ///        与"初始化/关联"用的是同一个半径 —— 配置里写死 0.25、
-        ///        实测/在线估计是 0.20~0.21 的那 4~5 cm 系统性偏差就出在这里。
+        /// @brief 在线改回转半径（局部拟合器慢层的 R）。同时改滤波器几何、tracker 自己的
+        ///        几何与底盘模型 —— 配置写死 0.25、实测/在线 0.20~0.21 的那 4~5 cm
+        ///        系统性径向偏差就出在这里。
         void setArmorRadius(double radius)
         {
             if (!(radius > 0.05 && radius < 1.0)) return;
             cfg_.armor_radius = radius;
             ekf_.setArmorRadius(radius);
+            for (auto& d : geometry_.plate_distance) d = radius;
+            ekf_.setPlateDistance(geometry_.plate_distance);
             if (std::isfinite(radius)) armor_radius_online_ = radius;
         }
         bool armorRadiusOnline() const { return armor_radius_online_ > 0.0; }
-        /// @brief 板面等效尺寸（半宽/半高，米）。**与 PnP 用同一组标定值**：
-        ///        重投影画出来的框、以及"模型 vs 检测"的像素误差都必须用这一组，
-        ///        否则量出来的残差里混着"画框尺寸不对"的成分（历史上 overlay 里
-        ///        写死过 0.0675/0.0275，和 configs 的 0.1315/0.060 不是一套）。
-        double getArmorHalfWidth(bool large_armor) const
-        {
-            return 0.5 * (large_armor ? cfg_.armor_large_width : cfg_.armor_small_width);
-        }
-        double getArmorHalfHeight() const { return 0.5 * cfg_.armor_height; }
         double getLastMeasurementWeight() const { return last_measurement_weight_; }
 
         /// @brief 收敛看门狗统计：触发次数 / 当前拒绝比例 / 是否收敛。
@@ -454,6 +472,8 @@ namespace auto_aim
         ArmorEKF ekf_;
         /// >0 表示半径已经被在线慢层改过（诊断/状态行用）。
         double armor_radius_online_ = 0.0;
+        /// 底盘慢层几何（唯一模型来源；由 config / 拟合器慢层 / 观测慢收敛更新）。
+        ChassisGeometry geometry_;
         PlateEKF plate_ekf_;                       // 双模型的装甲板模型
         double plate_model_last_timestamp_ = -1.0;
         double plate_model_weight_ = 0.0;

@@ -46,6 +46,10 @@ public:
         // armor sets normally leave these at zero; simulator models can define
         // plate-specific offsets instead of forcing one shared y coordinate.
         std::array<double, 4> armor_y_offsets{{0.0, 0.0, 0.0, 0.0}};
+        // 四块板各自到**车心**的水平距离（米）：真车底盘是矩形，前后 ≠ 左右。
+        // 0 = 该块板用 R（默认四块相等 → 圆，与仿真靶/旧行为一致）。
+        // 由 Tracker 从 ChassisGeometry 同步过来（见 common/chassis_model.hpp）。
+        std::array<double, 4> plate_distance{{0.0, 0.0, 0.0, 0.0}};
     };
 
     ArmorEKF() { initMatrices(); }
@@ -70,6 +74,16 @@ public:
         if (radius > 0.05 && radius < 1.0) cfg_.R = radius;
     }
     double armorRadius() const { return cfg_.R; }
+    /// @brief 第 plate 块板的回转半径（矩形底盘 → 逐板不同；0 表示回落到 R）。
+    double plateRadius(int plate) const {
+        if (plate < 0 || plate >= 4) return cfg_.R;
+        const double v = cfg_.plate_distance[static_cast<std::size_t>(plate)];
+        return v > 0.0 ? v : cfg_.R;
+    }
+    /// @brief 逐板回转半径（在线慢层用；不动状态/协方差）。
+    void setPlateDistance(const std::array<double, 4>& distances) {
+        cfg_.plate_distance = distances;
+    }
 
     void reset() {
         x_ = Vec<9>();
@@ -93,9 +107,9 @@ public:
         int count = 0;
         for (const auto& [plate_id, observation] : observations) {
             double angle = angleForPlate(plate_id);
-            sum_x += observation(0, 0) - cfg_.R * std::cos(angle);
+            sum_x += observation(0, 0) - plateRadius(plate_id) * std::cos(angle);
             sum_y += observation(1, 0) - cfg_.armor_y_offsets[plate_id];
-            sum_z += observation(2, 0) - cfg_.R * std::sin(angle);
+            sum_z += observation(2, 0) - plateRadius(plate_id) * std::sin(angle);
             ++count;
         }
         if (count == 0) return;
@@ -143,9 +157,9 @@ public:
 
     void init(const Vec<3>& observation, int plate_id) {
         double angle = angleForPlate(plate_id);
-        x_(0, 0) = observation(0, 0) - cfg_.R * std::cos(angle);
+        x_(0, 0) = observation(0, 0) - plateRadius(plate_id) * std::cos(angle);
         x_(2, 0) = observation(1, 0) - cfg_.armor_y_offsets[plate_id];
-        x_(7, 0) = observation(2, 0) - cfg_.R * std::sin(angle);
+        x_(7, 0) = observation(2, 0) - plateRadius(plate_id) * std::sin(angle);
         x_(4, 0) = 0.0;
         x_(5, 0) = 1.0;
         x_(6, 0) = 0.0;
@@ -263,11 +277,11 @@ public:
             const double yaw = normalizeAngle(
                 first.armor_yaw - angleForPlate(first.plate_id));
             Vec<3> center;
-            center(0, 0) = position(0, 0) - cfg_.R * std::cos(
+            center(0, 0) = position(0, 0) - plateRadius(first.plate_id) * std::cos(
                 yaw + angleForPlate(first.plate_id));
             center(1, 0) = position(1, 0) -
                 cfg_.armor_y_offsets[first.plate_id];
-            center(2, 0) = position(2, 0) - cfg_.R * std::sin(
+            center(2, 0) = position(2, 0) - plateRadius(first.plate_id) * std::sin(
                 yaw + angleForPlate(first.plate_id));
             initAt(center, yaw);
             return 1.0;
@@ -514,16 +528,18 @@ public:
         const double cos_total = cos_theta * cos_plate - sin_theta * sin_plate;
 
         Vec<3> predicted;
-        predicted(0, 0) = x_(0, 0) + cfg_.R * cos_total;
+        predicted(0, 0) = x_(0, 0) + plateRadius(plate_id) * cos_total;
         predicted(1, 0) = x_(2, 0) + cfg_.armor_y_offsets[plate_id];
-        predicted(2, 0) = x_(7, 0) + cfg_.R * sin_total;
+        predicted(2, 0) = x_(7, 0) + plateRadius(plate_id) * sin_total;
 
         Matrix<3, 9> H;
         // theta is represented by [sin(theta), cos(theta)] in the state, so
         // the position Jacobian must be taken with respect to those variables.
-        H(0, 0) = 1.0; H(0, 4) = -cfg_.R * sin_plate; H(0, 5) = cfg_.R * cos_plate;
+        H(0, 0) = 1.0; H(0, 4) = -plateRadius(plate_id) * sin_plate;
+        H(0, 5) = plateRadius(plate_id) * cos_plate;
         H(1, 2) = 1.0;
-        H(2, 7) = 1.0; H(2, 4) = cfg_.R * cos_plate;   H(2, 5) = cfg_.R * sin_plate;
+        H(2, 7) = 1.0; H(2, 4) = plateRadius(plate_id) * cos_plate;
+        H(2, 5) = plateRadius(plate_id) * sin_plate;
 
         const Vec<3> residual = observation - predicted;
         Matrix<3, 3> R;
@@ -779,9 +795,9 @@ public:
         const double cos_theta = x_(5, 0);
 
         Vec<3> position;
-        position(0, 0) = x_(0, 0) + cfg_.R * (cos_theta * cos_plate - sin_theta * sin_plate);
+        position(0, 0) = x_(0, 0) + plateRadius(plate_id) * (cos_theta * cos_plate - sin_theta * sin_plate);
         position(1, 0) = x_(2, 0) + cfg_.armor_y_offsets[plate_id];
-        position(2, 0) = x_(7, 0) + cfg_.R * (sin_theta * cos_plate + cos_theta * sin_plate);
+        position(2, 0) = x_(7, 0) + plateRadius(plate_id) * (sin_theta * cos_plate + cos_theta * sin_plate);
         return position;
     }
 
@@ -789,9 +805,9 @@ public:
     Vec<3> centerFromPlate(const Vec<3>& observation, int plate_id) const {
         const double angle = getYaw() + angleForPlate(plate_id);
         Vec<3> center;
-        center(0, 0) = observation(0, 0) - cfg_.R * std::cos(angle);
+        center(0, 0) = observation(0, 0) - plateRadius(plate_id) * std::cos(angle);
         center(1, 0) = observation(1, 0) - cfg_.armor_y_offsets[plate_id];
-        center(2, 0) = observation(2, 0) - cfg_.R * std::sin(angle);
+        center(2, 0) = observation(2, 0) - plateRadius(plate_id) * std::sin(angle);
         return center;
     }
 
@@ -834,9 +850,10 @@ private:
 
         const double sin_armor = sin_theta * cos_plate + cos_theta * sin_plate;
         const double cos_armor = cos_theta * cos_plate - sin_theta * sin_plate;
-        const double px = x_(0, 0) + cfg_.R * cos_armor;
+        const double radius = plateRadius(plate_id);
+        const double px = x_(0, 0) + radius * cos_armor;
         const double py = x_(2, 0) + cfg_.armor_y_offsets[plate_id];
-        const double pz = x_(7, 0) + cfg_.R * sin_armor;
+        const double pz = x_(7, 0) + radius * sin_armor;
 
         const double horizontal_sq = px * px + pz * pz;
         const double horizontal = std::sqrt(horizontal_sq);
@@ -846,10 +863,10 @@ private:
         // Position is a direct function of the [sin(theta), cos(theta)]
         // representation, so differentiate the rotation matrix directly.
         // Adding an atan2 chain here is incorrect.
-        const double dpx_ds = -cfg_.R * sin_plate;
-        const double dpx_dc = cfg_.R * cos_plate;
-        const double dpz_ds = cfg_.R * cos_plate;
-        const double dpz_dc = cfg_.R * sin_plate;
+        const double dpx_ds = -radius * sin_plate;
+        const double dpx_dc = radius * cos_plate;
+        const double dpz_ds = radius * cos_plate;
+        const double dpz_dc = radius * sin_plate;
 
         Matrix<4, 9> jacobian;
         if (horizontal_sq > 1e-12) {

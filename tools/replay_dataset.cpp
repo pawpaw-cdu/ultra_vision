@@ -354,16 +354,20 @@ int main(int argc, char* argv[])
             if (state_now != auto_aim::TrackerState::LOST && pipeline.tracker().hasObservation()) {
                 const int plate = pipeline.tracker().getLastObservedPlateId();
                 const auto& armor = pipeline.tracker().getLastObservedArmor();
-                const double half_w = pipeline.tracker().getArmorHalfWidth(
-                    armor.armor_type == auto_aim::large);
-                const double half_h = pipeline.tracker().getArmorHalfHeight();
-                const auto positions = pipeline.tracker().getEstimatedArmorPositions();
+                const double half_w = pipeline.tracker().armorHalfWidth(plate);
+                const double half_h = pipeline.tracker().armorHalfHeight();
                 // 模型姿态与板尺寸都从 tracker 取（单一来源，见 common/armor_geometry.hpp）：
                 // 过去这里自己拿"世界竖直 × 径向"造切向，漏掉真机 15° 安装倾角。
-                const auto_aim::ArmorAxes axes = pipeline.tracker().armorAxesCamera(plate);
-                const auto corners = auto_aim::projectArmorCameraFrame(
-                    positions[plate], axes.tangent, axes.bar, half_w, half_h, camera_matrix,
-                    dist_coeffs);
+                const auto model = pipeline.tracker().modelAt(0.0);
+                std::vector<cv::Point2f> corners;
+                if (model.valid) {
+                    const auto_aim::ArmorPose& pose = model.poses[plate];
+                    const cv::Mat center_mat = (cv::Mat_<double>(3, 1) << pose.center[0],
+                                                pose.center[1], pose.center[2]);
+                    corners = auto_aim::projectArmorCameraFrame(
+                        center_mat, pose.axes.tangent, pose.axes.bar, half_w, half_h,
+                        camera_matrix, dist_coeffs);
+                }
                 if (corners.size() == 4) {
                     // 顺便量"模型四角 vs 识别四角"的**尺寸比**：模型用的是配置里的板尺寸，
                     // 识别框是图像实测。比值明显≠1 就说明 configs/tracker.yaml 的
