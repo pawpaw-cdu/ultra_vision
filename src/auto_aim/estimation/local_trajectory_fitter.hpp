@@ -56,6 +56,12 @@ namespace auto_aim
         double R_prior_gain = 0.05;     // 弱先验回拉系数（防 R–Cz 耦合漂移）
         // 有效性
         double max_rmse_px = 5.0;
+        // **角度**门限（度）：有效性的主判据。为什么必须有它：
+        // 同一套几何误差，像素残差 ∝ f；本项目仿真相机 f≈1444，而实车 f≈2390（1.65×），
+        // 只用 max_rmse_px 会把实车上 6~13px 的好拟合全判成无效（实车 log: fit=0/3、pub=0）。
+        // 实际门限取 max(max_rmse_px, fx·tan(max_rmse_deg))，即"绝对像素"当保底，
+        // 角度门限随分辨率自动放大。
+        double max_rmse_deg = 0.4;
         // 板 yaw 偏移（armor_id → 偏移角）。默认四板 90° 均布。
         std::vector<double> plate_yaw_offsets{0.0, M_PI / 2, M_PI, 3.0 * M_PI / 2};
     };

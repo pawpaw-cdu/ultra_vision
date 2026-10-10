@@ -100,6 +100,25 @@ namespace auto_aim
         inline double projectU(const LocalFitIntrinsics& K, const double* pc) { return K.fx * pc[0] / pc[2] + K.cx; }
         inline double projectV(const LocalFitIntrinsics& K, const double* pc) { return K.fy * pc[1] / pc[2] + K.cy; }
 
+        // 有效性门限（像素）：绝对像素保底 + 随焦距放大的角度门限。
+        // 同一几何误差下像素残差 ∝ f：仿真 f≈1444、实车 f≈2390，只用像素门限会把
+        // 实车的好拟合全判无效。角度门限让它与分辨率无关。
+        inline double rmseGatePx(const LocalTrajectoryFitConfig& cfg, double /*rmse_px*/)
+        {
+            const double angle_gate = cfg.K.fx > 1.0
+                ? cfg.K.fx * std::tan(cfg.max_rmse_deg * 3.14159265358979323846 / 180.0)
+                : 0.0;
+            return std::max(cfg.max_rmse_px, angle_gate);
+        }
+
+        // 质量（0~1）：用同一个"有效尺度"归一，避免实车因像素残差天然更大而被压成 0。
+        inline double qualityFromRmse(const LocalTrajectoryFitConfig& cfg, double rmse_px)
+        {
+            const double scale = cfg.huber_delta * (rmseGatePx(cfg, rmse_px) /
+                                                    std::max(1e-3, cfg.max_rmse_px));
+            return std::exp(-rmse_px / std::max(0.1, scale));
+        }
+
         void endpointPc(const LocalTrajectoryFitConfig& cfg, double alpha, double R, double h, double theta,
                         double a, double b, const double* center, const double* drift, double dt,
                         double* pc)
@@ -228,7 +247,8 @@ namespace auto_aim
         out = LocalFitResult{};
         FastFit f;
         if (!fitFast(observations, alpha_fixed, R_fixed, f)) return false;
-        out.valid = f.valid && f.rmse_px <= config_.max_rmse_px;
+        const double rmse_gate = rmseGatePx(config_, f.rmse_px);
+        out.valid = f.valid && f.rmse_px <= rmse_gate;
         out.timestamp = observations.back().timestamp;
         out.center[0] = f.center[0]; out.center[1] = f.center[1]; out.center[2] = f.center[2];
         out.yaw = f.yawAt(observations.back().timestamp);
@@ -238,7 +258,7 @@ namespace auto_aim
         out.h = f.h;
         for (int i = 0; i < 3; ++i) out.drift[i] = f.drift[i];
         out.reprojection_rmse_px = f.rmse_px;
-        out.quality = std::exp(-f.rmse_px / std::max(0.1, config_.huber_delta));
+        out.quality = qualityFromRmse(config_, f.rmse_px);
         out.num_bars = static_cast<int>(observations.size());
         return out.valid;
     }
@@ -299,7 +319,7 @@ namespace auto_aim
         double a = slow_alpha_, r = slow_R_, info_a = 0.0, info_r = 0.0;
         refineSlow(observations, fast, a, r, info_a, info_r);
         const double Cz = fast.center[2];
-        const bool observable = std::isfinite(r) && fast.rmse_px <= config_.max_rmse_px &&
+        const bool observable = std::isfinite(r) && fast.rmse_px <= rmseGatePx(config_, fast.rmse_px) &&
                                 std::abs(Cz - 2.0 * slow_R_) > config_.R_freeze_band &&
                                 info_r > config_.R_info_min;
         if (observable)
@@ -315,7 +335,7 @@ namespace auto_aim
         // 用更新后的 (α,R) 重算快层，作为输出（外推到窗口末端时间）。
         FastFit f;
         if (!fitFast(observations, slow_alpha_, slow_R_, f)) return false;
-        out.valid = f.valid && f.rmse_px <= config_.max_rmse_px;
+        out.valid = f.valid && f.rmse_px <= rmseGatePx(config_, f.rmse_px);
         out.timestamp = observations.back().timestamp;
         out.center[0] = f.center[0]; out.center[1] = f.center[1]; out.center[2] = f.center[2];
         out.yaw = f.yawAt(observations.back().timestamp);
@@ -325,7 +345,7 @@ namespace auto_aim
         out.h = f.h;
         for (int i = 0; i < 3; ++i) out.drift[i] = f.drift[i];
         out.reprojection_rmse_px = f.rmse_px;
-        out.quality = std::exp(-f.rmse_px / std::max(0.1, config_.huber_delta));
+        out.quality = qualityFromRmse(config_, f.rmse_px);
         out.num_bars = static_cast<int>(observations.size());
         return out.valid;
     }

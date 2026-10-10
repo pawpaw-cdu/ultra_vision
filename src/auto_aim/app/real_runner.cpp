@@ -132,6 +132,7 @@ int auto_aim::app::RealRunner::run()
         auto_aim::LocalTrajectoryFitConfig fcfg;
         fcfg.K = { camera_matrix.at<double>(0, 0), camera_matrix.at<double>(1, 1),
                    camera_matrix.at<double>(0, 2), camera_matrix.at<double>(1, 2) };
+        fcfg.max_rmse_deg = env_d("ULTRA_VISION_LOCAL_FIT_MAX_RMSE_DEG", 0.4);
         fcfg.lightbar_len = env_d("ULTRA_VISION_LOCAL_FIT_L", 0.060);   // 灯条/板高（m）
         fcfg.plate_width = env_d("ULTRA_VISION_LOCAL_FIT_W", 0.135);    // 灯条中心间距（m）
         fcfg.gimbal_pitch = 0.0;     // 每帧按实际云台俯仰更新（见主循环）
@@ -148,7 +149,11 @@ int auto_aim::app::RealRunner::run()
         local_fitter_->seedSlow(alpha0, fcfg.R_prior);
         std::cout << "[local_fit] enabled (real): alpha="
                   << env_d("ULTRA_VISION_LOCAL_FIT_ALPHA_DEG", 15.0) << "deg pitch_sign="
-                  << local_fit_pitch_sign_ << " R_fixed=" << local_fit_r_fixed_ << std::endl;
+                  << local_fit_pitch_sign_ << " R_fixed=" << local_fit_r_fixed_
+                  // 有效性门限：max(像素保底, fx·tan(角度门限))。实车 f≈2390，
+                  // 角度门限 0.4° ≈ 16.7px —— 仿真(1444)那套 5px 会把实车好拟合全拒掉。
+                  << " max_rmse_deg=" << env_d("ULTRA_VISION_LOCAL_FIT_MAX_RMSE_DEG", 0.4)
+                  << std::endl;
     }
 #endif
     const auto_aim::PnpGeometry pnp_geometry =
