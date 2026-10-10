@@ -165,15 +165,17 @@ int auto_aim::app::RealRunner::run()
     // C 板回传 yaw 的符号（configs/serial.yaml 的 yaw_sign）。2026-09-28 实测这台车的
     // 编码器 yaw 正方向与本项目约定（正 yaw = 右转）相反，配置里填了 -1；手眼标定工具
     // 读的是同一个键，两边必须一致，否则瞄准会在 yaw 上镜像。
-    // 相机 pitch 的符号（**实车标定项**，默认 +1）。
-    // world↔camera 的约定 cameraToBaseRotation() 是按**仿真器（Bevy）**的
-    // R_home_camera = R_y(-yaw)·R_x(pitch) 推出来的；真机下位机的 pitch 正方向
-    // 不一定同相。符号错了**不影响被观测那块板**（硬钉 + 同一姿态反变换自洽），
-    // 但其余三块板会随深度整体错位（越远错得越多）—— 画面上就是"前后关系反了"。
-    // 判定方法看状态行的 model_fit（模型对**所有**检测的解释度），见下面的用法注释。
-    const double pitch_sign = [] {
+    // 相机 pitch 的符号（**实车标定项**）。world↔camera 的约定 cameraToBaseRotation()
+    // 是按**仿真器（Bevy）**的 R_home_camera = R_y(-yaw)·R_x(pitch) 推的；真机下位机的
+    // pitch 与它**反相**（2026-10-10 实车 A/B：pitch_sign=-1 时重投影模型才和底盘对上，
+    // 被钉住那块两种符号都贴得住，只有另外三块能暴露）。默认读 configs/serial.yaml 的
+    // serial.pitch_sign，现场可用 ULTRA_VISION_PITCH_SIGN=±1 覆盖，判定看 model_fit。
+    const double pitch_sign = [&serial_file] {
         const char* v = std::getenv("ULTRA_VISION_PITCH_SIGN");
-        return (v != nullptr && std::atof(v) < 0.0) ? -1.0 : 1.0;
+        if (v != nullptr) return std::atof(v) < 0.0 ? -1.0 : 1.0;
+        const double configured = serial_file["serial"]
+            ? serial_file["serial"]["pitch_sign"].as<double>(1.0) : 1.0;
+        return configured < 0.0 ? -1.0 : 1.0;
     }();
     const double yaw_sign =
         (serial_file["serial"] ? serial_file["serial"]["yaw_sign"].as<double>(1.0) : 1.0) < 0.0
@@ -294,7 +296,10 @@ int auto_aim::app::RealRunner::run()
     io::Gimbal gimbal(serial_cfg);
     std::cout << "[io] 下位机链路: device=" << serial_cfg.device
               << " connected=" << (gimbal.connected() ? "yes" : "no")
-              << " imu_world_frame=" << (use_imu_world_frame ? "on" : "off") << std::endl;
+              << " imu_world_frame=" << (use_imu_world_frame ? "on" : "off")
+              // 相机 pitch 符号（world↔camera 约定）。画模型"前后反了"就查这一项：
+              // 实车 -1（与仿真器约定反相），仿真入口不用这个值（它自己就是 +1）。
+              << " pitch_sign=" << pitch_sign << std::endl;
 
     // ---- 下发坐标系转换（唯一一处；瞄准 / 心跳 / 速度前馈都从这里出去）----
     // 2026-09-29 实测量定：下位机 yaw/pitch 闭环比较的是 **IMU 世界系角**，不是回传的

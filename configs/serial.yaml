@@ -22,6 +22,17 @@ serial:
   # 这台车的编码器 yaw 正方向与本项目约定（正 yaw = 右转）**相反**，幅度 1:1，所以填 -1。
   # 工具和 tracker 共用这一项；哪天固件把符号改对了，这里改回 +1 即可。
   yaw_sign: -1.0
+  # 相机 / 几何 pitch 的符号（world↔camera 约定）。**与下面的 command_pitch_sign 是两码事**：
+  #   · command_*_sign 决定"我们发什么、云台怎么动"（探针实测，见下）；
+  #   · pitch_sign 决定"云台 pitch 读数 ↔ 相机在世界系里的朝向"。本项目 world↔camera 的
+  #     约定 cameraToBaseRotation() 是按**仿真器（Bevy）**的 R_home_camera = R_y(-yaw)·R_x(pitch)
+  #     推出来的，仿真灌的就是那套（等价 +1）；**真机下位机的 pitch 与它反相**。
+  #   2026-10-10 实车 A/B（云台不动、只观察）：
+  #     pitch_sign=+1 → 重投影模型"越远的板画得越靠下"，底盘前后关系反了，model_fit 几十 px；
+  #     pitch_sign=-1 → 模型四块板与底盘对得上，model_fit 掉到 ~10 px 量级。
+  #   注：被 hard_plate_constraint 钉住的那块板两种符号下都贴得住（自洽），只有另外三块能暴露。
+  #   现场复测：ULTRA_VISION_PITCH_SIGN=±1 覆盖本值，比 model_fit 取小者。
+  pitch_sign: -1.0
 
   # ---- 下发命令的坐标系（2026-09-29 **按这台车的电控源码定案**）-------------
   # 依据：wheel_leg_2/gimbal/application/{visual_task.c,gimbal_task.c}
