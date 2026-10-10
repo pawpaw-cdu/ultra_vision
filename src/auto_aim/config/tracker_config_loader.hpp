@@ -71,6 +71,8 @@ namespace auto_aim
                 lf["yaw_rate_sign"].as<double>(cfg.local_fit.yaw_rate_sign);
             cfg.local_fit.also_update_center =
                 lf["also_update_center"].as<bool>(cfg.local_fit.also_update_center);
+            cfg.local_fit.center_noise =
+                lf["center_noise"].as<double>(cfg.local_fit.center_noise);
         }
 
         if (const YAML::Node rotation = tracker["rotation_rate"]) {

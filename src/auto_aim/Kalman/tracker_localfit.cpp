@@ -11,6 +11,7 @@
 #include <opencv2/calib3d.hpp>
 
 #include "Kalman/tracker.hpp"
+#include "Kalman/tracker_utils.hpp"
 
 namespace auto_aim
 {
@@ -283,7 +284,31 @@ namespace auto_aim
         if (!cfg_.local_fit.use_yaw || std::getenv("ULTRA_VISION_LOCAL_FIT_NO_YAW") != nullptr)
             conv.yaw = ekf_yaw;
 
-        return ekf_.updateWithLocalFit(conv, cfg_.local_fit.yaw_noise, cfg_.local_fit.omega_noise,
-                                       std::numeric_limits<double>::infinity());
+        const double fit_weight = ekf_.updateWithLocalFit(
+            conv, cfg_.local_fit.yaw_noise, cfg_.local_fit.omega_noise,
+            std::numeric_limits<double>::infinity());
+
+        // 可选：把拟合出的**旋转中心**也当观测（also_update_center，默认关）。
+        // 单板工况下模型中心只能靠"钉在观测板上"得到，擦边/正面观测的 PnP 位置误差
+        // （实测 ±0.15 m）会 1:1 进模型中心 —— 自旋时整台车的重投影框被单块板拖着跑，
+        // 就是现场看到的"绿色框对得上、模型跑飞"。拟合中心是整段弧的最小二乘解，
+        // 抖动小一个量级，正好补这一路（拟合器输出的是**相机系**中心）。
+        double center_weight = 0.0;
+        if (cfg_.local_fit.also_update_center)
+        {
+            Vec<3> camera_point;
+            camera_point(0, 0) = fit->center[0];
+            camera_point(1, 0) = fit->center[1];
+            camera_point(2, 0) = fit->center[2];
+            // 云台姿态已知 → 转到 home 系；未知（仿真里 tracker 不喂姿态）时
+            // EKF 本来就工作在相机系（toWorld 原样返回），直接用即可。
+            const Vec<3> observation = camera_pose_.valid
+                ? tracker_detail::pointToWorld(camera_pose_, camera_point)
+                : camera_point;
+            center_weight = ekf_.updateCenter(observation, cfg_.local_fit.center_noise,
+                                              cfg_.y_noise_mult,
+                                              std::numeric_limits<double>::infinity());
+        }
+        return std::max(fit_weight, center_weight);
     }
 }  // namespace auto_aim

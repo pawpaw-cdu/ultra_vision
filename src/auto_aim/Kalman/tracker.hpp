@@ -79,7 +79,12 @@ namespace auto_aim
         // 相机系→整车系符号（标定项）：拟合器的 θ 约定（相机 X-Z 平面，从 +Z 向 +X 量）
         // 与 EKF 的 ω/yaw 约定相反 → 仿真实测 -1（gyro5 A/B：+1 会让 EKF ω 更差，-1 明显更稳）。
         double yaw_rate_sign = -1.0;
-        bool also_update_center = false; // 是否把拟合中心也当观测（默认否，先只给 yaw/ω）
+        // 是否把拟合出的**旋转中心**也当观测喂 EKF（m²，位置方差）。
+        // 为什么需要它：单板工况下模型中心只能"钉在观测板上"，正面/擦边观测的 PnP
+        // 位置误差（实测 ±0.15 m）会 1:1 进模型中心，自旋时整台车的重投影框就被拖着跑；
+        // 拟合中心是**整段弧**的最小二乘解，抖动小一个量级，正好补这一路。
+        bool also_update_center = false;
+        double center_noise = 0.01;
     };
 
     struct TrackerConfig {
