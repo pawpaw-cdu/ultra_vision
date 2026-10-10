@@ -706,6 +706,12 @@ int auto_aim::app::RealRunner::run()
     double model_fit_sum = 0.0;
     double model_fit_max = 0.0;
     int model_fit_n = 0;
+    // "最差那个检测"的细节（每条秒更新一次）：像素误差 + 三维误差(m) + 类型/PnP 距离/宽度/板号
+    double worst_det_dist = -1.0;
+    double worst_det_err3d = -1.0;
+    double worst_det_pxw = -1.0;
+    int worst_det_large = -1;
+    int worst_det_plate = -1;
     auto report_time = std::chrono::steady_clock::now();
     // ------------------- 3.5 实时曲线（和仿真 node_sim 同一套组件）----------
     // 硬件上一直缺的正是这个：图像框只能说明"这一帧对上了"，而"命令 vs 回传、
@@ -1681,15 +1687,35 @@ int auto_aim::app::RealRunner::run()
                         0.25f * (armor.left.top + armor.left.bottom + armor.right.top +
                                  armor.right.bottom);
                     double best = 1e18;
+                    int best_plate = -1;
                     for (int plate = 0; plate < 4; ++plate) {
                         if (!model_px_ok[plate]) continue;
-                        best = std::min(best, static_cast<double>(cv::norm(model_px[plate] -
-                                                                          detected_center)));
+                        const double d = cv::norm(model_px[plate] - detected_center);
+                        if (d < best) { best = d; best_plate = plate; }
                     }
                     if (best < 1e17) {
                         model_fit_sum += best;
-                        model_fit_max = std::max(model_fit_max, best);
                         ++model_fit_n;
+                        // 记录"最差那个检测"的细节：像素误差 + **三维**误差（米）+
+                        // 类型/PnP 距离/视视角。用来区分"模型位置错"还是"检测距离错"。
+                        if (best > model_fit_max) {
+                            model_fit_max = best;
+                            const double dx = armor.tvec.at<double>(0);
+                            const double dy = armor.tvec.at<double>(1);
+                            const double dz = armor.tvec.at<double>(2);
+                            const double dist3d = std::sqrt(dx * dx + dy * dy + dz * dz);
+                            double err3d = -1.0;
+                            if (best_plate >= 0 && model_at_obs.poses[best_plate].center[2] > 0.3) {
+                                const cv::Vec3d a(dx, dy, dz);
+                                const cv::Vec3d b(model_at_obs.poses[best_plate].center);
+                                err3d = cv::norm(a - b);
+                            }
+                            worst_det_dist = dist3d;
+                            worst_det_err3d = err3d;
+                            worst_det_large = (armor.armor_type == auto_aim::large) ? 1 : 0;
+                            worst_det_pxw = cv::norm(armor.left.center - armor.right.center);
+                            worst_det_plate = best_plate;
+                        }
                     }
                 }
             }
@@ -1859,6 +1885,11 @@ int auto_aim::app::RealRunner::run()
                       << ", model_fit="
                       << (model_fit_n > 0 ? model_fit_sum / model_fit_n : -1.0) << "/"
                       << (model_fit_n > 0 ? model_fit_max : -1.0) << "px(n=" << model_fit_n << ")"
+                      // 最差那个检测：3D=到最近模型板的三维误差(m) type=大/小 d=PnP距离
+                      // pxw=检测框宽度 px plate=最近模型板号
+                      << " worst(3D=" << worst_det_err3d << "m d=" << worst_det_dist
+                      << "w=" << worst_det_pxw << " type=" << worst_det_large
+                      << " plate=" << worst_det_plate << ")"
                       // 几何慢收敛的结果（现场就看这四个数会不会收敛成"前后一个值、
                       // 左右另一个值"）；np_flip/motion 是另外两个机制的诊断。
                       << ", Rgeo="
@@ -1942,6 +1973,11 @@ int auto_aim::app::RealRunner::run()
             model_fit_sum = 0.0;
             model_fit_max = 0.0;
             model_fit_n = 0;
+            worst_det_dist = -1.0;
+            worst_det_err3d = -1.0;
+            worst_det_pxw = -1.0;
+            worst_det_large = -1;
+            worst_det_plate = -1;
         }
     }
 
