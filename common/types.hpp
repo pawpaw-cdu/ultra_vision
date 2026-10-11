@@ -76,7 +76,10 @@ namespace auto_aim
     {
         Light left, right;
         double center;
-        int number;
+        // 板面数字（检测网络 RP24 head 的 num_id：0=sentry…8=Bb；传统灯条流程给 -1）。
+        // **必须初始化**：默认构造不赋值时它是 indeterminate，sp_vision 式的
+        // "按数字做身份"一旦基于垃圾值就会静默错。
+        int number = -1;
         bool solve_result;
         ArmorType armor_type;
         std::vector<cv::Point2f> Points_2D;

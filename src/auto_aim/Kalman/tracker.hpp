@@ -324,7 +324,17 @@ namespace auto_aim
         double joint_solve_max_residual = 0.06;   // 联立残差 > 6cm 视为不可信，不喂
         double joint_solve_yaw_noise = 0.0004;    // (rad²) ≈ 1.1°
         double joint_solve_center_noise = 0.0004; // (m²) ≈ 2cm
-        double graze_gate_deg = 50.0;      // 0 = 关闭
+        // sp_vision_25 风格的**自适应测量噪声**（见 tracker.cpp 的注释）：
+        //   distance_noise = distance_noise_scale · (log(|视角|)+1)   —— 侧视时距离不可信
+        //   armor_yaw_noise = log(|距离|+1)/200 + armor_angle_noise_base
+        // 他们的 distance_noise_scale=1.0（σ≈1m，基本不信 PnP 深度）、
+        // armor_angle_noise_base=0.09（σ≈17°，远距径向角很糙）。我们原来分别等价于
+        // 0.01·(1+0.3d²)（4m 处 σ=0.24m）与 0.04 —— 也就是说我们一直在
+        // **过度信任 PnP 的深度**（实测深度噪声 ±12cm）。
+        double distance_noise_scale = 1.0;
+        double armor_angle_noise_base = 0.09;
+        // 极端擦边（视角超此角度）仍直接丢弃；<=0 关闭（正常由上面的自适应噪声降权）。
+        double graze_gate_deg = 75.0;
         double graze_noise_scale = 100.0;  // 距离噪声放大倍数
         double nearest_plate_margin_m = 0.05;   // 明显违反才翻（防抖）
         double position_nis_threshold = 7.815;

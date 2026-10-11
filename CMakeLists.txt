@@ -270,6 +270,27 @@ if(ULTRA_VISION_USE_OPENVINO)
   target_compile_definitions(replay_dataset PRIVATE ULTRA_VISION_USE_OPENVINO=1)
 endif()
 
+# 实车**检测流**离线回放（不改检测器，直接吃 observation.csv 的四角像素）：
+# 用来在没有实车的时候对 Tracker/滤波参数做 A/B（仿真角点太干净，很多实车
+# 问题在仿真里反着来）。见 tools/replay_obs_csv.cpp 的注释。
+add_executable(replay_obs_csv
+    tools/replay_obs_csv.cpp
+    src/auto_aim/perception/pnp_solver.cpp
+    src/auto_aim/Kalman/tracker.cpp
+    src/auto_aim/Kalman/tracker_association.cpp
+    src/auto_aim/Kalman/tracker_watchdog.cpp
+    src/auto_aim/Kalman/tracker_lifecycle.cpp
+    src/auto_aim/Kalman/tracker_accessors.cpp
+    src/auto_aim/Kalman/tracker_scale.cpp
+    src/auto_aim/Kalman/tracker_localfit.cpp
+    src/auto_aim/estimation/rotation_rate_estimator.cpp
+)
+target_include_directories(replay_obs_csv PRIVATE
+    ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src/auto_aim ${CMAKE_SOURCE_DIR}/common
+    ${OpenCV_INCLUDE_DIRS} ${YAML_CPP_INCLUDE_DIRS})
+target_link_libraries(replay_obs_csv PRIVATE
+    ${OpenCV_LIBS} ${YAML_CPP_LDFLAGS} Threads::Threads)
+
 add_executable(calibrate_camera tools/calibrate_camera.cpp)
 target_include_directories(calibrate_camera PRIVATE
     ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/io

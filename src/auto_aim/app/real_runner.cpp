@@ -633,7 +633,13 @@ int auto_aim::app::RealRunner::run()
     auto observation_recorder = std::make_unique<auto_aim::app::CsvSink>(
         "ULTRA_VISION_OBSERVATION_CSV",
         "x,y,z,rx,ry,rz,tracker_x,tracker_y,tracker_z,cmd_yaw,cmd_pitch,time_us,plate_id,state,"
-        "u0,v0,u1,v1,u2,v2,u3,v3,source_time_us\n");
+        "u0,v0,u1,v1,u2,v2,u3,v3,source_time_us,"
+        // armor_number = 检测网络给的**板面数字**（RP24 head 的 num_id，0=sentry…8=Bb）。
+        // 现场事实：同一台车的四块板印的是同一个数字。sp_vision_25 就是拿它做目标身份
+        // （Target::update 里按 armor.name 过滤），用它可以把"选哪块板/选谁的板"从
+        // 纯几何问题变成身份问题。这一列先只**记录**，不改任何行为 —— 有了实车数据
+        // 才能在 tools/replay_obs_csv 上做 A/B（见该工具与 configs/tracker.yaml 注释）。
+        "armor_number\n");
     // 底盘模型逐帧导出（ULTRA_VISION_MODEL_CSV=/tmp/model.csv 时才落盘）：
     // 模型中心/四块板心（相机系）+ 车心(yaw/ω 世界系) + 观测板 PnP + 几何 + 指标。
     // 用途：把"模型到底在哪、怎么动"整段拿出来看，而不是靠一行行 log 猜。
@@ -1024,7 +1030,7 @@ int auto_aim::app::RealRunner::run()
             } else {
                 for (int i = 0; i < 8; ++i) s << ",nan";
             }
-            s << ',' << source_result.timestamp_us << '\n';
+            s << ',' << source_result.timestamp_us << ',' << observed.number << '\n';
         }
         last_decision = outcome.decision;
         aim_ready = outcome.aim_ready;

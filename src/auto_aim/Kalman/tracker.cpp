@@ -317,17 +317,29 @@ namespace auto_aim
             // （bearing/距离），yaw 由 ω 外推 + 拟合器慢层提供。
             YpdObservation accepted = *observation;
             bool yaw_trusted = true;
-            // A3 擦边门控：视视角超门限 → 只信 bearing（radial/距离噪声放大）。
-            if (cfg_.graze_gate_deg > 0.0 && camera_fx_ > 1.0 && !armor.tvec.empty()) {
+            // ---- 测量噪声自适应（照 sp_vision_25 的 Target::update_ypda）----------
+            // 他们的 R_dig = {4e-3, 4e-3,
+            //                 log(|视角|+1)+1,           ← 距离噪声随**视角**增大
+            //                 log(|距离|+1)/200 + 9e-2}  ← 径向角噪声随**距离**增大
+            // 两个要点：
+            //   ① 距离噪声 ≈1 m²（σ≈1m）—— 他们**几乎不信任 PnP 的深度**；我们原来用
+            //      0.01·(1+0.3d²)（4m 处 σ=0.24m），比他们紧 4 倍，而实测我们 PnP 深度
+            //      噪声正是 ±12cm（p10/p90）→ 一直在过度信任最差的那个量。
+            //   ② 用 **log 平滑加权**代替硬门控：擦边板（视角大）的距离自动降权，不丢数据。
+            if (cfg_.distance_noise_scale > 0.0 && camera_fx_ > 1.0 && !armor.tvec.empty()) {
                 const double depth = std::max(0.3, std::abs(armor.tvec.at<double>(2)));
                 const double width = (armor.armor_type == auto_aim::large)
                     ? cfg_.armor_large_width : cfg_.armor_small_width;
                 const double expected = std::max(1.0, width * camera_fx_ / depth);
                 const double sep = std::abs(armor.right.center.x - armor.left.center.x);
-                const double cos_view = std::clamp(sep / expected, 0.0, 1.0);
-                const double view_deg = std::acos(cos_view) * 180.0 / M_PI;
-                last_view_deg_ = view_deg;
-                if (view_deg > cfg_.graze_gate_deg) {
+                const double view_rad = std::acos(std::clamp(sep / expected, 0.0, 1.0));
+                accepted.distance_noise =
+                    cfg_.distance_noise_scale * (std::log(std::abs(view_rad) + 1.0) + 1.0);
+                accepted.armor_yaw_noise =
+                    std::log(accepted.distance + 1.0) / 200.0 + cfg_.armor_angle_noise_base;
+                last_view_deg_ = view_rad * 180.0 / M_PI;
+                // 极端擦边（>graze_gate_deg，默认 75°）仍直接丢弃：那时连 bearing 都不可靠
+                if (cfg_.graze_gate_deg > 0.0 && last_view_deg_ > cfg_.graze_gate_deg) {
                     accepted.distance_noise *= cfg_.graze_noise_scale;
                     accepted.armor_yaw_noise = 1e3;
                     yaw_trusted = false;

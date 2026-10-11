@@ -210,6 +210,10 @@ namespace auto_aim
             cfg.reanchor_yaw_on_plate_switch =
                 kalman["reanchor_yaw_on_plate_switch"].as<bool>(
                     cfg.reanchor_yaw_on_plate_switch);
+            cfg.distance_noise_scale =
+                kalman["distance_noise_scale"].as<double>(cfg.distance_noise_scale);
+            cfg.armor_angle_noise_base =
+                kalman["armor_angle_noise_base"].as<double>(cfg.armor_angle_noise_base);
             cfg.graze_gate_deg = kalman["graze_gate_deg"].as<double>(cfg.graze_gate_deg);
             cfg.graze_noise_scale =
                 kalman["graze_noise_scale"].as<double>(cfg.graze_noise_scale);
