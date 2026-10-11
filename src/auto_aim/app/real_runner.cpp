@@ -651,6 +651,17 @@ int auto_aim::app::RealRunner::run()
         "p0x,p0y,p0z,p1x,p1y,p1z,p2x,p2y,p2z,p3x,p3y,p3z,"
         "obs_x,obs_y,obs_z,R0,R1,R2,R3,H0,H1,H2,H3,alpha\n");
 
+    // **全部检测**逐帧落盘（ULTRA_VISION_DETECTIONS_CSV=/tmp/det.csv）：一行 = 一个检测。
+    // 为什么必须有它：真机是把本帧**所有**检测喂给 tracker 的，而 observation.csv 只记
+    // "最后被接受的那一块" —— 拿它离线回放时，模型对**另外几块板**的解释误差（也就是
+    // "底盘构造对不对"）根本量不出来（实车实测：静止单板 model_fit 0.9px，而同帧双板
+    // 27~50px）。有了这一份，tools/replay_obs_csv 才能复现真机口径并做 A/B。
+    // 角点顺序与 Points_2D 一致：u0,v0=左下 u1,v1=左上 u2,v2=右上 u3,v3=右下。
+    auto detection_recorder = std::make_unique<auto_aim::app::CsvSink>(
+        "ULTRA_VISION_DETECTIONS_CSV",
+        "time_us,cmd_yaw,cmd_pitch,idx,n_det,armor_number,armor_type,"
+        "u0,v0,u1,v1,u2,v2,u3,v3\n");
+
     cv::Mat frame;
     cv::Mat image;
 
@@ -1009,6 +1020,35 @@ int auto_aim::app::RealRunner::run()
 #ifdef ULTRA_VISION_HAVE_LOCAL_FIT
         if (local_fitter_) tracker.applyLatestLocalFit();
 #endif
+        // 全部检测落盘（见 detection_recorder 的注释）。
+        if (*detection_recorder && !frame_input.armors.empty()) {
+            auto& d = detection_recorder->stream();
+            const int n = static_cast<int>(frame_input.armors.size());
+            for (int i = 0; i < n; ++i) {
+                const auto& a = frame_input.armors[static_cast<std::size_t>(i)];
+                d << source_result.timestamp_us << ',' << std::fixed << std::setprecision(6)
+                  << gimbal_state.yaw << ',' << gimbal_state.pitch << ',' << i << ',' << n << ','
+                  << a.number << ','
+                  << (a.armor_type == auto_aim::large ? "large" : "small");
+                if (a.Points_2D.size() >= 4) {
+                    for (int k = 0; k < 4; ++k)
+                        d << std::fixed << std::setprecision(3) << ','
+                          << a.Points_2D[static_cast<std::size_t>(k)].x << ','
+                          << a.Points_2D[static_cast<std::size_t>(k)].y;
+                } else {
+                    for (int k = 0; k < 8; ++k) d << ",nan";
+                }
+                d << '\n';
+            }
+        } else if (*detection_recorder) {
+            // 本帧**没有检测**也要记一行（n_det=0）：离线回放靠它才知道"这一帧该滑行"。
+            // 实车实测 25% 的帧没有检测，而画面最难看的那几帧恰好都是这种滑行帧。
+            detection_recorder->stream() << source_result.timestamp_us << ',' << std::fixed
+                                         << std::setprecision(6) << gimbal_state.yaw << ','
+                                         << gimbal_state.pitch << ",-1,0,-1,-1";
+            for (int k = 0; k < 8; ++k) detection_recorder->stream() << ",nan";
+            detection_recorder->stream() << '\n';
+        }
         // 观测记录（可选）：真机也落 observation.csv，离线即可对账重投影残差。
         if (*observation_recorder && tracker.hasObservation() &&
             !tracker.getLastObservedArmor().tvec.empty()) {

@@ -138,6 +138,7 @@ int main(int argc, char* argv[])
     std::string config_dir = "configs";
     std::string out_path;
     std::string armor_type = "small";
+    std::string detections_path;
     int max_rows = 0;
     bool local_fit_enabled = false;
     int local_fit_period = 8;   // 每 N 帧跑一次拟合（真机 worker 是 30ms 周期，量级相当）
@@ -150,6 +151,7 @@ int main(int argc, char* argv[])
         else if (arg == "--out" && i + 1 < argc) out_path = argv[++i];
         else if (arg == "--max-rows" && i + 1 < argc) max_rows = std::atoi(argv[++i]);
         else if (arg == "--type" && i + 1 < argc) armor_type = argv[++i];
+        else if (arg == "--detections" && i + 1 < argc) detections_path = argv[++i];
         else if (arg == "--local-fit") local_fit_enabled = true;
         else if (arg == "--local-fit-period" && i + 1 < argc)
             local_fit_period = std::max(1, std::atoi(argv[++i]));
@@ -161,11 +163,13 @@ int main(int argc, char* argv[])
         }
         else csv_path = arg;
     }
-    if (csv_path.empty())
+    if (csv_path.empty() && detections_path.empty())
     {
         std::cerr << "用法：replay_obs_csv <obs.csv> [--config-dir configs] [--out dump.csv]\n"
                      "                     [--max-rows N] [--type small|large]\n"
                      "                     [--local-fit]   # 接上局部拟合器（同步跑，不用 worker）\n"
+                     "                     [--detections d.csv]  # 用\"全部检测\"流当输入\n"
+                     "                                           # （ULTRA_VISION_DETECTIONS_CSV）\n"
                      "                     [--set tracker.kalman.<key>=<value>]...\n";
         return 2;
     }
@@ -207,15 +211,92 @@ int main(int argc, char* argv[])
               << "  fx=" << camera_matrix.at<double>(0, 0) << "  yaw_sign=" << yaw_sign
               << "  pitch_sign=" << pitch_sign << "  type=" << armor_type << std::endl;
 
+    // ---- 可选：吃「全部检测」流（ULTRA_VISION_DETECTIONS_CSV）--------------------
+    // 真机是把本帧**所有**检测喂给 tracker 的；只录一块板的 observation.csv 回放时会被迫
+    // 退化成"每帧一块板"，于是"模型对**另外几块板**的解释误差"（也就是底盘构造对不对）
+    // 根本量不出来 —— 实车实测：静止单板 model_fit 中位 0.9px，而同帧双板是 27px。
+    // 给了 --detections 就以它为主输入（它自带云台角 + 全部检测 + 无检测帧）。
+    struct DetFrame
+    {
+        double raw_yaw = 0.0;
+        double raw_pitch = 0.0;
+        std::vector<std::array<cv::Point2f, 4>> corners;
+        std::vector<int> numbers;
+    };
+    std::map<long long, DetFrame> det_frames;
+    if (!detections_path.empty())
+    {
+        std::ifstream din(detections_path);
+        if (!din)
+        {
+            std::cerr << "[replay] 打不开 " << detections_path << std::endl;
+            return 1;
+        }
+        std::string dh;
+        std::getline(din, dh);
+        const std::vector<std::string> dhead = splitCsv(dh);
+        std::map<std::string, int> dcol;
+        for (std::size_t i = 0; i < dhead.size(); ++i)
+            dcol[trim(dhead[i])] = static_cast<int>(i);
+        const auto dOf = [&](const std::string& n) {
+            const auto it = dcol.find(n);
+            return it == dcol.end() ? -1 : it->second;
+        };
+        const int i_t = dOf("time_us");
+        const int i_y = dOf("cmd_yaw");
+        const int i_p = dOf("cmd_pitch");
+        const int i_num = dOf("armor_number");
+        std::string dl;
+        while (std::getline(din, dl))
+        {
+            if (dl.empty()) continue;
+            const std::vector<std::string> r = splitCsv(dl);
+            double tu = 0.0;
+            double y = 0.0;
+            double p = 0.0;
+            if (!parseCell(r, i_t, tu)) continue;
+            parseCell(r, i_y, y);
+            parseCell(r, i_p, p);
+            DetFrame& fr = det_frames[static_cast<long long>(std::llround(tu))];
+            fr.raw_yaw = y;
+            fr.raw_pitch = p;
+            std::array<cv::Point2f, 4> c{};
+            bool ok = true;
+            for (int k = 0; k < 4; ++k)
+            {
+                double u = 0.0;
+                double v = 0.0;
+                if (!parseCell(r, dOf("u" + std::to_string(k)), u) ||
+                    !parseCell(r, dOf("v" + std::to_string(k)), v))
+                {
+                    ok = false;
+                    break;
+                }
+                c[static_cast<std::size_t>(k)] =
+                    cv::Point2f(static_cast<float>(u), static_cast<float>(v));
+            }
+            if (ok)
+            {
+                double num = -1.0;
+                parseCell(r, i_num, num);
+                fr.corners.push_back(c);
+                fr.numbers.push_back(static_cast<int>(num));
+            }
+        }
+        std::cout << "[replay] detections=" << detections_path
+                  << "  帧数=" << det_frames.size() << std::endl;
+    }
+    const bool use_det_stream = !det_frames.empty();
+
     std::ifstream in(csv_path);
-    if (!in)
+    if (!use_det_stream && !in)
     {
         std::cerr << "[replay] 打不开 " << csv_path << std::endl;
         return 1;
     }
 
     std::string header_line;
-    if (!std::getline(in, header_line))
+    if (!use_det_stream && !std::getline(in, header_line))
     {
         std::cerr << "[replay] 空文件" << std::endl;
         return 1;
@@ -237,7 +318,7 @@ int main(int argc, char* argv[])
         cu[static_cast<std::size_t>(k)] = colOf("u" + std::to_string(k));
         cv_col[static_cast<std::size_t>(k)] = colOf("v" + std::to_string(k));
     }
-    if (colOf(time_name) < 0 || cu[0] < 0 || cv_col[0] < 0)
+    if (!use_det_stream && (colOf(time_name) < 0 || cu[0] < 0 || cv_col[0] < 0))
     {
         std::cerr << "[replay] 表头必须含 time_us 与 u0..v3（见 observation.csv）" << std::endl;
         return 1;
@@ -309,17 +390,65 @@ int main(int argc, char* argv[])
     std::vector<double> cz_values;
     std::vector<double> omega_values;
     std::vector<double> fit_values;
+    std::vector<double> det_fit_values;   // 每块检测到"最近模型板心"的像素距离
     int local_fit_counter = 0;
     std::array<int, 6> yaw_res_hist{{0, 0, 0, 0, 0, 0}};   // |残差| 分档：<15/45/75/105/135/180°
 
-    while (std::getline(in, line))
+    std::map<long long, DetFrame>::const_iterator dit = det_frames.begin();
+    while (true)
     {
-        if (line.empty()) continue;
         if (max_rows > 0 && rows >= max_rows) break;
-        const std::vector<std::string> row = splitCsv(line);
-
+        std::vector<std::array<cv::Point2f, 4>> frame_dets;
+        std::vector<int> frame_numbers;
         double time_us = 0.0;
-        if (!parseCell(row, colOf(time_name), time_us)) continue;
+        double raw_yaw = 0.0;
+        double raw_pitch = 0.0;
+        bool has_yaw = false;
+        bool has_pitch = false;
+        if (use_det_stream)
+        {
+            if (dit == det_frames.end()) break;
+            time_us = static_cast<double>(dit->first);
+            raw_yaw = dit->second.raw_yaw;
+            raw_pitch = dit->second.raw_pitch;
+            has_yaw = has_pitch = true;
+            frame_dets = dit->second.corners;
+            frame_numbers = dit->second.numbers;
+            ++dit;
+        }
+        else
+        {
+            if (!std::getline(in, line)) break;
+            if (line.empty()) continue;
+            const std::vector<std::string> row = splitCsv(line);
+            if (!parseCell(row, colOf(time_name), time_us)) continue;
+            has_yaw = parseCell(row, colOf(yaw_name), raw_yaw);
+            has_pitch = parseCell(row, colOf(pitch_name), raw_pitch);
+            std::array<cv::Point2f, 4> c{};
+            bool ok = true;
+            for (int k = 0; k < 4; ++k)
+            {
+                double u = 0.0;
+                double v = 0.0;
+                if (!parseCell(row, cu[static_cast<std::size_t>(k)], u) ||
+                    !parseCell(row, cv_col[static_cast<std::size_t>(k)], v))
+                {
+                    ok = false;
+                    break;
+                }
+                c[static_cast<std::size_t>(k)] =
+                    cv::Point2f(static_cast<float>(u), static_cast<float>(v));
+            }
+            if (!ok)
+            {
+                ++rows;
+                continue;
+            }
+            frame_dets.push_back(c);
+            double num = -1.0;
+            parseCell(row, colOf("armor_number"), num);
+            frame_numbers.push_back(static_cast<int>(num));
+        }
         if (!have_first)
         {
             first_time = time_us;
@@ -327,41 +456,21 @@ int main(int argc, char* argv[])
         }
         const double t = (time_us - first_time) * 1e-6;
 
-        std::array<cv::Point2f, 4> corners{};
-        bool corners_ok = true;
-        for (int k = 0; k < 4; ++k)
+        // 本帧**全部**检测 → armor（与 real_runner 同口径：都做 PnP）。
+        std::vector<auto_aim::Armor> armors;
+        for (std::size_t i = 0; i < frame_dets.size(); ++i)
         {
-            double u = 0.0;
-            double v = 0.0;
-            if (!parseCell(row, cu[static_cast<std::size_t>(k)], u) ||
-                !parseCell(row, cv_col[static_cast<std::size_t>(k)], v))
-            {
-                corners_ok = false;
-                break;
-            }
-            corners[static_cast<std::size_t>(k)] =
-                cv::Point2f(static_cast<float>(u), static_cast<float>(v));
+            auto_aim::Armor a = armorFromCorners(frame_dets[i], large);
+            if (i < frame_numbers.size()) a.number = frame_numbers[i];
+            a.solve_result = auto_aim::solveArmorPnP(a, camera_matrix, dist_coeffs, pnp_geometry);
+            if (a.solve_result) armors.push_back(a);
         }
-        if (!corners_ok)
-        {
-            ++rows;
-            continue;
-        }
-
-        auto_aim::Armor armor = armorFromCorners(corners, large);
-        // 板面数字（分类器给的机器人 ID）：老录制没有这一列 → 保持 -1。
-        double number = -1.0;
-        if (parseCell(row, colOf("armor_number"), number))
-            armor.number = static_cast<int>(number);
-        armor.solve_result =
-            auto_aim::solveArmorPnP(armor, camera_matrix, dist_coeffs, pnp_geometry);
+        const std::array<cv::Point2f, 4> corners = frame_dets.empty()
+            ? std::array<cv::Point2f, 4>{}
+            : frame_dets.front();
 
         // ---- 相机姿态（real_runner 口径：内部角 = sign × 回传角）----
         auto_aim::CameraPose pose;
-        double raw_yaw = 0.0;
-        double raw_pitch = 0.0;
-        const bool has_yaw = parseCell(row, colOf(yaw_name), raw_yaw);
-        const bool has_pitch = parseCell(row, colOf(pitch_name), raw_pitch);
         pose.yaw = yaw_sign * (has_yaw ? raw_yaw : 0.0);
         pose.pitch = pitch_sign * (has_pitch ? raw_pitch : 0.0);
         pose.valid = true;
@@ -380,13 +489,11 @@ int main(int argc, char* argv[])
             fcfg.use_rcv = true;
             fcfg.rcv = tracker.fitterRcv();
             fitter->setConfig(fcfg);
-            if (armor.solve_result) tracker.pushArmorLightBars(armor, t, tracker.plateIdFor(armor));
+            for (const auto& a : armors)
+                tracker.pushArmorLightBars(a, t, tracker.plateIdFor(a));
             if (local_fit_counter++ % local_fit_period == 0) ran_fit = tracker.runLocalFitNow();
         }
 #endif
-        const std::vector<auto_aim::Armor> armors =
-            armor.solve_result ? std::vector<auto_aim::Armor>{armor}
-                               : std::vector<auto_aim::Armor>{};
         tracker.update(armors, t);
 #ifdef ULTRA_VISION_HAVE_LOCAL_FIT
         if (fitter) tracker.applyLatestLocalFit();
@@ -477,6 +584,32 @@ int main(int argc, char* argv[])
             cz_values.push_back(cz);
             omega_values.push_back(tracker.getOmega());
             if (fit_px >= 0.0) fit_values.push_back(fit_px);
+            // ---- "非观测板"指标：每块检测 ↔ 最近的模型板心 --------------------
+            // 被钉住那块板按定义永远重合，所以"底盘构造对不对"只能看这个量
+            // （与 real_runner 状态行的 model_fit 同义）。同帧只有一块板时它≈0；
+            // 同帧两块板时它才真正暴露构造误差。
+            for (const auto& a : armors)
+            {
+                const cv::Point2f dc =
+                    0.25f * (a.left.top + a.left.bottom + a.right.top + a.right.bottom);
+                double best = 1e18;
+                for (int p = 0; p < 4; ++p)
+                {
+                    cv::Point2f ctr(0.0f, 0.0f);
+                    int n = 0;
+                    for (int k = 0; k < 4; ++k)
+                    {
+                        const cv::Point2f& q = all_px[static_cast<std::size_t>(p * 4 + k)];
+                        if (q.x < 0.0f) continue;
+                        ctr += q;
+                        ++n;
+                    }
+                    if (n == 0) continue;
+                    ctr *= 1.0f / static_cast<float>(n);
+                    best = std::min(best, static_cast<double>(cv::norm(ctr - dc)));
+                }
+                if (best < 1e17) det_fit_values.push_back(best);
+            }
         }
 
         if (out)
@@ -525,6 +658,14 @@ int main(int argc, char* argv[])
               << "  cz median=" << median(cz_values)
               << "  |omega| median=" << median(omega_values)
               << "  fit_px median=" << median(fit_values);
+    if (!det_fit_values.empty())
+    {
+        std::vector<double> v = det_fit_values;
+        std::sort(v.begin(), v.end());
+        std::cout << "\n[replay] 全部检测↔模型板心(px): n=" << v.size()
+                  << "  中位 " << v[v.size() / 2] << "  p90 " << v[(v.size() * 9) / 10]
+                  << "  （这才是底盘构造对不对的度量；被钉那块板不算）";
+    }
     if (cz_values.size() > 1)
     {
         const auto mm = std::minmax_element(cz_values.begin(), cz_values.end());
