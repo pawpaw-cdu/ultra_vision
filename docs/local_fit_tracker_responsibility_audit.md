@@ -3,6 +3,10 @@
 ## 审计时间
 2026-10-11
 
+> **修复状态（2026-10-11 当天完成）**：P0-1 / P0-2 / P1-1 / P1-2 已按本报告的
+> 修复建议落地，并新增回归测试；证据与"修完之后实车数据长什么样"见文末
+> **附录 A：修复记录与验证**。P2-1 / P2-2 / P3 仍是待办。
+
 ## 审计范围
 
 必审（存在性已核对，提示词里的三个文件名与实际不符，已按实际文件审计）：
@@ -385,3 +389,76 @@ git status: 22 files changed, 2634 insertions(+), 311 deletions(-)   （脏工�
 特别地，那些日志里出现过 `geometry=1624`，而**当前源代码里
 `local_fit_apply_geometry_` 没有任何自增点**（本地与 NUC 都一样，已核对），
 所以那条日志必然来自更早的构建。建议：先让两边代码对齐，再解释任何实车数字。
+
+> **2026-10-11 已处理**：本地 `codex/test` 提交为 `4606b4b`，并用 git bundle
+> （`9358ba4..codex/test`，NUC 连不上 GitHub）+ `tools/sync_to_nuc.sh` 对齐到 NUC；
+> `ssh nuc` 现在 `git status` 干净、HEAD `4606b4b`，`auto_aim_real` 重新编译通过。
+> 现场标定 `hand_eye.yaml` / `camera_intrinsics.yaml` 未被动过；NUC 原有脏改动
+> 备份在 `~/nuc_dirty_backup_20261011.patch`。
+
+---
+
+# 附录 A：修复记录与验证（2026-10-11 当天）
+
+## A.1 改了什么
+
+| 项 | 文件 | 改动 |
+|---|---|---|
+| **P0-1** | `Kalman/armor_ekf.hpp` | `updateAngle` 的 H 从 `(cos_total, −sin_total)` 改成状态自己的 `(x5, −x4)`；新增 `kChassisYawPlateId`（=1，相位表里偏移为 0 的那块）；`updateWithLocalFit` 用它注入"底盘 yaw" |
+| **P0-2** | `Kalman/tracker_localfit.cpp`、`Kalman/tracker_accessors.cpp` | `applyLatestLocalFit` 恢复 `updateChassisFromFit(fit->R, fit->alpha, fit->h)` 调用 + `++local_fit_apply_geometry_`；`updateChassisFromFit` 改为**只挪平均半径、保留逐板形状**（否则每次有效拟合都把 `geometry_learn` 学出的矩形底盘抹成正圆） |
+| **P1-1** | `common/types.hpp`、`estimation/local_trajectory_fitter.cpp`、`Kalman/tracker.hpp`、`Kalman/tracker_localfit.cpp` | `LocalFitResult::ref_armor_id`（拟合器填"出现最多的那号板"）；新增 `ref_yaw_gate_deg` 相位门限 + 退回模 90° 吸附的路径；新增 `ysnap` / `exact` / `yaw_residual` 诊断（状态行打印 `ysnap=`） |
+| **P1-2** | `estimation/local_trajectory_fitter.hpp` | `plate_yaw_offsets` 默认表从 `{0,90,180,270}` 改成与 `ArmorEKF::angleForPlate` / `armorPhaseOffset` **同一张表** `{+90,0,−90,−180}` |
+| 附带 | `Kalman/tracker.hpp` | `plateIdFor()` 修**相机系/home 系混用**：原来把相机系的框直接喂给期待 home 系的 `selectPlateId`（差一个相机 yaw；仿真 yaw≡0 所以一直没暴露） |
+| 附带 | `app/real_runner.cpp`、`configs/tracker.yaml`、`config/tracker_config_loader.hpp` | 状态行加 `ysnap=`；新增 `ref_yaw_gate_deg`；`center_anchor` 改回 false（依据见 A.2 第 4 条） |
+
+## A.2 验证
+
+1. **API 探针**（只读小程序，直接调真实 `updateAngle`）：
+
+   ```
+   修复前:  plate 0/1/2/3 → +0.000 / +4.751 / +0.000 / −4.751 deg
+   修复后:  plate 0/1/2/3 → +4.751 / +4.751 / +4.751 / +4.751 deg
+   ```
+
+   （"观测说该板相位 +5°"时底盘 yaw 该动的量；四个板位必须同号同量级。）
+
+2. **新增回归测试** `src/auto_aim/test/armor_ekf_angle_test.cpp`：
+   四个板位的增益/符号一致性 + `updateWithLocalFit` 的 yaw / ω 两条通道各自独立可用；
+   `local_trajectory_fitter_test` 追加**相位表绑定**断言（拟合器表 == `armorPhaseOffset`）。
+   `ctest`：**22/22 通过**（原 21 + 新增 1）。
+
+3. **实车数据回放**（把局部拟合器接进 `tools/replay_obs_csv.cpp`，同步跑、确定性，
+   数据 `/tmp/obs_rcv.csv`）：
+
+   | 指标 | 修复前 | 修复后 |
+   |---|---|---|
+   | `geometry=` 慢层写回计数 | 结构性恒为 0（调用点不存在） | **3536** |
+   | `Rgeo` | 一直 0.250（配置值） | 收敛到 ≈0.20，且**保留矩形比例** |
+   | 拟合器自带日志 ω | — | 0.0 ~ −3.0 rad/s（与该段"几乎静止 + 中段小陀螺"吻合） |
+   | 拟合器 rmse / R | — | 2~3 px / 0.20→0.21 |
+   | 相位 | 无从判断（通道是空操作） | full 残差落在 ±90°/180°、扣掉 90° 整数倍后仅 ±5~18°，另有 ~10° 常值（由 yaw_bias 学习器吸收）；`exact=345 / snap=3191` |
+
+   结论：**四块板 90° 对称 ⇒ 底盘 yaw 只在模 90° 下可定义**，所以"残差落在 90° 倍数上"
+   是正常歧义、应走吸附；门限的作用正是把这种情况安全地交回吸附，只在真的对得上时才精确注入。
+
+4. **模型-观测残差 A/B**（同一份实车角点，只改开关；中位像素残差）：
+
+   | 配置 | 残差中位 | 说明 |
+   |---|---|---|
+   | 拟合器关（基线） | **7.78 px** | |
+   | 拟合器开（原默认，`center_anchor=true`） | 11.88 px | 唯一显著变差 |
+   | 拟合器开 + `center_anchor=false` | **7.79 px** | 与基线持平 |
+   | 拟合器开 + 只留 ω | 8.08 px | |
+
+   即：这次录制上"模型变差"**完全**由 `center_anchor` 造成，与 yaw 通道、慢层写回无关。
+   故 `center_anchor` 改回 false（理由与 yaml 里原本"默认关"的注释一致），实车再单独 A/B。
+
+5. **仿真不适合判这类改动**（记录一下）：打开局部拟合器后仿真 FPS 从 ~65 掉到 ~10，
+   `wd(reset=15)`，指标被 CPU 饥饿主导 —— 所以这一轮的判据用的是**实车录制回放**。
+
+## A.3 仍未解决（下一步）
+
+1. **P2-1**：拟合器的输入复用"给 tracker 的收缩 ROI"，与 Tracker 状态耦合（模型偏 → 看不到修正数据）。
+2. **P2-3**：`plateIdFor()` 用到的是 tracker 内部存的**上一帧**相机姿态（push 在 `pipeline.update()` 之前），实车云台快速转动时还有几度误差；要更严就在 push 前先 `setCameraPose(本帧姿态)`。
+3. **精确注入路径**在当前车体上几乎走不到（四重对称）；要等"逐板几何让 yaw 完全可观测"之后才有意义。
+4. 实车验证时建议的 A/B 顺序：① 拟合器关 vs 开（只留 ω）；② `center_anchor` on/off；③ `use_yaw` on/off。

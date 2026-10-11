@@ -462,6 +462,15 @@ if(ULTRA_VISION_BUILD_AUTO_AIM)
   add_subdirectory(src/auto_aim)
 endif()
 
+# 回放工具若能用局部拟合器（Ceres 找得到、且 auto_aim_real/sim 那套库已建），
+# 就把拟合器也接进去 —— 这样"改滤波器/改拟合器"能直接用**实车录制**做 A/B，
+# 不必依赖仿真（仿真角点干净、没有 15° 支架，这类改动在仿真里常常反着来）。
+# 放在 add_subdirectory 之后：auto_aim_local_fit 是那边创建的 target。
+if(TARGET replay_obs_csv AND TARGET auto_aim_local_fit)
+  target_link_libraries(replay_obs_csv PRIVATE auto_aim_local_fit)
+  target_compile_definitions(replay_obs_csv PRIVATE ULTRA_VISION_HAVE_LOCAL_FIT=1)
+endif()
+
 if(ULTRA_VISION_BUILD_TESTS)
   # 单元测试全部放在顶层 tests/（对齐 sp_vision 的组织方式），算法目录里不放测试。
   add_subdirectory(tests)

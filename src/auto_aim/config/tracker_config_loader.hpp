@@ -76,6 +76,8 @@ namespace auto_aim
                 lf["yaw_bias_alpha"].as<double>(cfg.local_fit.yaw_bias_alpha);
             cfg.local_fit.yaw_bias_limit_deg =
                 lf["yaw_bias_limit_deg"].as<double>(cfg.local_fit.yaw_bias_limit_deg);
+            cfg.local_fit.ref_yaw_gate_deg =
+                lf["ref_yaw_gate_deg"].as<double>(cfg.local_fit.ref_yaw_gate_deg);
             cfg.local_fit.yaw_rate_sign =
                 lf["yaw_rate_sign"].as<double>(cfg.local_fit.yaw_rate_sign);
             cfg.local_fit.also_update_center =

@@ -345,12 +345,27 @@ namespace auto_aim
             yaw_noise_eff *= 1.0 + age / std::max(0.05, cfg_.local_fit.max_result_age);
         }
 
-        // 板号绝对偏移不可靠（plateIdFor 在多板同现时会错）→ 拟合 yaw 可能整体差 k·90°。
-        // EKF 自身 yaw 平滑、不会差 90°：把 fit.yaw 吸附到"与 EKF yaw 最近的、模 90° 同余"
-        // 的那个值，消掉未知的 k·90°（只修正板偏移，不改 ω/中心）。注意吸附要在
-        // **外推之后**做，否则比较的是两个不同时刻的 yaw。
+        // ---- 相位代表元：先试"精确注入"，不可信才退回"模 90° 吸附" ----------------
+        // 2026-10-11 起 LocalFitResult::yaw 是**底盘 yaw**，且拟合器与 EKF 用同一张
+        // 相位表（见 local_trajectory_fitter.hpp 的 plate_yaw_offsets 注释），所以
+        // 正常情况它和 EKF yaw 直接可比 —— 精确注入保留了绝对相位，逐板几何下也成立。
+        // 但参考板号（plateIdFor → 几何选板，读 EKF 状态）本身可能错：一旦错 k 号，
+        // 拟合 yaw 就整体差 k·90°。所以残差超门限时不信它，退回"与 EKF yaw 最近的、
+        // 模 90° 同余"的那个值（只在四块板对称的假设下成立的安全退路）。
+        // 注意这一步要在**延迟外推之后**做，否则比较的是两个不同时刻的 yaw。
         const double ekf_yaw = ekf_.getYaw();
-        conv.yaw = ekf_yaw + std::remainder(conv.yaw - ekf_yaw, 0.5 * M_PI);
+        {
+            const double gate = cfg_.local_fit.ref_yaw_gate_deg * M_PI / 180.0;
+            const bool ref_ok = fit->ref_armor_id >= 0 && fit->ref_armor_id < 4;
+            const double residual = ArmorEKF::normalizeAngle(conv.yaw - ekf_yaw);
+            local_fit_yaw_residual_ = residual;   // 诊断：见 localFitYawResidual()
+            if (!(gate > 0.0) || !ref_ok || std::abs(residual) > gate) {
+                conv.yaw = ekf_yaw + std::remainder(conv.yaw - ekf_yaw, 0.5 * M_PI);
+                ++local_fit_yaw_snaps_;
+            } else {
+                ++local_fit_yaw_exact_;
+            }
+        }
 
         // ---- 拟合 yaw 的常值相位偏置在线学习 ------------------------------------
         // 实测（model4 vs model5）：直接注入拟合 yaw 后，慢转工况从 0.3px 劣化到 30px
@@ -399,6 +414,18 @@ namespace auto_aim
             ? ekf_.updateWithLocalFit(conv, yaw_noise_eff, cfg_.local_fit.omega_noise,
                                       std::numeric_limits<double>::infinity())
             : 0.0;
+
+        // ---- 慢层几何写回（R / 安装倾角 α / 板心高度 h）------------------------
+        // 拟合器在一个弧段上把这三个量一起解出来了，它们正是底盘模型的慢层参数
+        // （见 common/chassis_model.hpp）。**2026-10-11 之前这段调用被删掉了**：
+        // updateChassisFromFit 零调用点、local_fit_apply_geometry_ 无自增 →
+        // use_fit_radius 变成死配置（而 yaml 里它一直是 true）、状态行的 geometry= 恒为 0。
+        // 见 docs/local_fit_tracker_responsibility_audit.md 审计项 F。
+        if (cfg_.local_fit.use_fit_radius && slow_ok)
+        {
+            updateChassisFromFit(fit->R, fit->alpha, fit->h);
+            ++local_fit_apply_geometry_;
+        }
 
         // ---- 旋转中心先验：拟合器判出的运动状态决定"中心该不该动" ----------
         // 纯旋转 → 旋转中心物理上不变 → 把车心往拟合中心拉（强）；有平移 → 只轻拉。

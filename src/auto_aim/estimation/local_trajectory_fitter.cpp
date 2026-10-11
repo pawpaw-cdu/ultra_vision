@@ -11,6 +11,21 @@ namespace auto_aim
 {
     namespace
     {
+        /// @brief 这条拟合的**参考板号**：观测里出现最多的那个 armor_id
+        ///        （多板联合时 = 参考弧那条；单板时 = 那条弧的板号；没有合法 id → -1）。
+        ///        只用于诊断与调用方的相位门控，不参与拟合本身。
+        inline int referenceArmorId(const std::vector<LightBarObservation>& obs)
+        {
+            int count[4] = {0, 0, 0, 0};
+            for (const auto& o : obs)
+                if (o.armor_id >= 0 && o.armor_id < 4) ++count[o.armor_id];
+            int best = -1;
+            int best_n = 0;
+            for (int k = 0; k < 4; ++k)
+                if (count[k] > best_n) { best_n = count[k]; best = k; }
+            return best_n > 0 ? best : -1;
+        }
+
         // 车辆系→相机系。默认 R_cv = Rx(gimbal_pitch + pitch_offset)·R_base，
         // R_base: X_v→Z_c, Y_v→X_c, Z_v→-Y_c（与 experiments/local_fitter 一致）。
         // use_rcv 时直接用给定的完整 3×3 R_cv（含"相机→云台安装旋转"，实车必须）。
@@ -283,6 +298,7 @@ namespace auto_aim
         out.center[0] = f.center[0]; out.center[1] = f.center[1]; out.center[2] = f.center[2];
         out.yaw = f.yawAt(observations.back().timestamp);
         out.omega = f.omega;
+        out.ref_armor_id = referenceArmorId(observations);
         out.alpha = alpha_fixed;
         out.R = R_fixed;
         out.h = f.h;
@@ -370,6 +386,7 @@ namespace auto_aim
         out.center[0] = f.center[0]; out.center[1] = f.center[1]; out.center[2] = f.center[2];
         out.yaw = f.yawAt(observations.back().timestamp);
         out.omega = f.omega;
+        out.ref_armor_id = referenceArmorId(observations);
         out.alpha = slow_alpha_;
         out.R = slow_R_;
         out.h = f.h;

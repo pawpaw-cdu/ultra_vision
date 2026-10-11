@@ -92,6 +92,13 @@ namespace auto_aim
         double yaw_use_omega_full = 2.5;   // rad/s
         double yaw_bias_alpha = 0.02;      // 学习率
         double yaw_bias_limit_deg = 30.0;  // 限幅（防跑飞）
+        /// 相位代表元门限（度）。拟合 yaw 与 EKF yaw 的残差超过它 → 认为"参考板号
+        /// 错了 k 号"（拟合 yaw 整体差 k·90°），退回"模 90° 吸附"这条老路。
+        /// 为什么需要：板号来自 `plateIdFor()`（几何选板，读 EKF 状态），可能错；
+        /// 表统一之后 yaw 本来可以直接比，但一旦号错了，直接注入就会把 yaw 拽 90°。
+        /// 门限内的残差是真的修正，直接注入（逐板几何下也成立）；超门限的只取
+        /// 模 90° 分量（四块板对称假设下的安全退路）。0 = 永远吸附（旧行为）。
+        double ref_yaw_gate_deg = 40.0;
         // 相机系→整车系符号（标定项）：拟合器的 θ 约定（相机 X-Z 平面，从 +Z 向 +X 量）
         // 与 EKF 的 ω/yaw 约定相反 → 仿真实测 -1（gyro5 A/B：+1 会让 EKF ω 更差，-1 明显更稳）。
         double yaw_rate_sign = -1.0;
@@ -539,6 +546,16 @@ namespace auto_aim
         int localFitApplyNoFit() const { return local_fit_apply_no_fit_; }
         int localFitApplyStale() const { return local_fit_apply_stale_; }
         int localFitApplyGeometry() const { return local_fit_apply_geometry_; }
+        /// @brief 相位代表元被判"不可信"、退回模 90° 吸附的累计次数（诊断用）。
+        ///        长期为 0 说明 ref_armor_id 一直自洽（可以放心用精确注入）。
+        int localFitYawSnaps() const { return local_fit_yaw_snaps_; }
+        /// @brief 最近一次"拟合 yaw − EKF yaw"的残差（rad，已做相机系→home 系换算与
+        ///        延迟外推）。诊断用：它长期贴在 ±90°/180° 附近 = 参考板号或相位表
+        ///        不一致；贴在几十度 = 常值偏置/拟合器自身偏差。
+        double localFitYawResidual() const { return local_fit_yaw_residual_; }
+        /// @brief 参考板号自洽（|残差| ≤ ref_yaw_gate_deg）的累计次数，与
+        ///        localFitYawSnaps() 对照着看就是"精确注入 vs 吸附"的比例。
+        int localFitYawExact() const { return local_fit_yaw_exact_; }
         double localFitApplyAgeMs() const { return local_fit_apply_age_ms_; }
         double localFitLastMs() const { return local_fit_last_ms_; }
         double lastViewDeg() const { return last_view_deg_; }
@@ -598,7 +615,21 @@ namespace auto_aim
         ///        armor_id 必须是**板号 0..3**（不是网络类别 id）——用 plateIdFor() 取。
         void pushArmorLightBars(const Armor& armor, double timestamp, int armor_id);
         /// @brief 由几何把一块观测装甲板映射到板号 0..3（-1 = 不确定）。
-        int plateIdFor(const Armor& armor) const { return selectPlateId(armor); }
+        ///
+        /// ⚠ 入参必须是**相机系**的 armor（检测/PnP 刚出来的那个），内部会先变换到
+        /// home 系再和 EKF 比 —— `selectPlateId`/`matchCost` 拿的是 home 系量
+        /// （`Tracker::update` 里就是 `selectPlateId(toWorld(armor))`）。
+        /// **2026-10-11 修**：原来这里直接把相机系的框喂进去，等于拿"相机系 bearing"
+        /// 去比"home 系预测"，差一个相机 yaw 角。实车云台 yaw ≈ −12° 时，2.2 m 处
+        /// 横向差 ≈0.46 m > 关联门限 0.35 m → **正确那块板反被当成够不着**，选出来的
+        /// 板号与 EKF 自己的关联对不上。实测证据（tools/replay_obs_csv --local-fit，
+        /// 实车录制）：喂给拟合器的参考板号与 EKF yaw 的残差 87% 落在 ±90°/±180°
+        /// —— 正是"板号错 1~2 步"的特征。仿真里相机 yaw ≡ 0，所以一直没暴露。
+        ///
+        /// 备注：本函数用的是 tracker 内部存的**当前**相机姿态；调用方在
+        /// `pipeline.update()` 之前 push，所以那里比"曝光时刻姿态"晚一帧（几度），
+        /// 属于二阶项；要更严就在 push 之前先 `setCameraPose(本帧姿态)`。
+        int plateIdFor(const Armor& armor) const { return selectPlateId(toWorld(armor)); }
         /// @brief 同步跑一次拟合（把当前缓冲喂给回调）；返回是否产出有效结果。
         bool runLocalFitNow();
         /// @brief 启动/停止内部异步拟合线程（低频）。
@@ -648,6 +679,12 @@ namespace auto_aim
         int local_fit_apply_no_fit_ = 0;
         int local_fit_apply_stale_ = 0;
         int local_fit_apply_geometry_ = 0;
+        /// 相位代表元不可信、退回模 90° 吸附的次数（见 ref_yaw_gate_deg）。
+        int local_fit_yaw_snaps_ = 0;
+        /// 参考板号自洽（走精确注入）的次数，与上面配对。
+        int local_fit_yaw_exact_ = 0;
+        /// 最近一次"拟合 yaw − EKF yaw"残差（rad，换算+外推之后）。
+        double local_fit_yaw_residual_ = 0.0;
         double local_fit_apply_age_ms_ = -1.0;
         /// 最近一次拟合（含慢层）耗时（ms）——低功耗机器上这是关键指标。
         double local_fit_last_ms_ = -1.0;

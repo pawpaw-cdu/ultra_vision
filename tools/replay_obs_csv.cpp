@@ -43,6 +43,9 @@
 #include "Kalman/tracker.hpp"
 #include "perception/pnp_solver.hpp"
 #include "visualization/projection.hpp"
+#ifdef ULTRA_VISION_HAVE_LOCAL_FIT
+#include "estimation/local_trajectory_fitter.hpp"
+#endif
 
 namespace
 {
@@ -136,6 +139,8 @@ int main(int argc, char* argv[])
     std::string out_path;
     std::string armor_type = "small";
     int max_rows = 0;
+    bool local_fit_enabled = false;
+    int local_fit_period = 8;   // 每 N 帧跑一次拟合（真机 worker 是 30ms 周期，量级相当）
     std::vector<std::string> overrides;
 
     for (int i = 1; i < argc; ++i)
@@ -145,6 +150,9 @@ int main(int argc, char* argv[])
         else if (arg == "--out" && i + 1 < argc) out_path = argv[++i];
         else if (arg == "--max-rows" && i + 1 < argc) max_rows = std::atoi(argv[++i]);
         else if (arg == "--type" && i + 1 < argc) armor_type = argv[++i];
+        else if (arg == "--local-fit") local_fit_enabled = true;
+        else if (arg == "--local-fit-period" && i + 1 < argc)
+            local_fit_period = std::max(1, std::atoi(argv[++i]));
         else if (arg == "--set" && i + 1 < argc) overrides.push_back(argv[++i]);
         else if (arg.rfind("--", 0) == 0)
         {
@@ -157,6 +165,7 @@ int main(int argc, char* argv[])
     {
         std::cerr << "用法：replay_obs_csv <obs.csv> [--config-dir configs] [--out dump.csv]\n"
                      "                     [--max-rows N] [--type small|large]\n"
+                     "                     [--local-fit]   # 接上局部拟合器（同步跑，不用 worker）\n"
                      "                     [--set tracker.kalman.<key>=<value>]...\n";
         return 2;
     }
@@ -173,7 +182,8 @@ int main(int argc, char* argv[])
     YAML::Node tracker_file = YAML::LoadFile(config_dir + "/tracker.yaml");
     for (const auto& spec : overrides) applyOverride(tracker_file, spec);
 
-    const auto_aim::TrackerConfig track_cfg = auto_aim::loadTrackerConfig(tracker_file);
+    auto_aim::TrackerConfig track_cfg = auto_aim::loadTrackerConfig(tracker_file);
+    if (local_fit_enabled) track_cfg.local_fit.enabled = true;
     const auto_aim::PnpGeometry pnp_geometry = auto_aim::loadPnpGeometry(tracker_file);
     std::cout << "[replay] cfg hard_plate=" << track_cfg.hard_plate_constraint
               << " geometry_learn=" << track_cfg.geometry_learn
@@ -238,6 +248,42 @@ int main(int argc, char* argv[])
                                 camera_matrix.at<double>(0, 2), camera_matrix.at<double>(1, 2));
     if (!dist_coeffs.empty()) tracker.setCameraDistortion(dist_coeffs);
 
+#ifdef ULTRA_VISION_HAVE_LOCAL_FIT
+    // 局部拟合器：与 real_runner 同一套配置口径，但**同步**跑（不起 worker），
+    // 这样 A/B 是确定性的、也不受这台机器 CPU 快慢影响。
+    std::unique_ptr<auto_aim::LocalTrajectoryFitter> fitter;
+    if (local_fit_enabled)
+    {
+        const auto env_d = [](const char* n, double d) {
+            const char* v = std::getenv(n);
+            return v != nullptr ? std::atof(v) : d;
+        };
+        auto_aim::LocalTrajectoryFitConfig fcfg;
+        fcfg.K = {camera_matrix.at<double>(0, 0), camera_matrix.at<double>(1, 1),
+                  camera_matrix.at<double>(0, 2), camera_matrix.at<double>(1, 2)};
+        fcfg.max_rmse_deg = env_d("ULTRA_VISION_LOCAL_FIT_MAX_RMSE_DEG", 0.4);
+        fcfg.lightbar_len = env_d("ULTRA_VISION_LOCAL_FIT_L", 0.060);
+        fcfg.plate_width = env_d("ULTRA_VISION_LOCAL_FIT_W", 0.135);
+        fcfg.gimbal_pitch = 0.0;
+        fcfg.center_init = {{0.0, 0.0, 3.0}};
+        fitter = std::make_unique<auto_aim::LocalTrajectoryFitter>(fcfg);
+        const double alpha0 = env_d("ULTRA_VISION_LOCAL_FIT_ALPHA_DEG", 15.0) * M_PI / 180.0;
+        fitter->seedSlow(alpha0, fcfg.R_prior);
+        auto* raw = fitter.get();
+        tracker.setLocalFitter([raw](const std::vector<auto_aim::LightBarObservation>& obs,
+                                     auto_aim::LocalFitResult& out) {
+            return raw->fitWithSlow(obs, out);
+        });
+        std::cout << "[replay] local-fit ON (alpha="
+                  << env_d("ULTRA_VISION_LOCAL_FIT_ALPHA_DEG", 15.0) << "deg, use_yaw="
+                  << track_cfg.local_fit.use_yaw << ", use_fit_radius="
+                  << track_cfg.local_fit.use_fit_radius << ")" << std::endl;
+    }
+#else
+    if (local_fit_enabled)
+        std::cerr << "[replay] 本次构建没有局部拟合器（未找到 Ceres），--local-fit 无效" << std::endl;
+#endif
+
     std::ofstream out;
     if (!out_path.empty())
     {
@@ -248,6 +294,8 @@ int main(int argc, char* argv[])
         for (int p = 0; p < 4; ++p)
             for (int k = 0; k < 4; ++k)
                 out << ",q" << p << "x" << k << ",q" << p << "y" << k;
+        // 诊断列**必须在最后**，且与写入顺序一致（错位过一次，教训）。
+        out << ",fit_yaw_raw_deg,ekf_yaw_deg,fit_omega";
         out << '\n';
     }
 
@@ -261,6 +309,8 @@ int main(int argc, char* argv[])
     std::vector<double> cz_values;
     std::vector<double> omega_values;
     std::vector<double> fit_values;
+    int local_fit_counter = 0;
+    std::array<int, 6> yaw_res_hist{{0, 0, 0, 0, 0, 0}};   // |残差| 分档：<15/45/75/105/135/180°
 
     while (std::getline(in, line))
     {
@@ -319,10 +369,40 @@ int main(int argc, char* argv[])
         pose.timestamp_valid = true;
         tracker.setCameraPose(pose);
 
+#ifdef ULTRA_VISION_HAVE_LOCAL_FIT
+        bool ran_fit = false;
+        if (fitter)
+        {
+            // 与 real_runner 同序：先把**本帧全部检测**推进拟合缓冲（在关联之前），
+            // 再跑一次拟合，最后 update + apply。同步调用 → 确定性、与 CPU 快慢无关。
+            auto fcfg = fitter->config();
+            fcfg.h_prior = tracker.chassisGeometry().height(0);
+            fcfg.use_rcv = true;
+            fcfg.rcv = tracker.fitterRcv();
+            fitter->setConfig(fcfg);
+            if (armor.solve_result) tracker.pushArmorLightBars(armor, t, tracker.plateIdFor(armor));
+            if (local_fit_counter++ % local_fit_period == 0) ran_fit = tracker.runLocalFitNow();
+        }
+#endif
         const std::vector<auto_aim::Armor> armors =
             armor.solve_result ? std::vector<auto_aim::Armor>{armor}
                                : std::vector<auto_aim::Armor>{};
         tracker.update(armors, t);
+#ifdef ULTRA_VISION_HAVE_LOCAL_FIT
+        if (fitter) tracker.applyLatestLocalFit();
+        // 相位残差直方图：判断"板号/相位表不一致"（残差贴 ±90°/180°）还是
+        // "常值偏置"（残差几十度）。只在真正跑过拟合的帧采样，避免重复计数。
+        if (ran_fit)
+        {
+            const double deg = std::abs(tracker.localFitYawResidual()) * 180.0 / M_PI;
+            if (deg < 15.0) ++yaw_res_hist[0];
+            else if (deg < 45.0) ++yaw_res_hist[1];
+            else if (deg < 75.0) ++yaw_res_hist[2];
+            else if (deg < 105.0) ++yaw_res_hist[3];
+            else if (deg < 135.0) ++yaw_res_hist[4];
+            else ++yaw_res_hist[5];
+        }
+#endif
         const bool accepted = tracker.hasObservation() &&
             std::abs(tracker.lastObservationTime() - t) < 1e-9;
         if (tracker.getState() == auto_aim::TrackerState::TRACKING) ++tracked;
@@ -415,6 +495,20 @@ int main(int argc, char* argv[])
             for (int p = 0; p < 16; ++p)
                 out << ',' << all_px[static_cast<std::size_t>(p)].x << ','
                     << all_px[static_cast<std::size_t>(p)].y;
+            // 诊断两列：拟合器**原始**输出的 yaw（相机系，未换算）与 EKF 的 yaw。
+            // 两者一起看就能判断"拟合 yaw ↔ EKF yaw"到底是镜像、常值偏置还是差 90°。
+            double fit_yaw_raw = 0.0;
+            double fit_omega = 0.0;
+            bool have_fit = false;
+            if (auto lf = tracker.latestLocalFit(); lf && lf->valid)
+            {
+                fit_yaw_raw = lf->yaw * 180.0 / M_PI;
+                fit_omega = lf->omega;
+                have_fit = true;
+            }
+            out << ',' << (have_fit ? fit_yaw_raw : 0.0) << ','
+                << (have_fit ? tracker.getYaw() * 180.0 / M_PI : 0.0) << ','
+                << (have_fit ? fit_omega : 0.0);
             out << '\n';
         }
         ++rows;
@@ -437,5 +531,29 @@ int main(int argc, char* argv[])
         std::cout << "  cz range=[" << *mm.first << ", " << *mm.second << "]";
     }
     std::cout << std::endl;
+    if (local_fit_enabled)
+    {
+        std::cout << "[replay] local-fit: attempts=" << tracker.localFitAttempts()
+                  << " valids=" << tracker.localFitValids()
+                  << " applied=" << tracker.localFitApplied()
+                  << " geometry=" << tracker.localFitApplyGeometry()
+                  << " ysnap=" << tracker.localFitYawSnaps()
+                  << " lastR=" << tracker.localFitLastR()
+                  << " lastRmse=" << tracker.localFitLastRmse()
+                  << " | Rgeo=" << tracker.chassisGeometry().distance(0) << "/"
+                  << tracker.chassisGeometry().distance(1) << "/"
+                  << tracker.chassisGeometry().distance(2) << "/"
+                  << tracker.chassisGeometry().distance(3) << std::endl;
+        // 注意：对四块板 90° 对称的车体，"残差落在 90° 的整数倍上"是**正常歧义**
+        // （底盘 yaw 只在模 90° 下可定义），会走吸附路径；真正要看的是
+        // "90° 倍数之外还剩多少"——那部分才是拟合器与 EKF 的真实相位差（由
+        // yaw_bias 学习器吸收）。所以 75-105/135-180 这两档偏大不代表出错。
+        std::cout << "[replay] yaw 残差直方图 |fit.yaw-EKF.yaw| (deg): <15:"
+                  << yaw_res_hist[0] << " 15-45:" << yaw_res_hist[1]
+                  << " 45-75:" << yaw_res_hist[2] << " 75-105:" << yaw_res_hist[3]
+                  << " 105-135:" << yaw_res_hist[4] << " 135-180:" << yaw_res_hist[5]
+                  << "  | exact=" << tracker.localFitYawExact()
+                  << " snap=" << tracker.localFitYawSnaps() << std::endl;
+    }
     return 0;
 }

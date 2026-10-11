@@ -133,12 +133,19 @@ namespace auto_aim
         const double max_step = std::max(1e-4, cfg_.local_fit.radius_max_step);
         bool changed = false;
         if (std::isfinite(radius) && radius > 0.10 && radius < 0.50) {
-            const double step = std::clamp(radius - geometry_.meanDistance(), -max_step, max_step);
-            const double target = geometry_.meanDistance() + alpha * step;
-            for (auto& d : geometry_.plate_distance) d = target;
-            cfg_.armor_radius = target;
-            ekf_.setArmorRadius(target);
-            armor_radius_online_ = target;
+            // **只挪"平均半径"，保留逐板形状**（2026-10-11 修）。
+            // 原来是把四块板距离一次性写成同一个值（=正圆），但 geometry_learn /
+            // plate_distance 已经能学出**矩形底盘**（实车实测左右板到车心更远：
+            // 0.229/0.271/0.229/0.271）。一刀切成圆等于每次有效拟合都把逐板几何抹掉，
+            // 两个慢层互相打架。拟合器的 R 是"整段弧的平均回转半径"，正好对应
+            // meanDistance()，所以拿它修均值、形状交给 geometry_learn。
+            const double mean = geometry_.meanDistance();
+            const double step = std::clamp(radius - mean, -max_step, max_step);
+            const double delta = alpha * step;
+            for (auto& d : geometry_.plate_distance) d += delta;
+            cfg_.armor_radius = mean + delta;
+            ekf_.setArmorRadius(cfg_.armor_radius);
+            armor_radius_online_ = cfg_.armor_radius;
             changed = true;
         }
         if (std::isfinite(armor_pitch_rad) && std::abs(armor_pitch_rad) < 1.0) {

@@ -96,6 +96,16 @@ tracker:
     yaw_use_omega_full: 2.5
     yaw_bias_alpha: 0.02
     yaw_bias_limit_deg: 30.0
+    # 相位代表元门限（度）：拟合 yaw 与 EKF yaw 的残差超过它 → 退回"模 90° 吸附"。
+    # 背景：`LocalFitResult::yaw` 是底盘 yaw、拟合器与 EKF 用同一张相位表。
+    # **但四块板 90° 对称 ⇒ 底盘 yaw 本身只在模 90° 意义下有定义**：实车录制实测
+    # （tools/replay_obs_csv --local-fit）拟合 yaw 与 EKF yaw 的差几乎总是落在
+    # ±90°/180° 附近，扣掉 90° 的整数倍之后残差只有 ±5~18°（另有一个 ~10° 的常值
+    # 分量，由 yaw_bias_learn 吸收）。所以："落在 90° 倍数上"是**正常歧义**，不是错误；
+    # 门限的作用是把这种情况安全地交给吸附路径，只把"真的一步之内对得上"的
+    # 那部分留作精确注入（将来启用逐板几何、yaw 完全可观测之后才会大量走到）。
+    # 诊断：状态行 `ysnap=` / 工具里的 `exact=` 就是这两条路径的比例。0 = 永远吸附。
+    ref_yaw_gate_deg: 40.0
     yaw_noise: 0.02            # 拟合 yaw 的观测噪声（rad²）
     omega_noise: 0.05          # 拟合 ω 的观测噪声
     # 相机系→整车系符号（标定项）：拟合器 θ 约定与 EKF ω 约定相反 → -1
@@ -113,6 +123,12 @@ tracker:
     # 同一个物理量（仿真真值 0.210 / 在线收敛 0.200，实车 ≈0.20~0.24），
     # 差 4~5 cm 会 1:1 变成四块板的径向系统偏差。开启后限幅 + 一阶低通慢慢跟。
     # A/B（同一台仿真、3 rad/s）：开 → 模型对真板误差 0.170→0.145 m（R 收敛到 0.194）。
+    # ⚠ 2026-10-11 修：这个开关**今天是第一次真的接上**。8e0c663 把 applyLatestLocalFit
+    # 里的 `updateChassisFromFit(fit->R, fit->alpha, fit->h)` 调用删掉了，于是
+    # updateChassisFromFit 零调用点、local_fit_apply_geometry_ 无自增 ——
+    # 也就是说：**yaml 里写着 true，但慢层从来没写回过模型**（状态行 geometry= 恒为 0）。
+    # 现已恢复调用（见 docs/local_fit_tracker_responsibility_audit.md 审计项 F），
+    # 打开时 R/α/h 会按 radius_alpha + radius_max_step 限幅慢跟，可用 A/B 验证收益。
     use_fit_radius: true
     radius_alpha: 0.25         # 每次有效拟合最多跟 25% 的差值
     radius_max_step: 0.02      # 单次最大变化（m）
@@ -125,8 +141,15 @@ tracker:
     # ⚠ 默认关：它会把车心往拟合中心拉（纯旋转 0.35/次），而车心本来由"硬钉到
     # 观测板"决定 —— 拟合中心依赖拟合器自己的几何(R/α/h)，几何没标好时这一拉会让
     # 模型整体偏离观测。实车单独 A/B 确认收益后再打开。
-    # 同步打开：纯旋转时中心不该动（拟合器判运动状态），小陀螺段能让车心更稳。
-    center_anchor: true
+    # **2026-10-11 用实车录制实测（tools/replay_obs_csv --local-fit，同一份角点）**：
+    #   拟合器关（基线）             → 模型-观测残差中位 7.78 px
+    #   开 + center_anchor=true      → 11.88 px   ← 唯一显著变差的开关
+    #   开 + center_anchor=false     →  7.79 px   ← 与基线持平
+    #   开 + 只留 ω（yaw/radius 也关）→  8.08 px
+    # 也就是：这次录制上"模型变差"完全是它造成的，跟 yaw 通道/慢层写回无关。
+    # 所以先关回去；上实车时再单独 A/B 一次（它是唯一一个"拟合器整体几何偏了就会
+    # 把车心一起拉偏"的开关，风险本来就最高）。
+    center_anchor: false
     center_anchor_spin_min: 1.0        # rad/s
     center_anchor_move_max: 0.15       # m/s
     center_anchor_gain_rotating: 0.35

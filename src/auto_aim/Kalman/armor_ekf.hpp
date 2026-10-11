@@ -637,10 +637,20 @@ public:
         const double predicted_angle = std::atan2(sin_total, cos_total);
         const double residual_angle = normalizeAngle(observed_angle - predicted_angle);
 
-        // d(atan2(s, c)) / ds = c, d(atan2(s, c)) / dc = -s.
+        // 观测 = θ + plate_angle，状态是 (x4, x5) = (sinθ, cosθ)：
+        //     ∂观测/∂x4 = ∂θ/∂s =  cosθ = x5
+        //     ∂观测/∂x5 = ∂θ/∂c = −sinθ = −x4
+        // **必须用状态自己的 (sinθ, cosθ)**，不能用"旋转之后"的
+        // (sin_total, cos_total) —— 后者只在 angleForPlate(plate_id) == 0
+        // （本相位表里就是 plate 1）时才相等。
+        // 2026-10-11 修：原来写的是 (cos_total, -sin_total)，导致 plate 0/2 的
+        // 更新增益恰好为 0（yaw 完全不动）、plate 3 反号；而 updateWithLocalFit
+        // 固定传 plate_id=0 → **局部拟合器的 yaw 观测整条链路是空操作**。
+        // 有限差分与直接注入双重验证见 docs/local_fit_tracker_responsibility_audit.md
+        // 审计项 D（修复前：plate 0/2 → +0.000°，plate 3 → −4.751°，plate 1 → +4.751°）。
         Matrix<1, kStateDim> H;
-        H(0, 4) = cos_total;
-        H(0, 5) = -sin_total;
+        H(0, 4) = x_(5, 0);
+        H(0, 5) = -x_(4, 0);
 
         const Matrix<1, 1> S = H * P_ * H.transpose();
         const double innovation_variance = S(0, 0) + noise;
@@ -766,12 +776,25 @@ public:
     //
     // 约定：`fit.yaw` 已是 **EKF 坐标系**下的 chassis yaw（plate 0 相位）。相机系→
     // EKF 系的换算由调用方（Tracker::applyLocalFit）完成。返回综合有效权重（0 表示未采用）。
+    /// @brief 相位表里"零偏移"的那块板：angleForPlate(1) == 0。
+    ///        想吃进"**底盘 yaw 本身**"这个观测量时，就用它当 plate_id ——
+    ///        updateAngle() 的预测值 = θ + angleForPlate(plate_id) = θ。
+    ///        为什么需要它：updateAngle 的语义是"某块板的相位"，直接传 0 表示
+    ///        "plate 0 的相位 = θ+90°"，和"底盘 yaw"差 90°（历史上就是把这两个
+    ///        混在一起，才让 yaw 通道失效的）。
+    static constexpr int kChassisYawPlateId = 1;
+
     double updateWithLocalFit(
         const LocalFitResult& fit, double yaw_noise = 0.02, double omega_noise = 0.05,
         double nis_threshold = std::numeric_limits<double>::infinity()) {
         if (!initialized_ || !fit.valid) return 0.0;
         const double q = std::clamp(fit.quality, 0.05, 1.0);
-        const double yaw_w = updateAngle(fit.yaw, /*plate_id=*/0, yaw_noise / q, nis_threshold);
+        // LocalFitResult::yaw 是**底盘 yaw**（与 angleForPlate 同一张相位表，见
+        // estimation/local_trajectory_fitter.hpp 的 plate_yaw_offsets 注释），
+        // 所以以"零偏移板"注入。fit.ref_armor_id 只用于调用方的门控/诊断 ——
+        // 表统一之后这里不再需要相位换算（见审计报告 P1-1/P1-2 的说明）。
+        const double yaw_w =
+            updateAngle(fit.yaw, kChassisYawPlateId, yaw_noise / q, nis_threshold);
         const double omega_w =
             updateOmega(fit.omega, omega_noise / q, nis_threshold);
         return std::max(yaw_w, omega_w);

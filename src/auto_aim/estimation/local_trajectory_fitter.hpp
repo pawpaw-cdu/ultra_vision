@@ -85,8 +85,19 @@ namespace auto_aim
         // 0.25s → 99%、5s → 同样 99%，所以 0.25s 足够且能防住病态初值。
         // 慢层结果的工龄由 LocalFitConfig::max_slow_result_age 兜（默认 2s）。
         double max_solver_time_s = 0.25;
-        // 板 yaw 偏移（armor_id → 偏移角）。默认四板 90° 均布。
-        std::vector<double> plate_yaw_offsets{0.0, M_PI / 2, M_PI, 3.0 * M_PI / 2};
+        // 板 yaw 偏移（armor_id → 该板相对**底盘 yaw** 的相位偏移）。
+        //
+        // **必须与 ArmorEKF::angleForPlate / chassis_model::armorPhaseOffset 同一张表**
+        // —— 也就是 (1−k)·90°：plate 0 → +90°（车左侧）、1 → 0°（正面）、
+        // 2 → −90°、3 → −180°。理由：拟合输出的 `LocalFitResult::yaw` 是给 EKF 当
+        // 底盘 yaw 用的（ArmorEKF::updateWithLocalFit 以"零偏移板"注入），
+        // 两张表不一致时拟合 yaw 与 EKF yaw 会整体差 ±90°/180°：四块板对称时被
+        // "模 90° 吸附"掩盖，启用逐板几何（plate_distance / l / h）后就变成模型分叉。
+        // 2026-10-11 从 {0, 90, 180, 270} 改成本表（两者差一次 id 反射 0↔1、2↔3，
+        // 模型的几何解不变，只是 θ 的代表元对齐）。见
+        // docs/local_fit_tracker_responsibility_audit.md 审计项 G。
+        std::vector<double> plate_yaw_offsets{
+            0.5 * M_PI, 0.0, -0.5 * M_PI, -M_PI};
     };
 
     class LocalTrajectoryFitter

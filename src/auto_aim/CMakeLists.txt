@@ -301,6 +301,20 @@ if(ULTRA_VISION_BUILD_TESTS)
   target_link_libraries(armor_geometry_test PRIVATE ${OpenCV_LIBS})
   add_test(NAME armor_geometry_test COMMAND armor_geometry_test)
 
+  # 相位观测自检（审计项 D 的回归）：updateAngle 对四个板位的增益/符号 +
+  # updateWithLocalFit 的 yaw / ω 两条通道必须各自独立可用。
+  # 纯头文件（armor_ekf.hpp 是实现头），无额外依赖。
+  add_executable(armor_ekf_angle_test
+      test/armor_ekf_angle_test.cpp
+  )
+  target_include_directories(armor_ekf_angle_test PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}
+      ${CMAKE_SOURCE_DIR}
+      ${OpenCV_INCLUDE_DIRS}
+  )
+  target_link_libraries(armor_ekf_angle_test PRIVATE ${OpenCV_LIBS})
+  add_test(NAME armor_ekf_angle_test COMMAND armor_ekf_angle_test)
+
   # 下位机协议层自检：CRC16 标准值 / 43B+29B 字节布局 / 打包解析往返 / 非法帧。
   # 真机"连上但不动"最常见的三个原因（CRC 口径、结构体 padding、帧长）都在这里钉死。
   add_executable(gimbal_protocol_test

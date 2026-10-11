@@ -1,10 +1,12 @@
 // local_trajectory_fitter 的可复现单测：合成四板小陀螺灯条观测 → 拟合 → 校验。
 // 覆盖：快层 θ/ω（正面 + 俯仰）、慢层 α/R（单步 refine 与四板联合结论）。
 #include "estimation/local_trajectory_fitter.hpp"
+#include "common/chassis_model.hpp"   // armorPhaseOffset：相位表的唯一来源
 
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <random>
 #include <vector>
 
@@ -53,7 +55,13 @@ namespace
             const double t = k * dt;
             for (int p = 0; p < n_plates; ++p)
             {
-                const double theta = m.omega * t + p * 2.0 * M_PI / n_plates;
+                // 板相位 = 底盘相位 + 该板的**配置**偏移。必须走配置里的表（而不是
+                // 这里写死 p·90°），否则"改相位表"这类改动不会被这个测试发现 ——
+                // 而相位表正是拟合器 ↔ EKF 之间最容易错的地方。
+                const double theta = m.omega * t +
+                    (p < static_cast<int>(m.cfg.plate_yaw_offsets.size())
+                         ? m.cfg.plate_yaw_offsets[static_cast<std::size_t>(p)]
+                         : p * 2.0 * M_PI / n_plates);
                 for (double a : { +0.5 * W, -0.5 * W })
                 {
                     LightBarObservation o;
@@ -117,6 +125,24 @@ int main()
               "alpha_R_converged", std::abs(R - 0.20), 0.02);
         std::cout << "    alpha=" << alpha * 180 / M_PI << "deg R=" << R
                   << " info_a=" << ia << " info_R=" << iR << "\n";
+    }
+
+    // ---- 相位表绑定：拟合器的 plate_yaw_offsets 必须与 EKF/chassis_model 同一张表 ----
+    // 两张表不一致时，"拟合 yaw"和"EKF yaw"会整体差 ±90°/180°：四块板对称时被
+    // "模 90° 吸附"掩盖，启用逐板几何（plate_distance / l / h）后就变成模型分叉。
+    {
+        std::cout << "相位表绑定 (fitter plate_yaw_offsets vs chassis_model::armorPhaseOffset):\n";
+        LocalTrajectoryFitConfig cfg;
+        for (int k = 0; k < 4; ++k)
+        {
+            const double expected = auto_aim::armorPhaseOffset(k);
+            const double actual = k < static_cast<int>(cfg.plate_yaw_offsets.size())
+                ? cfg.plate_yaw_offsets[static_cast<std::size_t>(k)]
+                : std::numeric_limits<double>::quiet_NaN();
+            check(std::isfinite(actual) &&
+                      std::abs(std::remainder(actual - expected, 2 * M_PI)) < 1e-9,
+                  "plate_offset_binding", actual, expected);
+        }
     }
 
     std::cout << (failures == 0 ? "ALL PASS\n" : "FAILURES\n");

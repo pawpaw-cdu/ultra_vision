@@ -2032,6 +2032,8 @@ int auto_aim::app::RealRunner::run()
                       << " nofit=" << tracker.localFitApplyNoFit()
                       << " stale=" << tracker.localFitApplyStale()
                       << " geometry=" << tracker.localFitApplyGeometry()
+                      // ysnap=相位代表元不可信、退回"模 90° 吸附"的次数（长期为 0 最好）。
+                      << " ysnap=" << tracker.localFitYawSnaps()
                       << " age=" << tracker.localFitApplyAgeMs() << "ms"
                       << " fitms=" << tracker.localFitLastMs()
                       // view=被选中那块板的视视角（度）：>graze_gate_deg 时该板的
