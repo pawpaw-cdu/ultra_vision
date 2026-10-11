@@ -35,6 +35,9 @@ public:
 
   Eigen::VectorXd ekf_x() const;
   const tools::ExtendedKalmanFilter & ekf() const;
+  /// 移植扩展（**非 sp_vision 原版**）：局部拟合器要往这个 EKF 里注入一路 yaw/ω 观测，
+  /// 所以需要可变引用。只暴露引用，滤波器逻辑一行没动。
+  tools::ExtendedKalmanFilter & ekf_mutable() { return ekf_; }
   std::vector<Eigen::Vector4d> armor_xyza_list() const;
 
   bool diverged() const;

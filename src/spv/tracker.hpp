@@ -25,6 +25,10 @@ public:
 
   std::string state() const;
 
+  /// 移植扩展（**非 sp_vision 原版**）：`track()` 返回的是内部 target_ 的**拷贝**，
+  /// 而局部拟合器注入一路观测必须拿到内部那个。只暴露引用，关联/状态机逻辑没动。
+  Target & target_mutable() { return target_; }
+
   std::list<Target> track(
     std::list<Armor> & armors, std::chrono::steady_clock::time_point t,
     bool use_enemy_color = true);

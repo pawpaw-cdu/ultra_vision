@@ -66,6 +66,41 @@ SPV_LIGHTBAR_LEN=0.060 SPV_SMALL_ARMOR_WIDTH=0.1315 SPV_BIG_ARMOR_WIDTH=0.221
    按 `enemy_color` 过滤。所以生成的配置里 `enemy_color` 必须和建 `Armor` 时给的
    `color_id` 一致，否则所有检测会被 `remove_if` 掉（第一次跑就是这样，tracking=0）。
 
+## 第三个坑：外参的**坐标系约定**（2026-10-11）
+
+NUC 上 sp_vision 跑的是 `~/sp_vision_25/configs/standard3.yaml`（现场版，已抄成
+`configs/spv_extrinsics.yaml`）。但**不能把它的 `R_camera2gimbal` 直接拼进我们的链路**：
+
+- 它那份是给 sp_vision 自己的云台系标的（x 前 / y 左 / z 上）；
+- 我们的 `cameraToBaseRotation` 输出的是我们的体坐标系（x 右 / y 下 / z 前）；
+- 两者相差一个固定的 90° 置换。直接拼会把世界系的"竖直"拧歪，而 sp_vision 的模型
+  假设四块板在水平面内绕中心转 —— 竖直一歪模型就散。
+
+实测（同一份实车检测流，指标 = 检测中心 ↔ 最近模型板心）：
+
+| 配置 | 中位 |
+|---|---|
+| 自洽（单位外参，spv 的总变换 = 我们的 world←camera） | **3.9 px** |
+| 硬拼 spv 的 R_camera2gimbal（带补偿 R_g2w=W·R^T） | 27.1 px |
+| 硬拼 configs/camera.yaml 的 R_camera2gimbal | 149 px |
+
+**结论**：重投影对"外参选哪一组"本来就是不变的（前后用同一套就抵消），真正敏感的是
+**坐标系约定是否自洽**。要 100% 复刻 sp_vision 的链路，正确做法不是搬外参数字，而是
+连它的"云台角→世界系"那一步一起搬 —— 它用的是 **C 板 IMU 四元数**（`set_R_gimbal2world(q)`），
+不是 yaw/pitch。所以下一步应该：把 IMU 四元数也录进检测流（real_runner 里已经有
+`io::ImuSample`），再喂给它。现在默认用自己的自洽口径（`SPV_USE_SPV_EXTRINSICS=1` 可切换）。
+
+## 局部拟合器的接入状态（`--local-fit`）
+
+已经接好了：spv 的状态就是 `[x,vx,y,vy,z,vz,a,w,r,l,h]`，`a/w` 直接是底盘 yaw 与角速度，
+所以注入只要一路 `1×11` 的 H（不需要像我们原来那套处理 sin/cos）。工具里也做了：
+单板弧关联（同帧多板混进一条弧会让 rmse 直接爆）、**去畸变**、**用 EKF 中心热启动**。
+
+但**这一份录制上拟合器还没收敛**：`fitWithSlow` 的 rmse 在 37~97px（门限 ~17px），
+166 次尝试 0 次有效。注意同一份数据用 `replay_obs_csv --local-fit` 却出过 7.95px ——
+因为它沿用了 `local_fit.min_depth=1.5` 的过滤，**把 1.2~1.5m 的近距帧全丢了**。
+也就是说：**拟合器在近距（1.2~1.5m）这一段是失效的**，这是接下来要查的第一件事。
+
 ## 怎么用
 
 ```bash
