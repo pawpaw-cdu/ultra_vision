@@ -231,6 +231,31 @@ endif()
 # hand_eye_calibrate：静止标定物 + 多组云台姿态 → 相机→云台外参（手眼）
 # （原 calibrate_capture"拍照存盘"工具已删除：现场标定直接在 hand_eye_calibrate --live 里完成）
 
+# ---- sp_vision_25 的滤波器 / 底盘构造 / 重投影（**移植版**）--------------------
+# 为什么搬：用户在真机上验证过 sp_vision_25 的底盘模型构造与重投影"非常优秀"，
+# 而我们自己这套的几何学习等补丁在实车上会漂（实测 l 在 18s 内从 +3.5cm 走到
+# −16cm）。所以底座换成它的实现，局部拟合器只在这个底座上做 A/B。
+# 只搬了 armor/target/tracker/solver + extended_kalman_filter/math_tools；
+# 裁掉全向感知重载与 spdlog（换零依赖桩）；滤波器逻辑一行没动，namespace 改 spv。
+# 见 src/spv/tools/logger.hpp 与 docs/spv_port.md。
+find_package(Eigen3 QUIET)
+if(Eigen3_FOUND)
+  add_library(spv_core STATIC
+      src/spv/armor.cpp
+      src/spv/target.cpp
+      src/spv/tracker.cpp
+      src/spv/solver.cpp
+      src/spv/tools/extended_kalman_filter.cpp
+      src/spv/tools/math_tools.cpp)
+  target_include_directories(spv_core PUBLIC
+      ${CMAKE_SOURCE_DIR}/src/spv ${CMAKE_SOURCE_DIR}/src
+      ${EIGEN3_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${YAML_CPP_INCLUDE_DIRS})
+  target_link_libraries(spv_core PUBLIC Eigen3::Eigen ${OpenCV_LIBS} ${YAML_CPP_LDFLAGS})
+  message(STATUS "spv_core: 启用（sp_vision_25 的 tracker/solver 移植版）")
+else()
+  message(STATUS "spv_core: 跳过（未找到 Eigen3）")
+endif()
+
 # 实车数据集离线回放（配合 node.cpp 的 ULTRA_VISION_RECORD）
 # 实车数据集离线回放（配合 node.cpp 的 ULTRA_VISION_RECORD）
 set(REPLAY_SOURCES
@@ -469,6 +494,17 @@ endif()
 if(TARGET replay_obs_csv AND TARGET auto_aim_local_fit)
   target_link_libraries(replay_obs_csv PRIVATE auto_aim_local_fit)
   target_compile_definitions(replay_obs_csv PRIVATE ULTRA_VISION_HAVE_LOCAL_FIT=1)
+endif()
+
+# 用 sp_vision 的 solver/tracker 回放实车检测流（见 tools/spv_replay.cpp）。
+if(TARGET spv_core)
+  add_executable(spv_replay tools/spv_replay.cpp)
+  target_include_directories(spv_replay PRIVATE
+      ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src/auto_aim ${CMAKE_SOURCE_DIR}/src
+      ${CMAKE_SOURCE_DIR}/common
+      ${OpenCV_INCLUDE_DIRS} ${YAML_CPP_INCLUDE_DIRS})
+  target_link_libraries(spv_replay PRIVATE spv_core
+      ${OpenCV_LIBS} ${YAML_CPP_LDFLAGS} Threads::Threads)
 endif()
 
 if(ULTRA_VISION_BUILD_TESTS)
