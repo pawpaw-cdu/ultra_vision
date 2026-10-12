@@ -344,8 +344,16 @@ int main(int argc, char* argv[])
         fcfg.K = {camera_matrix.at<double>(0, 0), camera_matrix.at<double>(1, 1),
                   camera_matrix.at<double>(0, 2), camera_matrix.at<double>(1, 2)};
         fcfg.max_rmse_deg = env_d("ULTRA_VISION_LOCAL_FIT_MAX_RMSE_DEG", 0.4);
-        fcfg.lightbar_len = env_d("ULTRA_VISION_LOCAL_FIT_L", 0.060);
-        fcfg.plate_width = env_d("ULTRA_VISION_LOCAL_FIT_W", 0.135);
+        // ⚠ 拟合器的**几何必须与 tracker 同源**（都来自 yaml 的 local_fit 段）：
+        // 原来这里写死 env 默认 0.060/0.135，而 tracker 的推入用 yaml 的值 ——
+        // 于是"观测的 bar_offset"和"模型的 plate_width"各是一套，A/B 直接失真
+        // （实测：只改 yaml 的 lightbar_len，四次不同取值结果**逐位相同**）。
+        const YAML::Node lf = tracker_file["tracker"] && tracker_file["tracker"]["local_fit"]
+            ? tracker_file["tracker"]["local_fit"] : YAML::Node();
+        const double lf_l = (lf && lf["lightbar_len"]) ? lf["lightbar_len"].as<double>() : 0.060;
+        const double lf_w = (lf && lf["plate_width"]) ? lf["plate_width"].as<double>() : 0.135;
+        fcfg.lightbar_len = env_d("ULTRA_VISION_LOCAL_FIT_L", lf_l);
+        fcfg.plate_width = env_d("ULTRA_VISION_LOCAL_FIT_W", lf_w);
         fcfg.gimbal_pitch = 0.0;
         fcfg.center_init = {{0.0, 0.0, 3.0}};
         fitter = std::make_unique<auto_aim::LocalTrajectoryFitter>(fcfg);
