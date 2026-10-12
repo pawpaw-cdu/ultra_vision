@@ -41,6 +41,7 @@
 #include "config_loader.hpp"
 #include "config/tracker_config_loader.hpp"
 #include "Kalman/tracker.hpp"
+#include "Kalman/tracker_utils.hpp"
 #include "perception/pnp_solver.hpp"
 #include "visualization/projection.hpp"
 #ifdef ULTRA_VISION_HAVE_LOCAL_FIT
@@ -491,7 +492,23 @@ int main(int argc, char* argv[])
             fcfg.h_prior = tracker.chassisGeometry().height(0);
             fcfg.use_rcv = true;
             fcfg.rcv = tracker.fitterRcv();
+            // 实验（SPV_FIT_PITCH_DEG）：用指定俯仰重建拟合器的 R_cv，验证"回传 pitch 是否可信"。
+            // 回放里 pose.camera_to_gimbal 是默认值（=单位阵），所以 R_cv = R_cb(pitch)ᵀ·B。
+            if (const char* pv = std::getenv("SPV_FIT_PITCH_DEG")) {
+                const auto cb = auto_aim::tracker_detail::cameraToBaseRotation(
+                    pose.yaw, std::atof(pv) * M_PI / 180.0);
+                const double B[3][3] = {{0, 1, 0}, {0, 0, -1}, {1, 0, 0}};
+                for (int i = 0; i < 3; ++i)
+                    for (int j = 0; j < 3; ++j) {
+                        double v = 0;
+                        for (int k = 0; k < 3; ++k) v += cb(k, i) * B[k][j];
+                        fcfg.rcv[i * 3 + j] = v;
+                    }
+            }
             fitter->setConfig(fcfg);
+            if (std::getenv("SPV_HINT_DIAG") != nullptr && local_fit_counter % 200 == 0)
+                std::cerr << "[hint] frame=" << local_fit_counter << " theta0=" << fcfg.theta0_hint
+                          << " omega=" << fcfg.omega_hint << " cam_yaw=" << pose.yaw << std::endl;
             // A/B：默认把**本帧全部检测**都推入（历史行为）。设 SPV_PUSH_FIRST=1 时
             // 只推第一块 —— 用来验证"同帧多板被串进同一条弧"到底伤不伤拟合质量。
             const bool push_first = std::getenv("SPV_PUSH_FIRST") != nullptr;

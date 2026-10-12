@@ -81,6 +81,9 @@ namespace auto_aim
                 lf["omega_max_rmse_px"].as<double>(cfg.local_fit.omega_max_rmse_px);
             // A 段深度门控（实车靶 1.2~1.6m，别用 sp_vision 的 1.5）
             cfg.local_fit.min_depth = lf["min_depth"].as<double>(cfg.local_fit.min_depth);
+            cfg.local_fit.plate_width = lf["plate_width"].as<double>(cfg.local_fit.plate_width);
+            cfg.local_fit.lightbar_len =
+                lf["lightbar_len"].as<double>(cfg.local_fit.lightbar_len);
             cfg.local_fit.max_depth = lf["max_depth"].as<double>(cfg.local_fit.max_depth);
             cfg.local_fit.yaw_bias_alpha =
                 lf["yaw_bias_alpha"].as<double>(cfg.local_fit.yaw_bias_alpha);

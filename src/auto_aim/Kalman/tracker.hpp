@@ -67,6 +67,11 @@ namespace auto_aim
         // |偏角|<60°），离开即清段——保证图像左右=板面切向、且相位跨度可控。
         double front_gate = 0.5;
         double assoc_gate_px = 45.0;    // 帧间板心关联门限（px），配合常速预测
+        /// 灯条中心间距 / 灯条长度（m）。**必须与拟合器的 Config 同源**：
+        /// 历史上这里是 `constexpr 0.135` 硬编码，拟合器 yaml 里的 plate_width 根本
+        /// 不生效（"两个地方各写一套"的老毛病）。放在这里由 yaml 统一给。
+        double plate_width = 0.135;
+        double lightbar_len = 0.060;
         // 参与局部拟合的板深下限（m，滤掉近处杂检/道具）。
         // ⚠ **1.5 是抄 sp_vision 的值，对这块场地是错的**：实车靶就在 1.2~1.6 m，
         // 1.5 会把大部分帧直接滤掉（sp 端口实测 attempts=0，一个解都出不来）。

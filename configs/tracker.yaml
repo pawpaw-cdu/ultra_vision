@@ -79,6 +79,9 @@ tracker:
     # 直接滤掉（sp 端口实测 attempts=0，一个解都出不来）。
     min_depth: 0.8
     max_depth: 9.0
+    # 灯条几何：**唯一的来源**（拟合器与 A 段门控都用它）。0.1315/0.060 与 PnP 同源。
+    plate_width: 0.1315
+    lightbar_len: 0.060
     period_frames: 10          # 每多少帧触发一次（低频）
     max_result_age: 0.20       # s：**快层**(ω/yaw)结果比当前帧老过它就丢弃
     # **慢层**(R/α/h/中心)单独的工龄上限：拟合在低功耗机器上（NUC）要几百 ms，

@@ -19,7 +19,8 @@ namespace auto_aim
     namespace
     {
         // 灯条在板面切向的偏移（±W/2）；与 LocalTrajectoryFitter 的 plate_width 一致。
-        constexpr double k_local_fit_plate_width = 0.135;
+        // 板宽改由 yaml 给（local_fit.plate_width）——原来这里硬编码 0.135，
+        // 把拟合器 yaml 里的 plate_width 完全架空（见 tracker.hpp 的同名注释）。
 
         double wrapPi(double a)
         {
@@ -55,7 +56,8 @@ namespace auto_aim
         // A3 正对门控：sep/(W·fx/depth)=cos(板相对相机偏角)，要求 > front_gate。
         // 只有正对时图像左右才对应板面切向的 ±W/2；离开正对区后左右翻号，喂进去会追镜像解。
         const double sep = armor.right.center.x - armor.left.center.x;
-        const double sep_max = k_local_fit_plate_width * camera_fx_ / std::max(0.5, depth);
+        const double plate_width = cfg_.local_fit.plate_width;
+        const double sep_max = plate_width * camera_fx_ / std::max(0.5, depth);
         const bool front = sep > cfg_.local_fit.front_gate * sep_max;
 
         // A1 身份：按图像板心"最近邻 + 常速预测"关联到某条已开弧。
@@ -165,8 +167,8 @@ namespace auto_aim
             arc->obs.push_back(o);
             ++local_fit_pushed_;
         };
-        push_bar(armor.left, +0.5 * k_local_fit_plate_width);
-        push_bar(armor.right, -0.5 * k_local_fit_plate_width);
+        push_bar(armor.left, +0.5 * plate_width);
+        push_bar(armor.right, -0.5 * plate_width);
 
         // 弧内只保留最近 window_frames 帧（每帧 2 根灯条）
         last_push_time_ = t;
