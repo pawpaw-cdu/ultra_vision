@@ -1,0 +1,187 @@
+# 《局部拟合器与 6D 位姿估计完整方案》对账
+
+> 日期：2026-10-12。对账对象：用户提供的三份文档 ——
+> ①《Ultra_Vision 架构优化方案》②《从 6D PnP 到 2D 约束优化的完整数学推导》
+> ③《局部拟合器与 6D 位姿估计完整方案》。
+>
+> 方法：逐条对着**当前代码**核实（给出 file:line），能离线量的一律量出来。
+> 结论分三种：**已做** / **缺** / **照做会倒退**。
+
+---
+
+## 0. 结论先讲
+
+1. 方案列的四个新模块里，**三个已经在代码里**（高度约束、跨板联合、机械约束降维 + 1D yaw 精修），
+   其中**一条（EKF 相位转换）照做会双重计相位、直接倒退**。
+2. 真正缺的只有三件：**2D 优化求解器**、**时间戳/检测精度**、**板编号模块化**。
+3. 而"2D 优化"有一个**前置门**，方案没有提：它的 ψ 来自拟合器，而拟合器 yaw 的精度
+   **完全由拟合质量分层**——本轮实测（同一份实车检测流）：
+
+   | 拟合 rmse | 样本 | 与 EKF yaw 的差（模 90°） |
+   |---|---|---|
+   | < 3 px | 312 | 中位 **+0.49°**、p10/p90 −0.08°/+0.93°、**std 0.57°** |
+   | 3–8 px | 223 | 中位 +1.21°、std 9.7° |
+   | 8–16 px | 1185 | 中位 +5.67°、std **22.6°** |
+
+   也就是说：**方案里 σ_ψ ≈ 0.5–1° 的假设成立——但只在 rmse < 3 px 那 18% 的拟合上成立。**
+   而当前配置的门限是 `max_rmse_deg = 0.4°`，在 fx=2399 下等于 **16.7 px**，
+   恰好把 σ_ψ = 22° 的那一大坨放进了 yaw 注入通道。这解释了 yaml 里那句
+   "直接注入会让慢转工况从 0.3px 劣化到 30px"。
+
+   **所以要先把门控收掉，2D 优化才有意义。**
+
+---
+
+## 1. 逐条对账
+
+| 方案条目 | 方案说法 | 代码事实 | 判定 |
+|---|---|---|---|
+| 机械约束降维 6D→4D | "当前 PnP 仍以 4D/6D 求解，未利用机械约束" | `PnpGeometry::yaw_refine`（`perception/pnp_solver.hpp:21`）+ `armor_pitch_deg = 15`（`:27`）；`refineArmorYaw()` 固定 tvec + 机械约束，**只在方位角 ψ 上做 1D 搜索**（`:51`） | **已做**，且比方案更进一步（1D 而非 4D） |
+| 降自由度 Yaw 优化 | 只优化 yaw | 同上 | 已做 |
+| UV 重投影观测 | "单帧 PnP 已用，可与拟合器融合为 2D 优化" | 没有 2D 求解器（`rg solvePose2D` 无） | **缺** |
+| 高度约束 | "未用；Cz 精度提升 3–5×" | `HeightPrior`（`estimation/local_trajectory_fitter.cpp:102-113`）+ `h_prior/h_prior_sigma`（`estimation/local_trajectory_fitter.hpp:51-52`）+ `real_runner` 每帧喂 `chassisGeometry().height(0)`（`app/real_runner.cpp:997-1003`） | **已做**；但"3–5×"没有实测支撑（本轮实测它是**防错**项：先验给错时 rmse 0.06→34 px） |
+| 跨板联合 | "未用" | `joint_plates` 已实现且**比方案的写法稳**：两段式——先拟合参考弧得 C，再用**种子帧 PnP 板心相对 C 的方位角**定各弧相位 k，然后联合重拟合，失败回退单板（`Kalman/tracker_localfit.cpp:221-258`），默认 `false` | **已实现、未验证** |
+| 板编号识别 | "YOLO-Pose 输出 tag_id，直接识别装甲板数字（1=英雄，3/4/5=步兵）" | NN 的类别是 `color × number × size`（**车号**）；板号来自 `plateIdFor(armor) = selectPlateId(toWorld(armor))`，读 EKF 状态（`Kalman/tracker.hpp:635`） | **半做**；"tag_id → 板号"是**概念错误**（见 §2.5） |
+| EKF 相位转换 `θ_sel = θ_ref + π/2·(id_sel − id_ref)` | "新增" | 拟合器的相位表已与 EKF **统一**（`armorPhaseOffset`，`kChassisYawPlateId = 1`，`armor_ekf.hpp:785`），`updateWithLocalFit` 按"零偏移板"注入（`:787-801`） | **照做会倒退**（见 §2.6） |
+| `LocalFitResult::ref_armor_id` | "需增加" | 已有（`common/types.hpp:139`） | 已做 |
+| 职责分离（A 段不依赖选板） | "新增 TrackerLocalFit 类" | A 段已经在做，且 `plateIdFor` **只当偏好不当硬条件**（`Kalman/tracker_localfit.cpp:61-75`） | **功能已做**（方案 4.6 的独立类是重构，不是缺口） |
+| 异步/低频线程 | "已有" | `start_worker/stop_worker/take_latest` + `period_ms`（`estimation/local_trajectory_fitter.hpp`） | 已做 |
+| 配置项 | `window_size / min_frames / max_frames / height_constraint / multi_plate / pose_2d / armor_id` | 实际键名是 `window_frames / min_bars`；`h_prior*`、`joint_plates` 已有等价物；`pose_2d`、`armor_id` 两段不存在 | 键名需对齐、两段待建 |
+
+---
+
+## 2. 需要更正的地方
+
+### 2.1 `Z` 的语义混了（最重要，直接影响 2D 优化的正确性）
+
+方案 §4.3 自己写了这个疑点（"拟合器的 `Z` 是旋转中心的深度，而 `t_z` 是装甲板中心的深度"），
+但在 §5.2 又按 `t_z = Ẑ` 直接把问题降到 2D。这两者相差
+`[R_cv · R(θ) · p_armor_v]_z`，量级 `R·|sinθ|`：**R = 0.2 m、θ = 90° 时就是 20 cm** ——
+比方案自己写的 σ_Z = 1–5 cm 大一个数量级，也比 4D PnP 的 ~20 mm 差。
+
+正确做法是用拟合器输出的**完整刚体** `(C, θ, R, h, α)` 反算板心深度：
+
+```
+t_z = C_z + [ R_cv · ( (R − b·sinα)·n̂ + a·t̂ + (h + b·cosα)·ẑ ) ]_z
+```
+
+（本项目里就是 `barEndpointV` + `vehicleToCamera` 那两段；2026-10-11 的合成自检正是这样把
+真值参数投影成端点、再回灌验证的。）
+
+**在没改这一点之前上 2D 优化，会把"旋转中心深度"的误差直接灌进 `t_x, t_y`。**
+
+### 2.2 拟合器的 yaw 精度不是常数，是被质量门控的
+
+见 §0 的表。补充两条：
+
+* 分层看下来，残差的中位是稳定的（四段的 yaw-offset 中位 0.4°/0.5°/0.8°/1.8°，漂移 < 1.5°），
+  也就是说**它是一个"常值偏差 + 与拟合质量成反比的噪声"**，不是漂移；
+* 方案 §3.3 的边界条件"ω≈0 时窗口内角度覆盖不足"正是这件事的物理原因：
+  覆盖不足 ⇒ 代价函数在 yaw 方向上是平谷 ⇒ 拟合出来的 yaw 不可信，**即使 rmse 看起来不大**。
+  所以更稳的门是**相位跨度**（弧段端点之间的 Δθ = |ω|·T），而不是只看 rmse。
+
+**动作**：把 yaw 注入的门从 `max_rmse_deg = 0.4°`（16.7 px）收到 **3 px** 量级，
+或者按 `Δθ ≥ 30~40°` 门控；ω 通道可以继续用宽松门（ω 的稳健性远好于 yaw）。
+
+### 2.3 跨板联合的相位不是固定 π/2
+
+四块板的相对相位是 `k·π/2`（k ∈ {0,1,2,3}），而且换板时 k 要**估**出来。
+UV 的实现用"种子帧 PnP 板心相对 C 的方位角"定 k，比固定 π/2 稳（避开病态 yaw）；
+另外本轮实测：**跨板窗口本质非凸**——合成自检 S2（前半板 A、后半板 B、θ 连续）
+有时精确收敛（0.9 px、ω=2.92），有时落进坏解（34 px、ω=5.24）。
+所以跨板联合必须保留"失败就退化为单板"的回退（UV 已有，`tracker_localfit.cpp:263`）。
+
+### 2.4 命中率增益的说法要降级
+
+方案 §2/§7/§10 的 "+12%~+15%" 是从更早的 A/B 抄来的。按本轮证据，拟合器**可证**的增益是：
+中速 + 正面时的 **ω** 与**旋转中心**；yaw 只在好拟合上可用。
+而 2–4 rad/s 区间"单帧 PnP + EKF 本来就够用"（sp_vision 报告 §7.4 的可观测性分析），
+5 rad/s 以上主流方案不跟板。建议把这行改成"**待验证**"，验收口径直接用
+`docs/layer_error_budget.md` 里现成的量（`aim_settled` 占空、`|yaw_err|`、`in_fire_window`）。
+
+### 2.5 `tag_id` ≠ 板号
+
+`tag_id`（本项目是 NN 的 `number` 类）回答的是"**这是哪台车**"，不是"**这是车上的第几块板**"。
+板号 0..3 只能由几何给出（相对车心的方位角 + EKF 关联）。
+方案 §5.1 写"直接识别装甲板数字 → 板编号"会把这两件事混在一起；
+`ArmorIdRecognizer` 的正确定义应该是：**输入 = PnP 径向角 + EKF 关联结果（马氏距离）+
+历史投票，输出 = 板号 0..3**，多帧投票只用于抑制抖动。
+
+### 2.6 EKF 相位转换不要加
+
+方案 §4.7 的 `θ_sel = θ_ref + π/2·(id_sel − id_ref)` 是针对"拟合器 yaw 带板号偏移"的写法。
+本项目在 2026-10-11 的审计（`docs/local_fit_tracker_responsibility_audit.md` P1-2）里
+**已经把拟合器的相位表改成与 EKF 同一张表**，`LocalFitResult::yaw` 现在就是**底盘 yaw**，
+注入用 `kChassisYawPlateId = 1`（0° 板）。再叠一次相位偏移会**双重计数**，
+等于把 yaw 观测拧 90° 的整数倍。
+
+### 2.7 2D 优化（钉死 ψ 与 t_z）——**已实现并测过，结论是不要做**
+
+已落地：`estimation/pose_2d_solver.{hpp,cpp}`（在 ψ、t_z 固定时**严格线性**，
+闭式一次解出 t_x,t_y；放开 t_z 时几轮 GN）+ `test/pose_2d_solver_test.cpp`（ctest 已接入）。
+它同时验证了方案里**对**的部分和**错**的部分：
+
+| 量 | 6D PnP（IPPE，σ_px=0.5px、2.2 m、132 mm 板） | 2D 求解器 | 判定 |
+|---|---|---|---|
+| 正面 yaw | 1.40° | 继承输入的 **0.57°**（实车好拟合实测） | **拟合器赢 2.5×** ✓ |
+| (t_x,t_y) | **0.27 mm** | 0.26 mm（真值 ψ,t_z）／0.27 mm（实测 σ_ψ=0.6°、σ_Z=2cm） | **没有增益** ✗ |
+| t_z | **5.8 mm** | 不估计（按输入固定）；方案说拟合器 Z 是 10~50 mm | 钉成拟合器的 Z → **变差 2~9×** ✗ |
+
+**结论**：(t_x,t_y) 与 t_z 本来就由角点决定、已经在噪声底
+（σ_tx ≈ σ_px·Z/fx ≈ 0.46 mm，实测 0.27 mm），"降维"买不到它们；
+能买到的只有 **yaw**——也就是角点看不见的那个方向。
+而 UV 现有的 `refineArmorYaw()`（固定 tvec + 1D ψ 搜索）**已经就是正确的分解**；
+把 t_z 也钉给拟合器是往反方向走。
+
+两个副产物（都在单测里钉住了）：
+
+* **机械倾角有数值证据**：正面观测时 ψ 的 profile-cost 曲率 pitch=0° → 10.75、
+  15° → 582.5（**54×**）——直接验证方案 §2.1/§8.3 的机制。
+* **灵敏度**：ψ 偏 1° 只让 (t_x,t_y) 动 **0.03 mm**（残差 0 → 0.11 px），偏 5° 动 0.17 mm。
+  即 ψ 的误差**不污染位置**，只污染**朝向**并在残差上留痕 —— 这正好给了一个廉价的门控：
+  用 2D 残差反查"这一帧的 ψ 可信不可信"，比只看拟合 rmse 更直接。
+
+---
+
+## 3. 建议的落地顺序（在方案 §8 基础上重排）
+
+| 顺序 | 任务 | 为什么排这里 | 验收 |
+|---|---|---|---|
+| 1 | **yaw 门控收口**：`max_rmse_deg` → 3 px 量级，或改用 Δθ 门 | 2D 优化的前置条件；当前门控把 σ_ψ=22° 放进了 yaw 通道 | 好拟合（rmse<3px）占比与 yaw offset 稳定性同时报出 |
+| 2 | ~~2D 求解器~~ → **保留"PnP 出 t_x,t_y,t_z + 拟合器只出 yaw"** | §2.7 实测：降维买不到位置/深度，只能买到 yaw；UV 的 `refineArmorYaw` 已是这个分解 | 用 2D 残差当 ψ 的门控（已实现，可直接接） |
+| 3 | **跨板联合在线验证**（把 `joint_plates` 打开，用 §2.3 的判据） | 已实现但没验证；它是打破 R–Cz 耦合最直接的手段 | 打开后 R 的收敛速度与 C_z 的稳定性（同一条实车流 A/B） |
+| 4 | **时间戳 + 检测精度**（方案 P1） | 识别层 0.12~0.16 m 是整条链最大项，也是拟合器上限 | 静止靶重投影残差；拟合 rmse<3px 的**占比**提升 |
+| 5 | **板编号模块化**（按 §2.5 重新定义输入） | 只影响跨板联合的触发可靠性 | 板号跳变率 |
+| 6 | 真机 A/B（NUC） | 前面都是离线 | `layer_error_budget.md` 的 4 档转速表 |
+
+---
+
+## 4. 顺带发现（sp_vision 端口）
+
+* `Target::isinit` 在 sp_vision **原版**里就从来没被赋过 `true`（`checkinit()` 恒 false）。
+  我在端口里写的"拟合结果注入 EKF"用了 `if (target_.isinit)` 当守卫 →
+  **注入路径从来没跑过**（和 UV 历史上 `updateChassisFromFit` 零调用点是同一类 bug）。
+  已改为按状态机判断（`state_ != "lost"`）。
+* 本轮量 yaw 偏差用的日志是 `SPV_FIT_EKF_LOG`（`sp_vision_25/tools/local_fit_replay.cpp`），
+  它同时落 `fit.yaw/fit.omega/fit.rmse` 与整车 EKF 的 `a/w`，是用来回答
+  "拟合器能不能当 yaw 观测源"的最小工具。
+
+---
+
+## 5. 复现命令
+
+```bash
+# 2D 求解器与"6D PnP vs 2D"的判决（纯数学，无需相机/Ceres）
+cd Ultra_Vision && cmake --build build_sim -j8 --target pose_2d_solver_test && \
+  ./build_sim/pose_2d_solver_test
+
+# 拟合器 yaw 相对整车 EKF 的偏差（按拟合质量分层）
+cd sp_vision_25
+SPV_LOCAL_FIT_RCV_MODE=1 SPV_LOCAL_FIT_MIN_DEPTH=0.8 \
+  LOCAL_FIT_LOG=/tmp/fit.csv SPV_FIT_EKF_LOG=/tmp/fit_ekf.csv \
+  ./build/local_fit_replay --detections /tmp/det2.csv \
+      --uv-camera ../Ultra_Vision/configs/camera.yaml --out-flat false
+# 然后对 /tmp/fit_ekf.csv 算 remainder(fit.yaw + ekf.a, π/2) 的分布，并按 fit_rmse 分层
+```
+
+写于 2026-10-12。

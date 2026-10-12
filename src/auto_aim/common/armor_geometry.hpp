@@ -64,6 +64,37 @@ namespace auto_aim
         return axes;
     }
 
+    /// @brief **PnP 关键点**用的基向量：由"板法向方位角 ψ + 机械俯仰"给出
+    ///        (normal, tangent, vertical) 三轴（相机系）。
+    ///
+    /// 与上面 `armorAxesFromRadial` 的关系（**别混用，这是两个用途**）：
+    ///   · `armorAxesFromRadial` 用"径向 + 竖直"描述**实物板**（画框/整车模型用），
+    ///     角点顺序 lb/lt/rt/rb 与图像上下**同向**；
+    ///   · 本函数描述的是**神经网络四个关键点**那块等效矩形（`getArmor3DPoints`），
+    ///     它的 y/z 标注是 180° 旋转过的（lb 落在图像上沿）。两者给出的角点**集合**
+    ///     相同（矩形对 180° 旋转对称），所以位置与法向完全一致，只是标注不同；
+    ///     但**同一次计算里必须只用一套**，混用会让带倾角 α 的深度不对称（顶/底
+    ///     端点深度不同）被错误配对，产生系统性重投影偏差。
+    ///
+    /// 数学与 `perception/pnp_solver.cpp` 原先的局部 `armorBasis` **逐位一致**，
+    /// 提取到这里是为了让 `pose_2d_solver` 与 `refineArmorYaw` 共用同一份约定
+    /// （ψ 的含义必须完全相同，否则"拟合器给的 yaw"接不进 2D 优化）。
+    ///
+    /// @param psi   板法向在相机 x-z 平面内的方位角（rad），`atan2(n_z, n_x)`
+    /// @param pitch 机械俯仰（RM 规范 ≈15°）
+    inline void armorKeypointBasis(double psi, double pitch, cv::Vec3d& normal,
+                                   cv::Vec3d& tangent, cv::Vec3d& vertical)
+    {
+        const cv::Vec3d n0(std::cos(psi), 0.0, std::sin(psi));
+        const cv::Vec3d v0(0.0, 1.0, 0.0);   // 相机 y 向下
+        const cv::Vec3d t0 = v0.cross(n0);
+        const double cp = std::cos(pitch);
+        const double sp = std::sin(pitch);
+        normal = cp * n0 + sp * v0;
+        vertical = -sp * n0 + cp * v0;
+        tangent = t0;   // 绕切向轴旋转，切向不变
+    }
+
     /// @brief 四个角点（左下、左上、右上、右下）——纯刚体构造，三轴都按三维向量参与，
     ///        不再有"切向只有 x/z、竖直只补 y"这种只在相机 pitch≈0 时才成立的写法。
     inline std::vector<cv::Vec3d> armorCorners(const cv::Vec3d& center, const ArmorAxes& axes,

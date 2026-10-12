@@ -1,4 +1,5 @@
 #include "pnp_solver.hpp"
+#include "common/armor_geometry.hpp"
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -9,22 +10,10 @@ namespace auto_aim
     {
         constexpr double kPi = 3.14159265358979323846;
 
-        /// @brief 装甲板在给定方位角 ψ 与机械俯仰角 β 下的相机系基向量。
-        ///        先取"竖直板"（法向 = 径向水平、竖直 = 相机 +y、切向 = 竖直×法向），
-        ///        再绕切向轴俯仰 β：n = cosβ·n0 + sinβ·v0，v = −sinβ·n0 + cosβ·v0。
-        ///        β=0 时退化为竖直板；β=15°（RM 规范）让正对相机的单板 yaw 一阶可观测。
-        void armorBasis(double psi, double pitch, cv::Vec3d& normal, cv::Vec3d& tangent,
-                        cv::Vec3d& vertical)
-        {
-            const cv::Vec3d n0(std::cos(psi), 0.0, std::sin(psi));
-            const cv::Vec3d v0(0.0, 1.0, 0.0);   // 相机 y 向下
-            const cv::Vec3d t0 = v0.cross(n0);
-            const double cp = std::cos(pitch);
-            const double sp = std::sin(pitch);
-            normal = cp * n0 + sp * v0;
-            vertical = -sp * n0 + cp * v0;
-            tangent = t0;   // 绕切向轴旋转，切向不变
-        }
+        // 基向量已提取到 common/armor_geometry.hpp 的 armorKeypointBasis()：
+        // `pose_2d_solver` 也要用**同一份** ψ 约定，不能各写一份
+        // （历史上"整车模型在三个地方各写一套、各错一点"就是这么来的）。
+        using auto_aim::armorKeypointBasis;
 
         /// @brief 给定 ψ 时四角在**归一化像平面**上的重投影误差平方和（按 fx/fy 折回像素）。
         ///        归一化坐标用 undistortPoints 预先算好，所以这里只做针孔投影，
@@ -36,7 +25,7 @@ namespace auto_aim
                                    const std::vector<cv::Point2f>& normalized)
         {
             cv::Vec3d normal, tangent, vertical;
-            armorBasis(psi, pitch, normal, tangent, vertical);
+            armorKeypointBasis(psi, pitch, normal, tangent, vertical);
             // 物点顺序（getArmor3DPoints）：lb, lt, rt, rb
             //   P = tvec + obj.y·tangent + obj.z·vertical
             const double obj_y[4] = {half_width, half_width, -half_width, -half_width};
@@ -55,7 +44,7 @@ namespace auto_aim
         cv::Mat rotationFromYaw(double psi, double pitch)
         {
             cv::Vec3d normal, tangent, vertical;
-            armorBasis(psi, pitch, normal, tangent, vertical);
+            armorKeypointBasis(psi, pitch, normal, tangent, vertical);
             // 列 = 物体 x(法向) / y(切向) / z(竖直)，与 getArmor3DPoints 对应。
             return (cv::Mat_<double>(3, 3) <<
                 normal[0], tangent[0], vertical[0],

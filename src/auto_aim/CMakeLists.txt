@@ -16,6 +16,7 @@ set(AUTO_AIM_CORE_SOURCES
     control/shooter.cpp
     control/target_selector.cpp
     estimation/rotation_rate_estimator.cpp
+    estimation/pose_2d_solver.cpp
     perception/detector.cpp
     perception/pnp_solver.cpp
     perception/armor_source.cpp
@@ -314,6 +315,22 @@ if(ULTRA_VISION_BUILD_TESTS)
   )
   target_link_libraries(armor_ekf_angle_test PRIVATE ${OpenCV_LIBS})
   add_test(NAME armor_ekf_angle_test COMMAND armor_ekf_angle_test)
+
+  # 2D 位姿求解器（6D→4D→2D 的最后一环）自检：拟合器刚体解 → 角点 → 解回来。
+  # 只需 pose_2d_solver.cpp + pnp_solver.cpp（要 getArmor3DPoints 的物点定义），
+  # 不依赖 Ceres/YAML/相机。
+  add_executable(pose_2d_solver_test
+      test/pose_2d_solver_test.cpp
+      estimation/pose_2d_solver.cpp
+      perception/pnp_solver.cpp
+  )
+  target_include_directories(pose_2d_solver_test PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}
+      ${CMAKE_SOURCE_DIR}
+      ${OpenCV_INCLUDE_DIRS}
+  )
+  target_link_libraries(pose_2d_solver_test PRIVATE ${OpenCV_LIBS})
+  add_test(NAME pose_2d_solver_test COMMAND pose_2d_solver_test)
 
   # 下位机协议层自检：CRC16 标准值 / 43B+29B 字节布局 / 打包解析往返 / 非法帧。
   # 真机"连上但不动"最常见的三个原因（CRC 口径、结构体 padding、帧长）都在这里钉死。
