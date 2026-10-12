@@ -12,6 +12,7 @@
 
 #include "Kalman/tracker.hpp"
 #include "Kalman/tracker_utils.hpp"
+#include "estimation/local_fit_gate.hpp"
 
 namespace auto_aim
 {
@@ -399,6 +400,24 @@ namespace auto_aim
                     (cfg_.local_fit.yaw_use_omega_full - cfg_.local_fit.yaw_use_omega_min),
                 0.0, 1.0);
         }
+        // ---- yaw 通道的质量门（2026-10-12）--------------------------------------
+        // 实测（同一份实车检测流，对照整车 EKF 的 yaw，模 90°）：
+        //   rmse <3px → σ_ψ=0.57° ｜ 3~8px → 9.7° ｜ 8~16px → 22.6°；ω 各档都稳。
+        // 而在加这道门之前，自旋时 |ω|≥2.5 就给满权重 → 那一坨 68% 的坏 yaw 直接进 EKF。
+        // ω 通道保持宽松（localFitOmegaUsable）：它是"无滞后"的那一路，也是我们在
+        // 自旋段真正要用的量。
+        LocalFitGateConfig gate_cfg;
+        gate_cfg.yaw_max_rmse_px = cfg_.local_fit.yaw_max_rmse_px;
+        gate_cfg.yaw_min_phase_span_deg = cfg_.local_fit.yaw_min_phase_span_deg;
+        gate_cfg.omega_max_rmse_px = cfg_.local_fit.omega_max_rmse_px;
+        const LocalFitYawVerdict yaw_verdict = evaluateLocalFitYaw(*fit, gate_cfg);
+        local_fit_yaw_verdict_ = static_cast<int>(yaw_verdict);
+        local_fit_phase_span_deg_ = fit->phase_span_rad * 180.0 / M_PI;
+        if (yaw_verdict != LocalFitYawVerdict::ok) {
+            yaw_weight = 0.0;
+            ++local_fit_yaw_gated_;
+        }
+
         if (!cfg_.local_fit.use_yaw || std::getenv("ULTRA_VISION_LOCAL_FIT_NO_YAW") != nullptr) {
             conv.yaw = ekf_yaw;
             yaw_weight = 0.0;
@@ -410,7 +429,10 @@ namespace auto_aim
         }
         if (yaw_weight <= 0.0) conv.yaw = ekf_yaw;
 
-        const double fit_weight = (fresh || slow_ok)
+        // ω 通道同样过质量门：拟合没贴住观测时，连角速度一起丢掉（实测见 gate 头文件）。
+        const bool omega_ok = localFitOmegaUsable(*fit, gate_cfg);
+        if (!omega_ok) ++local_fit_omega_gated_;
+        const double fit_weight = (fresh || slow_ok) && omega_ok
             ? ekf_.updateWithLocalFit(conv, yaw_noise_eff, cfg_.local_fit.omega_noise,
                                       std::numeric_limits<double>::infinity())
             : 0.0;

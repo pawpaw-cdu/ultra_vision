@@ -332,6 +332,18 @@ if(ULTRA_VISION_BUILD_TESTS)
   target_link_libraries(pose_2d_solver_test PRIVATE ${OpenCV_LIBS})
   add_test(NAME pose_2d_solver_test COMMAND pose_2d_solver_test)
 
+  # 局部拟合 yaw 质量门（实测分层：rmse<3px→σ_ψ≈0.6°，8~16px→22.6°，而 ω 各档都稳）。
+  # 纯头文件（estimation/local_fit_gate.hpp），无额外依赖。
+  add_executable(local_fit_gate_test
+      test/local_fit_gate_test.cpp
+  )
+  target_include_directories(local_fit_gate_test PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}
+      ${CMAKE_SOURCE_DIR}
+      ${OpenCV_INCLUDE_DIRS}
+  )
+  add_test(NAME local_fit_gate_test COMMAND local_fit_gate_test)
+
   # 下位机协议层自检：CRC16 标准值 / 43B+29B 字节布局 / 打包解析往返 / 非法帧。
   # 真机"连上但不动"最常见的三个原因（CRC 口径、结构体 padding、帧长）都在这里钉死。
   add_executable(gimbal_protocol_test

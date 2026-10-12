@@ -377,6 +377,9 @@ int main(int argc, char* argv[])
                 out << ",q" << p << "x" << k << ",q" << p << "y" << k;
         // 诊断列**必须在最后**，且与写入顺序一致（错位过一次，教训）。
         out << ",fit_yaw_raw_deg,ekf_yaw_deg,fit_omega";
+        // EKF 状态协方差对角线（诊断"P 是否真实"）：0=x 1=vx 2=y 3=vy 4=sin
+        // 5=cos 6=ω 7=z 8=vz 9=l 10=h。
+        for (int i = 0; i < 11; ++i) out << ",P" << i;
         out << '\n';
     }
 
@@ -525,7 +528,10 @@ int main(int argc, char* argv[])
         double obs_py = 0.0;
         double model_px = 0.0;
         double model_py = 0.0;
-        std::vector<cv::Point2f> all_px;
+        // 16 个模型角点：**必须**在声明时就填满。只在 have_model 分支里 assign
+        // 会让"丢目标/快照无效"的帧在落盘时越界访问空 vector（实测段错误，
+        // 2026-10-11 修）。
+        std::vector<cv::Point2f> all_px(16, cv::Point2f(-1.0f, -1.0f));
         const int obs_plate = tracker.getLastObservedPlateId();
         if (tracker.getState() != auto_aim::TrackerState::LOST)
         {
@@ -642,6 +648,7 @@ int main(int argc, char* argv[])
             out << ',' << (have_fit ? fit_yaw_raw : 0.0) << ','
                 << (have_fit ? tracker.getYaw() * 180.0 / M_PI : 0.0) << ','
                 << (have_fit ? fit_omega : 0.0);
+            for (int i = 0; i < 11; ++i) out << ',' << tracker.ekfCovarianceDiag(i);
             out << '\n';
         }
         ++rows;
@@ -679,6 +686,11 @@ int main(int argc, char* argv[])
                   << " applied=" << tracker.localFitApplied()
                   << " geometry=" << tracker.localFitApplyGeometry()
                   << " ysnap=" << tracker.localFitYawSnaps()
+                  // ygate=被 yaw 质量门拦下的次数（rmse>yaw_max_rmse_px 或 相位跨度不足）
+                  << " ygate=" << tracker.localFitYawGated()
+                  << " yexact=" << tracker.localFitYawExact()
+                  << " yspan=" << tracker.localFitPhaseSpanDeg()
+                  << " ogate=" << tracker.localFitOmegaGated()
                   << " lastR=" << tracker.localFitLastR()
                   << " lastRmse=" << tracker.localFitLastRmse()
                   << " | Rgeo=" << tracker.chassisGeometry().distance(0) << "/"

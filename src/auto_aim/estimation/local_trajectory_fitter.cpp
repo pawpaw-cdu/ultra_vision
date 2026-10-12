@@ -148,6 +148,16 @@ namespace auto_aim
             return std::exp(-rmse_px / std::max(0.1, scale));
         }
 
+        /// 这条弧在窗口内覆盖的相位跨度（rad）。yaw 能不能被定住看的是它，而不是 rmse。
+        inline double phaseSpanRad(
+            const LocalTrajectoryFitter::FastFit& f,
+            const std::vector<LightBarObservation>& obs)
+        {
+            if (obs.size() < 2) return 0.0;
+            const double dt = obs.back().timestamp - obs.front().timestamp;
+            return std::abs(f.omega * dt + 0.5 * f.beta * dt * dt);
+        }
+
         void endpointPc(const LocalTrajectoryFitConfig& cfg, double alpha, double R, double h, double theta,
                         double a, double b, const double* center, const double* drift, double dt,
                         double* pc)
@@ -304,6 +314,7 @@ namespace auto_aim
         out.h = f.h;
         for (int i = 0; i < 3; ++i) out.drift[i] = f.drift[i];
         out.reprojection_rmse_px = f.rmse_px;
+        out.phase_span_rad = phaseSpanRad(f, observations);
         out.quality = qualityFromRmse(config_, f.rmse_px);
         out.num_bars = static_cast<int>(observations.size());
         return out.valid;
@@ -392,6 +403,7 @@ namespace auto_aim
         out.h = f.h;
         for (int i = 0; i < 3; ++i) out.drift[i] = f.drift[i];
         out.reprojection_rmse_px = f.rmse_px;
+        out.phase_span_rad = phaseSpanRad(f, observations);
         out.quality = qualityFromRmse(config_, f.rmse_px);
         out.num_bars = static_cast<int>(observations.size());
         return out.valid;

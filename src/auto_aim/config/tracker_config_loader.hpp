@@ -72,6 +72,16 @@ namespace auto_aim
                 lf["yaw_use_omega_min"].as<double>(cfg.local_fit.yaw_use_omega_min);
             cfg.local_fit.yaw_use_omega_full =
                 lf["yaw_use_omega_full"].as<double>(cfg.local_fit.yaw_use_omega_full);
+            // yaw 通道的质量门（见 estimation/local_fit_gate.hpp）
+            cfg.local_fit.yaw_max_rmse_px =
+                lf["yaw_max_rmse_px"].as<double>(cfg.local_fit.yaw_max_rmse_px);
+            cfg.local_fit.yaw_min_phase_span_deg =
+                lf["yaw_min_phase_span_deg"].as<double>(cfg.local_fit.yaw_min_phase_span_deg);
+            cfg.local_fit.omega_max_rmse_px =
+                lf["omega_max_rmse_px"].as<double>(cfg.local_fit.omega_max_rmse_px);
+            // A 段深度门控（实车靶 1.2~1.6m，别用 sp_vision 的 1.5）
+            cfg.local_fit.min_depth = lf["min_depth"].as<double>(cfg.local_fit.min_depth);
+            cfg.local_fit.max_depth = lf["max_depth"].as<double>(cfg.local_fit.max_depth);
             cfg.local_fit.yaw_bias_alpha =
                 lf["yaw_bias_alpha"].as<double>(cfg.local_fit.yaw_bias_alpha);
             cfg.local_fit.yaw_bias_limit_deg =

@@ -67,7 +67,10 @@ namespace auto_aim
         // |偏角|<60°），离开即清段——保证图像左右=板面切向、且相位跨度可控。
         double front_gate = 0.5;
         double assoc_gate_px = 45.0;    // 帧间板心关联门限（px），配合常速预测
-        double min_depth = 1.5;         // 参与局部拟合的板深下限（m，滤掉近处杂检/道具）
+        // 参与局部拟合的板深下限（m，滤掉近处杂检/道具）。
+        // ⚠ **1.5 是抄 sp_vision 的值，对这块场地是错的**：实车靶就在 1.2~1.6 m，
+        // 1.5 会把大部分帧直接滤掉（sp 端口实测 attempts=0，一个解都出不来）。
+        double min_depth = 0.8;
         double max_depth = 9.0;         // 上限（m）
         // 多板联合（方向2 P0）：把**同时可见的多块板**堆进同一次拟合——共享 C/R/h、
         // 相位相差固定角（由 plate_yaw_offsets 给）。打破单板 R–Cz 耦合、Yaw 更准。
@@ -90,6 +93,18 @@ namespace auto_aim
         // 所以按 |ω| 线性混合：≤min 全用 EKF，≥full 全用拟合，中间过渡。
         double yaw_use_omega_min = 1.0;    // rad/s
         double yaw_use_omega_full = 2.5;   // rad/s
+        // ---- yaw 通道的**质量门**（2026-10-12 加，见 estimation/local_fit_gate.hpp）----
+        // 修复前这里**没有任何质量门**：自旋时 |ω|≥2.5 就给满权重，等于把
+        // "rmse 8~16px、yaw 偏 22°"那一坨（占实测 68%）直接注进 EKF。
+        // 实测分层（同一份实车检测流，对照整车 EKF 的 yaw）：
+        //   rmse <3px → σ_ψ=0.57° ｜ 3~8px → 9.7° ｜ 8~16px → 22.6°；而 ω 各档都稳。
+        // 所以 yaw 要过门、ω 不需要 —— 「ω 与 yaw 的门控不对称」是实测结论，不是妥协。
+        double yaw_max_rmse_px = 3.0;          // yaw 可注入的最大拟合 rmse
+        double yaw_min_phase_span_deg = 20.0;  // yaw 可注入的最小弧段相位跨度
+        /// ω 通道的 rmse 门（**修正了"ω 任何档都稳"这个错假设**：见
+        /// estimation/local_fit_gate.hpp 的 omega_max_rmse_px 注释与实测数字）。
+        /// <=0 表示不门（旧行为）。
+        double omega_max_rmse_px = 3.0;
         double yaw_bias_alpha = 0.02;      // 学习率
         double yaw_bias_limit_deg = 30.0;  // 限幅（防跑飞）
         /// 相位代表元门限（度）。拟合 yaw 与 EKF yaw 的残差超过它 → 认为"参考板号
@@ -507,6 +522,9 @@ namespace auto_aim
             return rotation_rate_estimator_.omega();
         }
         double getEkfOmega() const { return ekf_.getOmega(); }
+        /// @brief 整车 EKF 状态协方差对角元（诊断"P 是否真实"用；只读）。
+        ///        状态：0=x 1=vx 2=y 3=vy 4=sinθ 5=cosθ 6=ω 7=z 8=vz 9=l 10=h。
+        double ekfCovarianceDiag(int i) const { return ekf_.covarianceDiag(i); }
         bool hasRotationRate() const { return rotation_rate_estimator_.valid(); }
         double getArmorRadius() const { return cfg_.armor_radius; }
         /// @brief 在线改回转半径（局部拟合器慢层的 R）。同时改滤波器几何、tracker 自己的
@@ -556,6 +574,16 @@ namespace auto_aim
         /// @brief 参考板号自洽（|残差| ≤ ref_yaw_gate_deg）的累计次数，与
         ///        localFitYawSnaps() 对照着看就是"精确注入 vs 吸附"的比例。
         int localFitYawExact() const { return local_fit_yaw_exact_; }
+        /// @brief yaw 通道被**质量门**拦下的累计次数（拟合 rmse 超限 或 相位跨度不足）。
+        ///        与 localFitYawExact() 一起看 = "该喂 yaw 的帧里有多少被门控挡住"。
+        ///        实测口径见 estimation/local_fit_gate.hpp。
+        int localFitYawGated() const { return local_fit_yaw_gated_; }
+        /// @brief ω 通道被质量门拦下的累计次数（实测：放宽深度后 ω 也会害人，见 gate 头文件）。
+        int localFitOmegaGated() const { return local_fit_omega_gated_; }
+        /// @brief 最近一次 yaw 门控的判定（0=ok 1=bad_rmse 2=bad_span 3=invalid）。
+        int localFitYawVerdict() const { return local_fit_yaw_verdict_; }
+        /// @brief 最近一次拟合的相位跨度（度）——yaw 可辨识性的直接读数量。
+        double localFitPhaseSpanDeg() const { return local_fit_phase_span_deg_; }
         double localFitApplyAgeMs() const { return local_fit_apply_age_ms_; }
         double localFitLastMs() const { return local_fit_last_ms_; }
         double lastViewDeg() const { return last_view_deg_; }
@@ -683,6 +711,11 @@ namespace auto_aim
         int local_fit_yaw_snaps_ = 0;
         /// 参考板号自洽（走精确注入）的次数，与上面配对。
         int local_fit_yaw_exact_ = 0;
+        /// yaw 被质量门拦下的次数（见 estimation/local_fit_gate.hpp）。
+        int local_fit_yaw_gated_ = 0;
+        int local_fit_omega_gated_ = 0;
+        int local_fit_yaw_verdict_ = 0;
+        double local_fit_phase_span_deg_ = 0.0;
         /// 最近一次"拟合 yaw − EKF yaw"残差（rad，换算+外推之后）。
         double local_fit_yaw_residual_ = 0.0;
         double local_fit_apply_age_ms_ = -1.0;

@@ -75,6 +75,10 @@ tracker:
     enabled: false
     window_frames: 24          # 滑窗帧数；覆盖相位 ≥ π/3 才有 ω 可辨识性
     min_bars: 8                # 窗口内至少这么多条灯条观测才拟合
+    # A 段深度门控：**实车靶就在 1.2~1.6 m**，原来抄 sp_vision 的 1.5 会把大部分帧
+    # 直接滤掉（sp 端口实测 attempts=0，一个解都出不来）。
+    min_depth: 0.8
+    max_depth: 9.0
     period_frames: 10          # 每多少帧触发一次（低频）
     max_result_age: 0.20       # s：**快层**(ω/yaw)结果比当前帧老过它就丢弃
     # **慢层**(R/α/h/中心)单独的工龄上限：拟合在低功耗机器上（NUC）要几百 ms，
@@ -106,6 +110,17 @@ tracker:
     # 那部分留作精确注入（将来启用逐板几何、yaw 完全可观测之后才会大量走到）。
     # 诊断：状态行 `ysnap=` / 工具里的 `exact=` 就是这两条路径的比例。0 = 永远吸附。
     ref_yaw_gate_deg: 40.0
+    # ---- yaw 通道的**质量门**（2026-10-12 加；见 estimation/local_fit_gate.hpp）----
+    # 实测（同一份实车检测流，对照整车 EKF 的 yaw，模 90°）：rmse<3px → σ_ψ=0.57°；
+    # 3~8px → 9.7°；8~16px → **22.6°**（占 68%）。而 ω 各档都稳。
+    # 加这道门之前，自旋时 |ω|≥yaw_use_omega_full 就给满权重，等于把那一坨坏 yaw
+    # 直接注进 EKF —— 这就是"直接注入会让慢转从 0.3px 劣化到 30px"的来源。
+    yaw_max_rmse_px: 3.0          # yaw 可注入的最大拟合 rmse（像素，换分辨率要重标）
+    yaw_min_phase_span_deg: 20.0  # 弧段相位跨度不足时 yaw 是平谷（方案 §3.3 的边界条件）
+    # ω **也要**过 rmse 门（修正"ω 任何档都稳"这个假设）：把深度门放宽到 0.8 后注入
+    # 次数 36→343，底盘一致性从 32.6px 劣化到 69.7px（此时 yaw 已全被挡，只能是 ω）。
+    # 0 = 退回旧行为（A/B 用）。
+    omega_max_rmse_px: 3.0
     yaw_noise: 0.02            # 拟合 yaw 的观测噪声（rad²）
     omega_noise: 0.05          # 拟合 ω 的观测噪声
     # 相机系→整车系符号（标定项）：拟合器 θ 约定与 EKF ω 约定相反 → -1
@@ -127,9 +142,15 @@ tracker:
     # 里的 `updateChassisFromFit(fit->R, fit->alpha, fit->h)` 调用删掉了，于是
     # updateChassisFromFit 零调用点、local_fit_apply_geometry_ 无自增 ——
     # 也就是说：**yaml 里写着 true，但慢层从来没写回过模型**（状态行 geometry= 恒为 0）。
-    # 现已恢复调用（见 docs/local_fit_tracker_responsibility_audit.md 审计项 F），
-    # 打开时 R/α/h 会按 radius_alpha + radius_max_step 限幅慢跟，可用 A/B 验证收益。
-    use_fit_radius: true
+    # 审计项 F 把那句调用补回来了，但 **2026-10-12 用它做 A/B 发现它是净害的**：
+    # 同一份实车检测流（det2.csv，1380 帧）"检测↔模型板心"中位：
+    #     use_fit_radius=true  → 74.0 px（geometry=257）
+    #     use_fit_radius=false → 32.6 px（geometry=0）
+    # 同一批 36 次拟合、同样的 yaw/ω 注入，只有"写回几何"这一项不同 → +41px。
+    # 原因：把拟合器还没验证的慢层 (R, α, h) 直接写进**底盘模型**，等于用一个
+    # 精度未知的量去改所有下游（重投影/选板/瞄点）都依赖的那把尺子。
+    # 所以默认关，**要打开必须先过离线 A/B（"检测↔模型板心"必须变好）**。
+    use_fit_radius: false
     radius_alpha: 0.25         # 每次有效拟合最多跟 25% 的差值
     radius_max_step: 0.02      # 单次最大变化（m）
     # ---- 旋转中心先验（拟合器判运动状态）--------------------------------------

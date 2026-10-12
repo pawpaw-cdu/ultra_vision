@@ -2074,6 +2074,13 @@ int auto_aim::app::RealRunner::run()
                       << " geometry=" << tracker.localFitApplyGeometry()
                       // ysnap=相位代表元不可信、退回"模 90° 吸附"的次数（长期为 0 最好）。
                       << " ysnap=" << tracker.localFitYawSnaps()
+                      // ygate=yaw 被**质量门**拦下的次数（rmse>3px 或 相位跨度<20°），
+                      // yexact=走精确注入的次数，yspan=最近一次拟合的相位跨度（度）。
+                      // ω 通道不受这道门影响（实测 ω 各档都稳）。
+                      << " ygate=" << tracker.localFitYawGated()
+                      << " yexact=" << tracker.localFitYawExact()
+                      << " yspan=" << tracker.localFitPhaseSpanDeg()
+                      << " ogate=" << tracker.localFitOmegaGated()
                       << " age=" << tracker.localFitApplyAgeMs() << "ms"
                       << " fitms=" << tracker.localFitLastMs()
                       // view=被选中那块板的视视角（度）：>graze_gate_deg 时该板的

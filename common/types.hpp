@@ -142,6 +142,14 @@ namespace auto_aim
         double h = 0.0;                 // 板心相对旋转中心的高度（m，向上为正；慢层）
         double drift[3] = {0, 0, 0};    // 旋转中心的平移速度（m/s，相机系；快层）
         double reprojection_rmse_px = 0.0;  // 诊断用，不作为唯一有效性判据
+        /// 这条弧在窗口内**覆盖的相位跨度**（rad，=|ω·T + ½βT²|）。
+        /// 为什么单列一个字段：`reprojection_rmse_px` 只是"模型和点贴不贴"，
+        /// 而 yaw 能不能被这条弧**定住**取决于相位覆盖——覆盖不足时代价函数在
+        /// yaw 方向是平谷（残差看着不大，yaw 却可能偏 20°+）。
+        /// 2026-10-12 实车检测流实测（按拟合 rmse 分层，对照整车 EKF 的 yaw）：
+        ///   rmse < 3px → σ_ψ = 0.57°；3~8px → 9.7°；8~16px → 22.6°。
+        /// 所以 yaw 通道必须同时看 rmse 与相位跨度（见 estimation/local_fit_gate.hpp）。
+        double phase_span_rad = 0.0;
         double quality = 0.0;           // 0~1，越大越可信（用于缩放观测协方差）
         int num_bars = 0;               // 参与拟合的灯条数
     };
