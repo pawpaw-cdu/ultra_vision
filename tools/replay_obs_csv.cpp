@@ -506,9 +506,6 @@ int main(int argc, char* argv[])
                     }
             }
             fitter->setConfig(fcfg);
-            if (std::getenv("SPV_HINT_DIAG") != nullptr && local_fit_counter % 200 == 0)
-                std::cerr << "[hint] frame=" << local_fit_counter << " theta0=" << fcfg.theta0_hint
-                          << " omega=" << fcfg.omega_hint << " cam_yaw=" << pose.yaw << std::endl;
             // A/B：默认把**本帧全部检测**都推入（历史行为）。设 SPV_PUSH_FIRST=1 时
             // 只推第一块 —— 用来验证"同帧多板被串进同一条弧"到底伤不伤拟合质量。
             const bool push_first = std::getenv("SPV_PUSH_FIRST") != nullptr;
