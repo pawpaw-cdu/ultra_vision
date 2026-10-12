@@ -10,8 +10,18 @@
 //   · 弧段：取该板"正对相机"（两灯条像素横向间距最大）的 N 帧连续弧，
 //     与在线"一块板连续可见弧"同义。
 // 用法: local_fit_from_lightbars <csv> <fx fy cx cy> <alpha_deg> <R> <L> <W> <gimbal_pitch_deg> [plate] [frames]
+//
+// 反向标定用（env，2026-10-12）：
+//   ULTRA_VISION_LF_BLUR_MS=<ms>   运动模糊模型：观测端点 = 曝光窗口内 [t-ms, t] 的
+//                                  投影位置平均（K=9 个亚采样，端点按相邻帧线性插值）。
+//                                  用来回答"实车检测端等效有多少运动误差"。
+//   ULTRA_VISION_LF_SHIFT_MS=<ms>  **负对照**：把每个观测的时间戳整体平移 ms
+//                                  （即用 t+ms 时刻的端点）。常量时间偏移是**纯相位**误差，
+//                                  会被 θ0/ω 吸收 → 残差应当几乎不变。
+//   ULTRA_VISION_LF_BLUR_LOG=1     额外打印"等效模糊像素数"（按图像速度×曝光时间算）。
 #include "estimation/local_trajectory_fitter.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
@@ -39,6 +49,10 @@ int main(int argc, char** argv)
     const double L=std::atof(argv[8]), W=std::atof(argv[9]);
     cfg.lightbar_len=L; cfg.plate_width=W; cfg.gimbal_pitch=std::atof(argv[10])*M_PI/180.0;
     cfg.omega_init=3.0; cfg.center_init={{(float)0.0,(float)0.0,(float)3.0}};
+    const double blur_ms = std::getenv("ULTRA_VISION_LF_BLUR_MS")
+        ? std::atof(std::getenv("ULTRA_VISION_LF_BLUR_MS")) : 0.0;
+    const double shift_ms = std::getenv("ULTRA_VISION_LF_SHIFT_MS")
+        ? std::atof(std::getenv("ULTRA_VISION_LF_SHIFT_MS")) : 0.0;
     const int want_plate = (argc>11)? std::atoi(argv[11]) : 0;
     const int want_frames = (argc>12)? std::atoi(argv[12]) : 20;
 
@@ -69,6 +83,47 @@ int main(int argc, char** argv)
     auto proj=[&](double X,double Y,double Z,double&u,double&v){u=cfg.K.fx*X/Z+cfg.K.cx; v=cfg.K.fy*Y/Z+cfg.K.cy;};
     const int maxcol = pixel_mode ? std::max({i_t,i_pl,iu0,iv0,iu1,iv1,iu2,iv2,iu3,iv3}) : std::max({i_t,i_pl,i0,i1,i2,i3,i4,i5});
 
+    // ---- 反向标定用：每根灯条的 3D 端点时间序列（用于亚采样插值）-----------------
+    // key = bar_id，value = 按时间排序的 {t_us, x0,y0,z0, x1,y1,z1}
+    std::map<int, std::vector<std::array<double, 7>>> bar_series;
+    // 8 根灯条 × 每帧：这既是"模糊"的采样源，也是算图像速度的源。
+    // 先扫一遍文件把 3D 端点收全（pixel 模式下没有 3D 端点，模糊功能自动失效）。
+    {
+        std::ifstream f2(argv[1]); std::string l2; std::getline(f2, l2);
+        if (!pixel_mode && i0 >= 0 && i3 >= 0)
+        {
+            while (std::getline(f2, l2))
+            {
+                if (l2.empty()) continue;
+                std::stringstream ss(l2); std::string tok; std::vector<double> v;
+                while (std::getline(ss, tok, ',')) { try { v.push_back(std::stod(tok)); } catch (...) { v.push_back(std::nan("")); } }
+                if ((int)v.size() <= i3) continue;
+                if ((int)v[i_pl] != want_plate) continue;
+                const int bid = (i_bar >= 0) ? static_cast<int>(v[i_bar]) : 0;
+                bar_series[bid].push_back({v[i_t], v[i0], v[i1], v[i2], v[i3], v[i4], v[i5]});
+            }
+            for (auto& kv : bar_series)
+                std::sort(kv.second.begin(), kv.second.end(),
+                          [](const std::array<double,7>& a, const std::array<double,7>& b){ return a[0] < b[0]; });
+        }
+    }
+    // 在时间 tau(us) 上线性插值该灯条的两个端点；返回 false 表示没有足够样本。
+    auto sample_bar = [&](int bid, double tau_us, double* t3, double* b3) -> bool {
+        auto it = bar_series.find(bid);
+        if (it == bar_series.end() || it->second.size() < 2) return false;
+        const auto& v = it->second;
+        if (tau_us <= v.front()[0]) { for (int k=0;k<3;++k){ t3[k]=v.front()[1+k]; b3[k]=v.front()[4+k]; } return true; }
+        if (tau_us >= v.back()[0])  { for (int k=0;k<3;++k){ t3[k]=v.back()[1+k];  b3[k]=v.back()[4+k];  } return true; }
+        for (std::size_t i = 1; i < v.size(); ++i)
+            if (v[i][0] >= tau_us)
+            {
+                const double w = (tau_us - v[i-1][0]) / std::max(1.0, v[i][0] - v[i-1][0]);
+                for (int k=0;k<3;++k) { t3[k] = v[i-1][1+k] + w*(v[i][1+k]-v[i-1][1+k]); b3[k] = v[i-1][4+k] + w*(v[i][4+k]-v[i-1][4+k]); }
+                return true;
+            }
+        return false;
+    };
+
     // 按帧时间分组（文件顺序 == 时间顺序）
     std::vector<Frame> frames; std::map<long long,size_t> frame_idx;
     while(std::getline(f,line)){ if(line.empty())continue;
@@ -94,9 +149,38 @@ int main(int argc, char** argv)
         else
         {
             BarObs bo; bo.bar_id = (i_bar>=0)? static_cast<int>(v[i_bar]) : 0;
-            double uu0,vv0,uu1,vv1; proj(v[i0],v[i1],v[i2],uu0,vv0); proj(v[i3],v[i4],v[i5],uu1,vv1);
+            double uu0,vv0,uu1,vv1;
+            if (blur_ms > 0.0)
+            {
+                // **运动模糊模型**：观测端点 = 曝光窗口 [t-blur, t] 内投影位置的平均。
+                // K=9 个亚采样（中点法），端点用相邻帧线性插值。真实探测器在模糊条上
+                // 报出的角点≈拖影的质心，所以"取平均"是一阶模型。
+                const int K = 9;
+                double s0u=0,s0v=0,s1u=0,s1v=0; int cnt=0;
+                for (int k = 0; k < K; ++k)
+                {
+                    const double frac = (k + 0.5) / K;                 // (0,1)
+                    const double tau = v[i_t] - blur_ms * 1000.0 * (1.0 - frac);
+                    double t3[3], b3[3];
+                    if (!sample_bar(bo.bar_id, tau, t3, b3)) continue;
+                    double au,av,bu,bv; proj(t3[0],t3[1],t3[2],au,av); proj(b3[0],b3[1],b3[2],bu,bv);
+                    s0u+=au; s0v+=av; s1u+=bu; s1v+=bv; ++cnt;
+                }
+                if (cnt == 0) { proj(v[i0],v[i1],v[i2],uu0,vv0); proj(v[i3],v[i4],v[i5],uu1,vv1); }
+                else { uu0=s0u/cnt; vv0=s0v/cnt; uu1=s1u/cnt; vv1=s1v/cnt; }
+            }
+            else
+            {
+                proj(v[i0],v[i1],v[i2],uu0,vv0); proj(v[i3],v[i4],v[i5],uu1,vv1);
+            }
             // top = 图像上端（投影后 v 更小的端点）；(x0,y0,z0)/(x1,y1,z1) 来自网格顶点序，
             // 实测恒有 y0>y1（相机 y 向下）→ x0 端是下端，直接当 top 会造成 ~L 的系统偏差。
+            if (shift_ms != 0.0)
+            {
+                double t3[3], b3[3];
+                if (sample_bar(bo.bar_id, v[i_t] + shift_ms * 1000.0, t3, b3))
+                { proj(t3[0],t3[1],t3[2],uu0,vv0); proj(b3[0],b3[1],b3[2],uu1,vv1); }
+            }
             if (vv1 < vv0) { bo.ut=uu1; bo.vt=vv1; bo.ub=uu0; bo.vb=vv0; }
             else           { bo.ut=uu0; bo.vt=vv0; bo.ub=uu1; bo.vb=vv1; }
             bo.cu = 0.5*(uu0+uu1);
@@ -139,6 +223,22 @@ int main(int argc, char** argv)
     auto_aim::LocalFitResult r;
     const bool fit_ok=fitter.fit(win,alpha,R,r);
     std::cout<<std::fixed<<std::setprecision(4);
+    // 等效模糊像素数：|图像速度| × 曝光时间（用弧段首尾灯条中心的位移估速度）
+    if (blur_ms > 0.0 || shift_ms != 0.0)
+    {
+        const Frame& f0 = ok[best_start];
+        const Frame& f1 = ok[best_start + N - 1];
+        const double dt = (f1.t_us - f0.t_us) * 1e-6;
+        if (dt > 1e-6)
+        {
+            const double d0 = std::hypot(f0.bars[0].cu - f1.bars[0].cu, f0.bars[0].vt - f1.bars[0].vt);
+            const double d1 = std::hypot(f0.bars[1].cu - f1.bars[1].cu, f0.bars[1].vt - f1.bars[1].vt);
+            const double speed = 0.5 * (d0 + d1) / dt;   // px/s
+            std::cout << "  [注入] blur=" << blur_ms << "ms shift=" << shift_ms
+                      << "ms  图像速度≈" << speed << "px/s  等效模糊≈"
+                      << speed * blur_ms * 1e-3 << "px\n";
+        }
+    }
     std::cout<<"valid="<<fit_ok<<" rmse="<<r.reprojection_rmse_px<<"px yaw="<<r.yaw<<" omega="<<r.omega
              <<" center="<<r.center[0]<<","<<r.center[1]<<","<<r.center[2]<<"\n";
     return 0;
