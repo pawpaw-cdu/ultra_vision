@@ -492,8 +492,28 @@ int main(int argc, char* argv[])
             fcfg.use_rcv = true;
             fcfg.rcv = tracker.fitterRcv();
             fitter->setConfig(fcfg);
+            // A/B：默认把**本帧全部检测**都推入（历史行为）。设 SPV_PUSH_FIRST=1 时
+            // 只推第一块 —— 用来验证"同帧多板被串进同一条弧"到底伤不伤拟合质量。
+            const bool push_first = std::getenv("SPV_PUSH_FIRST") != nullptr;
             for (const auto& a : armors)
+            {
                 tracker.pushArmorLightBars(a, t, tracker.plateIdFor(a));
+                if (push_first) break;
+            }
+            // 诊断（ULTRA_VISION_LOCAL_FIT_DIAG=1）：把"喂给拟合器的前提"打出来 ——
+            // h 先验（来自底盘几何慢层）/ 本帧推入几块板 / 几何的四个板距。
+            // 拟合 rmse 大时先看这里：h 先验给错（σ=5cm）会把残差顶到几十 px。
+            if (std::getenv("ULTRA_VISION_LOCAL_FIT_DIAG") != nullptr && local_fit_counter % 200 == 0)
+            {
+                std::cout << "[diag] frame=" << local_fit_counter
+                          << " h_prior=" << fcfg.h_prior << " alpha=" << fcfg.alpha_prior
+                          << " W=" << fcfg.plate_width << " L=" << fcfg.lightbar_len
+                          << " n_push=" << armors.size() << " use_rcv=" << fcfg.use_rcv
+                          << " Rgeo=" << tracker.getArmorRadius() << "/"
+                          << tracker.chassisGeometry().distance(1) << "/"
+                          << tracker.chassisGeometry().distance(2) << "/"
+                          << tracker.chassisGeometry().distance(3) << std::endl;
+            }
             if (local_fit_counter++ % local_fit_period == 0) ran_fit = tracker.runLocalFitNow();
         }
 #endif
