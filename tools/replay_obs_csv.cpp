@@ -377,7 +377,7 @@ int main(int argc, char* argv[])
             for (int k = 0; k < 4; ++k)
                 out << ",q" << p << "x" << k << ",q" << p << "y" << k;
         // 诊断列**必须在最后**，且与写入顺序一致（错位过一次，教训）。
-        out << ",fit_yaw_raw_deg,ekf_yaw_deg,fit_omega";
+        out << ",fit_yaw_raw_deg,ekf_yaw_deg,fit_omega,ekf_omega";
         // EKF 状态协方差对角线（诊断"P 是否真实"）：0=x 1=vx 2=y 3=vy 4=sin
         // 5=cos 6=ω 7=z 8=vz 9=l 10=h。
         for (int i = 0; i < 11; ++i) out << ",P" << i;
@@ -668,8 +668,10 @@ int main(int argc, char* argv[])
             for (int p = 0; p < 16; ++p)
                 out << ',' << all_px[static_cast<std::size_t>(p)].x << ','
                     << all_px[static_cast<std::size_t>(p)].y;
-            // 诊断两列：拟合器**原始**输出的 yaw（相机系，未换算）与 EKF 的 yaw。
-            // 两者一起看就能判断"拟合 yaw ↔ EKF yaw"到底是镜像、常值偏置还是差 90°。
+            // 诊断列：拟合器**原始**输出的 yaw（相机系，未换算）+ EKF 的 yaw / ω。
+            // ⚠ 原来这里把 EKF 的 yaw 也写成 `have_fit ? getYaw() : 0` —— 拟合器关掉时
+            // 整列恒为 0，读起来像"EKF 冻住"（实际是**诊断列被门控**的伪影，2026-10-12 修）。
+            // EKF 的 yaw/ω 任何时候都该写；拟合器的量没有就给 0。
             double fit_yaw_raw = 0.0;
             double fit_omega = 0.0;
             bool have_fit = false;
@@ -680,8 +682,8 @@ int main(int argc, char* argv[])
                 have_fit = true;
             }
             out << ',' << (have_fit ? fit_yaw_raw : 0.0) << ','
-                << (have_fit ? tracker.getYaw() * 180.0 / M_PI : 0.0) << ','
-                << (have_fit ? fit_omega : 0.0);
+                << tracker.getYaw() * 180.0 / M_PI << ','
+                << (have_fit ? fit_omega : 0.0) << ',' << tracker.getEkfOmega();
             for (int i = 0; i < 11; ++i) out << ',' << tracker.ekfCovarianceDiag(i);
             out << '\n';
         }
