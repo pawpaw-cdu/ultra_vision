@@ -394,7 +394,9 @@ int main(int argc, char* argv[])
     std::vector<double> cz_values;
     std::vector<double> omega_values;
     std::vector<double> fit_values;
-    std::vector<double> det_fit_values;   // 每块检测到"最近模型板心"的像素距离
+    std::vector<double> det_fit_values;
+        std::vector<double> det_corner_best;
+        std::vector<double> det_corner_paired;   // 每块检测到"最近模型板心"的像素距离
     int local_fit_counter = 0;
     std::array<int, 6> yaw_res_hist{{0, 0, 0, 0, 0, 0}};   // |残差| 分档：<15/45/75/105/135/180°
 
@@ -649,6 +651,37 @@ int main(int argc, char* argv[])
                     best = std::min(best, static_cast<double>(cv::norm(ctr - dc)));
                 }
                 if (best < 1e17) det_fit_values.push_back(best);
+
+                // ---- 四角点重投影口径（2026-10-12 加）----------------------------
+                // 旧口径"检测↔**最近**的模型板心"会**奖励会扫圈的模型**：模型自己在转时，
+                // 总有一块板偶尔扫到检测，中位被拉低（实测：ω=3.5 时 22.9px，
+                // 把 ω 压到 spv 同款的 ≈0 反而变成 119px）。所以这里补两个不取"最近"的口径：
+                //   corner_best   = 取**四角点整体最贴**的那块模型板（RMS），对扫圈免疫度更高
+                //   corner_paired = 取**同板号**的那块模型板（用 obs_plate）
+                double best_corner = 1e18;
+                double paired_corner = -1.0;
+                for (int p = 0; p < 4; ++p)
+                {
+                    double sse = 0.0;
+                    int n = 0;
+                    for (int k = 0; k < 4; ++k)
+                    {
+                        const cv::Point2f& q = all_px[static_cast<std::size_t>(p * 4 + k)];
+                        if (q.x < 0.0f) continue;
+                        const cv::Point2f o = k == 0
+                            ? a.left.bottom
+                            : (k == 1 ? a.left.top : (k == 2 ? a.right.top : a.right.bottom));
+                        const cv::Point2f d = q - o;
+                        sse += d.x * d.x + d.y * d.y;
+                        ++n;
+                    }
+                    if (n == 0) continue;
+                    const double rms = std::sqrt(sse / static_cast<double>(n));
+                    best_corner = std::min(best_corner, rms);
+                    if (p == obs_plate) paired_corner = rms;
+                }
+                if (best_corner < 1e17) det_corner_best.push_back(best_corner);
+                if (paired_corner >= 0.0) det_corner_paired.push_back(paired_corner);
             }
         }
 
@@ -705,6 +738,17 @@ int main(int argc, char* argv[])
     {
         std::vector<double> v = det_fit_values;
         std::sort(v.begin(), v.end());
+        {
+            std::vector<double> cb = det_corner_best, cp = det_corner_paired;
+            std::sort(cb.begin(), cb.end());
+            std::sort(cp.begin(), cp.end());
+            if (!cb.empty())
+                std::cout << "\n[replay] 四角点重投影(px) 最优板: n=" << cb.size()
+                          << " 中位 " << cb[cb.size() / 2] << " p90 " << cb[9 * cb.size() / 10]
+                          << " ｜ 同板号配对: n=" << cp.size() << " 中位 "
+                          << (cp.empty() ? 0.0 : cp[cp.size() / 2]) << " p90 "
+                          << (cp.empty() ? 0.0 : cp[9 * cp.size() / 10]);
+        }
         std::cout << "\n[replay] 全部检测↔模型板心(px): n=" << v.size()
                   << "  中位 " << v[v.size() / 2] << "  p90 " << v[(v.size() * 9) / 10]
                   << "  （这才是底盘构造对不对的度量；被钉那块板不算）";
