@@ -11,37 +11,8 @@ using namespace auto_aim::tracker_detail;
 
 namespace auto_aim
 {
-    int Tracker::plateIdFromBearing(const Armor& armor) const
-    {
-        if (!ekf_.isInit()) return -1;
-        const Armor home = toWorld(armor);               // 注意：toWorld 把板心写回 tvec
-        if (!home.solve_result || home.tvec.rows != 3) return -1;
-        const auto c = getTargetCenterWorldArray();      // 世界系 {x,y,z}（水平面 = x-z）
-        const double dx = home.tvec.at<double>(0) - c[0];
-        const double dz = home.tvec.at<double>(2) - c[2];
-        const double r_obs = std::hypot(dx, dz);
-        // 板心离旋转中心太近/太远 → 位置本身不可信（近处杂检、深度退化）
-        if (!(r_obs > 0.05 && r_obs < 0.60)) return -1;
-        const double bearing = std::atan2(dx, dz);        // 与 ArmorEKF::getYaw() 同约定
-        const double yaw = ekf_.getYaw();
-        int best = -1;
-        double best_res = 1e9;
-        for (int k = 0; k < 4; ++k) {
-            const double res = std::abs(ArmorEKF::normalizeAngle(
-                bearing - yaw - armorPhaseOffset(k)));
-            if (res < best_res) { best_res = res; best = k; }
-        }
-        const double gate = cfg_.plate_bearing_gate_deg * M_PI / 180.0;
-        return (gate > 0.0 && best_res > gate) ? -1 : best;
-    }
-
     int Tracker::selectPlateId(const Armor& armor) const
     {
-        // 2026-10-12：**几何（位置）优先**。原因见 plateIdFromBearing 的注释 ——
-        // 原路径的代价函数含"预测的 armor_yaw"，斜视时它病态，会把板号挑到 90° 外。
-        const int geo = plateIdFromBearing(armor);
-        if (geo >= 0) return geo;
-
         int best_plate_id = plate_id_;
         const double previous_cost = matchCost(armor, best_plate_id);
         double best_cost = previous_cost;

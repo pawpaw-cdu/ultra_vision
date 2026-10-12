@@ -182,8 +182,6 @@ namespace auto_aim
                 kalman["ypd_nis_threshold"].as<double>(cfg.ypd_nis_threshold);
             cfg.max_angle_error =
                 kalman["max_angle_error"].as<double>(cfg.max_angle_error);
-            cfg.plate_bearing_gate_deg =
-                kalman["plate_bearing_gate_deg"].as<double>(cfg.plate_bearing_gate_deg);
             cfg.adaptive_association_gate = kalman["adaptive_association_gate"]
                                                 .as<bool>(cfg.adaptive_association_gate);
             cfg.association_gate_sigma = kalman["association_gate_sigma"]
