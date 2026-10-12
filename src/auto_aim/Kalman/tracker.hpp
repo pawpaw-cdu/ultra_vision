@@ -271,6 +271,9 @@ namespace auto_aim
         double ypd_nis_threshold = 9.488;
         // 关联的板角误差上限：相邻板相差 90°，所以 20°(0.35 rad) 足够严格地把
         // "另一块物理板"的观测挡掉（实测它会带来 ±12~16° 的视轴跳变）。
+        /// 几何板号的方位角残差门限（度）：观测板心的方位角与最近板相位差超过它
+        /// 就认为"位置也不可信"，退回原来的代价函数（默认 35°，四块板相隔 90°）。
+        double plate_bearing_gate_deg = 35.0;
         double max_angle_error = 0.35;
         // ---- 高速自旋（小陀螺 ≥5 rad/s）通用的关联门限 ----------------------
         // 固定角门限在高速下必然失配：ω 估计还没收敛时，预测 yaw 每帧落后
@@ -825,6 +828,13 @@ namespace auto_aim
         bool tryReacquire(const std::vector<const Armor*>& observations,
                           double timestamp);
         int selectPlateId(const Armor& armor) const;
+        /// @brief **只用位置**定板号：观测板心相对模型旋转中心的方位角 → 最近的板相位。
+        /// 斜视时 PnP 的板朝向会病态/翻解，而 matchCost 用的正是"预测的 armor_yaw"，
+        /// 于是板号会被挑到 90° 以外那块（实测斜视·静止 205 帧：同板号配对 715px，
+        /// 而"取最贴"只有 52px）。位置量在斜视时仍然稳 —— 与局部拟合器多板联合里
+        /// "用种子帧板心相对 C 的方位角定相位"同一招。
+        /// @return 0..3；**-1 = 几何上不可信**（此时调用方退回原来的代价函数）
+        int plateIdFromBearing(const Armor& armor) const;
         double distanceToPlate(const cv::Mat& tvec, int plate_id) const;
         double matchCost(const Armor& armor, int plate_id) const;
         /// @param yaw_valid 这一帧的 PnP yaw（板法向=径向）是否可信（见 pnp_yaw_trust_deg）。
