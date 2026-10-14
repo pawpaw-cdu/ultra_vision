@@ -300,6 +300,11 @@ int main(int argc, char ** argv)
   // ⚠ 实测这台车的两块同帧可见板 z 差 ≈0.10 m；模型假设四块等高(h=0)时，
   //   双检测帧的最优拟合会剩 ~100px/板（0.10m @1.3m ≈ 92px）—— 这就是"四块板高度不统一"。
   double h_offset = 0.0;
+  // 双板构造残差门（px，每板）：超过它就**不认这一对**，退回"只喂一块"。
+  // 这就是"双板残差大就丢弃"的量化版本；默认关(=inf)保持旧行为。
+  double pair_gate_px = std::numeric_limits<double>::infinity();
+  // 锚板锁定迟滞（对齐 Ultra_Vision tracker 的 plate_lock_margin: 1.35）
+  double plate_lock_margin = 1.35;
   bool single_only = false;   // 只用"最近的那一块"检测（诊断双检测的影响）
   for (int i = 1; i < argc; ++i)
   {
@@ -310,6 +315,8 @@ int main(int argc, char ** argv)
     else if (a == "--window" && i + 1 < argc) window = std::atoi(argv[++i]);
     else if (a == "--radius" && i + 1 < argc) radius = std::atof(argv[++i]);
     else if (a == "--h" && i + 1 < argc) h_offset = std::atof(argv[++i]);
+    else if (a == "--pair-gate" && i + 1 < argc) pair_gate_px = std::atof(argv[++i]);
+    else if (a == "--lock-margin" && i + 1 < argc) plate_lock_margin = std::atof(argv[++i]);
     else if (a == "--sigma-px" && i + 1 < argc) sigma_px = std::atof(argv[++i]);
     else if (a == "--yaw-sign" && i + 1 < argc) yaw_sign = std::atof(argv[++i]);
     else if (a == "--pitch-sign" && i + 1 < argc) pitch_sign = std::atof(argv[++i]);
@@ -443,6 +450,7 @@ int main(int argc, char ** argv)
   bool inited = false;
   Eigen::Vector3d last_C = Eigen::Vector3d::Zero(), last_V = Eigen::Vector3d::Zero();
   double last_th = 0.0, last_w = 0.0;
+  int anchor_id_ = -1;   // 上一帧锚定的板号（选板迟滞用）
 
   auto plate_center = [&](const Eigen::Vector3d & C, double th, int id) {
     const double a = th + id * 2.0 * kPi / 4.0;
@@ -574,7 +582,9 @@ int main(int argc, char ** argv)
           return (d / 30.0) * (d / 30.0);
         };
         std::vector<int> assign(f.dets.size(), -1);
-        if (f.dets.size() == 2 && qok[0] && qok[1])
+        const bool pair_ok = (f.dets.size() == 2 && qok[0] && qok[1]);
+        double pair_res = std::numeric_limits<double>::infinity();
+        if (pair_ok)
         {
           // **解析求 θ**：两块板的 PnP 位置就确定了底盘朝向，不需要预测。
           //   模型：q_k = C − r·u(θ + id_k·90°)，u(a) = (cos a, sin a)
@@ -618,6 +628,19 @@ int main(int argc, char ** argv)
           }
           if (bi >= 0)
           {
+            pair_res = std::sqrt(std::max(0.0, best) / 2.0);   // 每板残差(px)
+            if (pair_res > pair_gate_px)
+            {
+              // **双板构造残差太大 → 不认这一对**，退回单板路径
+              if (std::getenv("FGO_PAIR_DEBUG") != nullptr)
+                std::fprintf(
+                  stderr, "[pair] t=%.2f 残差 %.1fpx > 门限 %.1fpx → 丢弃这一对，退回单板\n",
+                  f.t, pair_res, pair_gate_px);
+              bi = bj = -1;
+            }
+          }
+          if (bi >= 0)
+          {
             // 用解析解直接初始化这一帧的底盘（比"上一帧外推"好得多）
             f.C = bestC;
             f.th = best_th;
@@ -639,28 +662,41 @@ int main(int argc, char ** argv)
           assign[0] = bi;
           assign[1] = bj;
         }
-        else
+        if (assign[0] < 0 || (f.dets.size() >= 2 && assign[1] < 0))
         {
+          // ---- 单板路径（含"双板残差太大退回来"的分支）--------------------------
+          // 先按"板号 → 该板号下各检测的最小图像代价"给每个可见板号打分，
+          // 再套**锚板锁定迟滞**：上一帧锚定的那块只要不明显更差就继续保持
+          // （对齐 Ultra_Vision tracker 的 plate_lock_margin=1.35）。
           struct Cand { std::size_t det; int id; double d; };
-          std::vector<Cand> cands;
+          double id_cost[4] = {1e18, 1e18, 1e18, 1e18};
+          std::size_t id_det[4] = {0, 0, 0, 0};
           for (std::size_t j = 0; j < f.dets.size(); ++j)
             for (int id = 0; id < 4; ++id)
             {
               if (!visible(f.C, f.th, id)) continue;
-              cands.push_back({j, id, img_cost(j, id)});
+              const double cst = img_cost(j, id);
+              if (cst < id_cost[id]) { id_cost[id] = cst; id_det[id] = j; }
             }
-          std::sort(cands.begin(), cands.end(), [](const Cand & a, const Cand & b) { return a.d < b.d; });
-          bool used[4] = {false, false, false, false};
-          for (const Cand & cd : cands)
+          int best_id = -1;
+          for (int id = 0; id < 4; ++id)
+            if (id_cost[id] < 1e17 && (best_id < 0 || id_cost[id] < id_cost[best_id])) best_id = id;
+          int chosen = best_id;
+          if (best_id >= 0 && anchor_id_ >= 0 && anchor_id_ < 4 && id_cost[anchor_id_] < 1e17 &&
+              id_cost[anchor_id_] <= plate_lock_margin * id_cost[best_id])
+            chosen = anchor_id_;
+          if (chosen >= 0)
           {
-            if (assign[cd.det] >= 0 || used[cd.id]) continue;
-            assign[cd.det] = cd.id;
-            used[cd.id] = true;
+            assign[id_det[chosen]] = chosen;
+            anchor_id_ = chosen;
           }
         }
         for (std::size_t j = 0; j < f.dets.size(); ++j)
         {
-          const int id = assign[j] >= 0 ? assign[j] : 0;
+          // ⚠ 没被认领的检测**必须丢掉**，不能兜底成 id=0 —— 否则同帧两块又都算到
+          //   同一块模型板上（两条矛盾约束），就是前面把底盘拽飞的那个 bug。
+          if (assign[j] < 0) continue;
+          const int id = assign[j];
           f.plate_id.push_back(id);
           const Eigen::Vector3d p_model = plate_center(f.C, f.th, id);
           // PnP 初值（离底盘模型太远就退回模型值，防止坏 PnP 把局部极小带出来）
@@ -673,6 +709,44 @@ int main(int argc, char ** argv)
           {
             f.P.push_back(p_model);
             f.psi.push_back(f.th + id * 2.0 * kPi / 4.0);
+          }
+        }
+        // 把没被认领的检测从这一帧里删掉（= 不喂给估计器）
+        if (f.plate_id.size() != f.dets.size())
+        {
+          std::vector<Detection> keep;
+          std::vector<int> kkeep;
+          for (std::size_t j = 0; j < f.dets.size(); ++j)
+          {
+            if (assign[j] < 0) continue;
+            keep.push_back(f.dets[j]);
+            kkeep.push_back(assign[j]);
+          }
+          if (!keep.empty())
+          {
+            f.dets = keep;
+            f.plate_id = kkeep;
+            // P/psi 也按同样顺序重建
+            std::vector<Eigen::Vector3d> kP;
+            std::vector<double> kpsi;
+            for (std::size_t j = 0; j < assign.size(); ++j)
+            {
+              if (assign[j] < 0) continue;
+              const int id = assign[j];
+              const Eigen::Vector3d p_model = plate_center(f.C, f.th, id);
+              if (qok[j] && (q[j] - p_model).norm() < 1.0)
+              {
+                kP.push_back(q[j]);
+                kpsi.push_back(qyaw[j]);
+              }
+              else
+              {
+                kP.push_back(p_model);
+                kpsi.push_back(f.th + id * 2.0 * kPi / 4.0);
+              }
+            }
+            f.P = kP;
+            f.psi = kpsi;
           }
         }
       }
