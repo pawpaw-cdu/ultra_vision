@@ -883,48 +883,73 @@ public:
         return H;
     }
 
-    /// 一次 8 维 UV 更新。返回 NIS 的软权重（0 = 被门限拒绝）。
-    double updateUV(
-        const UvObservation & o, const UvGeometry & g,
-        double nis_threshold = 15.51 /* χ²(8,95%) */) {
-        if (!initialized_ || o.plate_id < 0 || o.plate_id >= 4) return 0.0;
-        if (!(o.fx > 1.0) || !(o.fy > 1.0)) return 0.0;
-
-        const Vec<8> residual = uvResidual(o, g);
-        const Matrix<8, kStateDim> H = uvJacobian(o, g, 0.0);
-
-        // R：按"差分/平均"的分块噪声构造（每根灯条一个 4×4 块：u_top,v_top,u_bot,v_bot）
-        const double sd2 = o.sigma_diff_px * o.sigma_diff_px;
-        const double sa2 = o.sigma_avg_px * o.sigma_avg_px;
-        const double diag = sa2 + 0.25 * sd2;   // Var(top) = Var(bot)
-        const double off = sa2 - 0.25 * sd2;    // Cov(top, bot)
-        Matrix<8, 8> R;
+    /// 差分残差（4 维）：每根灯条 (Δu, Δv) = (观测 − 预测)，与 updateAngle 同约定
+    /// ⚠ 这里是 (z − h)：EKF 形式是 x += K·(z − h)。第一版写成 (h − z)，结果把 yaw 往反方向推。
+    /// **与平移无关** —— 这正是它能单独定 θ 的原因（打破 C↔θ 退化，见 uv_ekf_feasibility.md §3.1）。
+    Vec<4> uvDiffResidual(const UvObservation & o, const UvGeometry & g) const
+    {
+        const auto pts = uvEndpoints(o.plate_id, g);
+        Vec<4> r;
         for (int bar = 0; bar < 2; ++bar)
         {
-            const int b0 = 4 * bar;
-            R(b0 + 0, b0 + 0) = diag; R(b0 + 1, b0 + 1) = diag;
-            R(b0 + 2, b0 + 2) = diag; R(b0 + 3, b0 + 3) = diag;
-            R(b0 + 0, b0 + 2) = off;  R(b0 + 2, b0 + 0) = off;
-            R(b0 + 1, b0 + 3) = off;  R(b0 + 3, b0 + 1) = off;
+            const Vec<2> top = uvProject(pts[static_cast<std::size_t>(2 * bar)], o);
+            const Vec<2> bot = uvProject(pts[static_cast<std::size_t>(2 * bar + 1)], o);
+            const auto & ct = o.corners[static_cast<std::size_t>(2 * bar)];
+            const auto & cb = o.corners[static_cast<std::size_t>(2 * bar + 1)];
+            r(2 * bar, 0) = (ct.x - cb.x) - (top(0, 0) - bot(0, 0));
+            r(2 * bar + 1, 0) = (ct.y - cb.y) - (top(1, 0) - bot(1, 0));
         }
+        return r;
+    }
 
-        const Matrix<kStateDim, 8> PHt = P_ * H.transpose();
-        Matrix<8, 8> S = H * PHt + R;
-        Matrix<8, 8> Sinv;
-        if (!Matrix<8, 8>::invert(S, Sinv)) return 0.0;
+    /// 平均残差（4 维）：每根灯条端点中点 (ū, v̄)。含 C 与 θ。
+    Vec<4> uvAvgResidual(const UvObservation & o, const UvGeometry & g) const
+    {
+        const auto pts = uvEndpoints(o.plate_id, g);
+        Vec<4> r;
+        for (int bar = 0; bar < 2; ++bar)
+        {
+            const Vec<2> top = uvProject(pts[static_cast<std::size_t>(2 * bar)], o);
+            const Vec<2> bot = uvProject(pts[static_cast<std::size_t>(2 * bar + 1)], o);
+            const auto & ct = o.corners[static_cast<std::size_t>(2 * bar)];
+            const auto & cb = o.corners[static_cast<std::size_t>(2 * bar + 1)];
+            r(2 * bar, 0) = 0.5 * (ct.x + cb.x) - 0.5 * (top(0, 0) + bot(0, 0));
+            r(2 * bar + 1, 0) = 0.5 * (ct.y + cb.y) - 0.5 * (top(1, 0) + bot(1, 0));
+        }
+        return r;
+    }
 
+    /// 通用 4 维更新（数值雅可比）。residual_fn 决定是差分还是平均那一组。
+    template <typename ResidualFn>
+    double uvUpdate4(const UvObservation & o, double sigma_px, ResidualFn residual_fn,
+                     double nis_threshold, double gain = 1.0) {
+        const Vec<4> residual = residual_fn(*this, o);
+        Matrix<4, kStateDim> H;
+        for (int j = 0; j < kStateDim; ++j)
+        {
+            const double delta = 1e-6 * std::max(1.0, std::abs(x_(j, 0)));
+            ArmorEKF probe = *this;
+            probe.x_(j, 0) += delta;
+            const Vec<4> r1 = residual_fn(probe, o);
+            for (int i = 0; i < 4; ++i) H(i, j) = (r1(i, 0) - residual(i, 0)) / delta;
+        }
+        Matrix<4, 4> R;
+        for (int i = 0; i < 4; ++i) R(i, i) = sigma_px * sigma_px;
+        const Matrix<kStateDim, 4> PHt = P_ * H.transpose();
+        Matrix<4, 4> S = H * PHt + R;
+        Matrix<4, 4> Sinv;
+        if (!Matrix<4, 4>::invert(S, Sinv)) return 0.0;
         double nis = 0.0;
-        for (int i = 0; i < 8; ++i)
-            for (int j = 0; j < 8; ++j)
+        for (int i = 0; i < 4; ++i)
+            for (int j = 0; j < 4; ++j)
                 nis += residual(i, 0) * Sinv(i, j) * residual(j, 0);
         if (!std::isfinite(nis) || nis > nis_threshold) return 0.0;
-
-        const Matrix<kStateDim, 8> K = PHt * Sinv;
+        const Matrix<kStateDim, 4> K = PHt * Sinv;
         for (int i = 0; i < kStateDim; ++i)
         {
             double dx = 0.0;
-            for (int j = 0; j < 8; ++j) dx += K(i, j) * residual(j, 0);
-            x_(i, 0) += dx;
+            for (int j = 0; j < 4; ++j) dx += K(i, j) * residual(j, 0);
+            x_(i, 0) += gain * dx;   // 阻尼：见 updateUV 的注释（单板 C↔θ 近退化，全增益会冲过头）
         }
         Matrix<kStateDim, kStateDim> I;
         for (int i = 0; i < kStateDim; ++i) I(i, i) = 1.0;
@@ -932,11 +957,39 @@ public:
         P_ = IKH * P_ * IKH.transpose() + K * R * K.transpose();
         for (int i = 0; i < kStateDim; ++i)
             if (P_(i, i) < cfg_.P_min) P_(i, i) = cfg_.P_min;
-
         const double norm = std::sqrt(x_(4, 0) * x_(4, 0) + x_(5, 0) * x_(5, 0));
         if (norm > 1e-6) { x_(4, 0) /= norm; x_(5, 0) /= norm; }
         return std::exp(-0.5 * nis);
     }
+
+    /// 一次 8 维 UV 更新。返回 NIS 的软权重（0 = 被门限拒绝）。
+    double updateUV(
+        const UvObservation & o, const UvGeometry & g,
+        double nis_threshold = 9.49 /* χ²(4,95%)，每步都是 4 维 */, double gain = 1.0) {
+        if (!initialized_ || o.plate_id < 0 || o.plate_id >= 4) return 0.0;
+        if (!(o.fx > 1.0) || !(o.fy > 1.0)) return 0.0;
+
+        // **两步**：先差分（与平移无关 → 单独定 θ/R），再平均（在 θ 已知下定 C）。
+        // 单板下 C 与 θ 近退化，合成一次 8 维会把修正劈错方向（实测发散，见
+        // docs/uv_ekf_feasibility.md §3.1）—— 顺序不能反，也不能合并。
+        // 噪声：端点单次 σ 已知 ⇒ 差分 σ=√2σ、平均 σ=σ/√2（可由 obs 覆盖）。
+        const double s_corner = std::sqrt(0.5 * (o.sigma_diff_px * o.sigma_diff_px +
+                                                 o.sigma_avg_px * o.sigma_avg_px));
+        const double s_diff = (o.sigma_diff_px > 0 ? o.sigma_diff_px : std::sqrt(2.0) * s_corner);
+        const double s_avg = (o.sigma_avg_px > 0 ? o.sigma_avg_px : s_corner / std::sqrt(2.0));
+        // gain<1：单板下 (C, θ) 的近退化会让全增益步**冲过头**（实测 5.7° 的误差一步走成
+        // −10°、随后发散）。阻尼相当于"带线搜索的高斯-牛顿"，代价是要多迭代几次。
+        const double w_diff = uvUpdate4(
+            o, s_diff,
+            [&](const ArmorEKF & e, const UvObservation & oo) { return e.uvDiffResidual(oo, g); },
+            nis_threshold, gain);
+        const double w_avg = uvUpdate4(
+            o, s_avg,
+            [&](const ArmorEKF & e, const UvObservation & oo) { return e.uvAvgResidual(oo, g); },
+            nis_threshold, gain);
+        return std::max(w_diff, w_avg);
+    }
+
 
     bool isInit() const { return initialized_; }
     double getYaw() const { return std::atan2(x_(4, 0), x_(5, 0)); }
