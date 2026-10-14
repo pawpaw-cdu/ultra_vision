@@ -21,7 +21,16 @@ RUN="${RUN:-/tmp/obs_gui}"
 
 [[ -x "$REPO/build_sim/auto_aim_sim" ]] || { echo "先构建 build_sim/auto_aim_sim" >&2; exit 2; }
 mkdir -p "$RUN"
-cp -R "$REPO/configs" "$RUN/configs"
+# ⚠ 这里必须用 `configs/.`（把**内容**拷进已存在的目录）。写成 `cp -R configs "$RUN/configs"`
+# 时：RUN 目录第一次是新建的没问题，但**第二次运行（目录已存在）会拷成
+# $RUN/configs/configs/**，而视觉端读的 $RUN/configs/tracker.yaml 还是**上一次的旧配置**。
+# 踩过的坑：2026-10-10 之后 hard_plate_constraint 改成了 false，但 /tmp/obs_gui 里那份
+# 陈旧配置一直是 true —— 实测同一命令、同转速（5rad/s）：
+#     陈旧(true)  模型板误差 41.2/102.6px(p50/p90)，车心偏差中位 69.8px，>60px 占 55.6%
+#     新鲜(false) 模型板误差 19.2/ 38.0px(p50/p90)，车心偏差中位  7.1px，>60px 占  5.1%
+# 也就是"重投影的模型整块跑到机器人旁边"那种现象。
+rm -rf "$RUN/configs/configs" 2>/dev/null || true
+cp -R "$REPO/configs/." "$RUN/configs/"
 
 camera_config="$REPO/tools/sim/${CAM}.yaml"
 if [[ -n "$DIST" ]]; then
@@ -52,7 +61,7 @@ trap cleanup EXIT
   DAEDALUS_GIMBAL_MODE=vision \
   DAEDALUS_CAMERA_CONFIG="$camera_config" \
   DAEDALUS_CSV_PATH="$RUN/truth.csv" DAEDALUS_LIGHT_CSV_PATH="$RUN/light.csv" \
-  DAEDALUS_CAPTURE_WIDTH=1440 DAEDALUS_CAPTURE_HEIGHT=1080 DAEDALUS_CAPTURE_FPS=30 \
+  DAEDALUS_CAPTURE_WIDTH=1440 DAEDALUS_CAPTURE_HEIGHT=1080 DAEDALUS_CAPTURE_FPS=60 \
   DAEDALUS_TCP_ADDR=127.0.0.1:7666 DAEDALUS_COMMAND_ADDR=127.0.0.1:7667 \
   DAEDALUS_TELEMETRY_ADDR=127.0.0.1:7668 \
   DAEDALUS_WINDOW_WIDTH=960 DAEDALUS_WINDOW_HEIGHT=720 \
@@ -62,8 +71,15 @@ for _ in $(seq 1 120); do nc -z 127.0.0.1 7666 2>/dev/null && break; sleep 1; do
 if ! nc -z 127.0.0.1 7666 2>/dev/null; then echo "仿真器没起来:" >&2; tail -5 "$RUN/sim.log" >&2; exit 3; fi
 echo "[obs] sim up: gyro=${SPEED} rad/s dist=${DIST} m; 视觉端 GUI（云台冻结，只观测）..."
 
+# 协议要**两侧一致**：本脚本起仿真器时没有给 DAEDALUS_UDP=1（= TCP），但
+# configs/simulator.yaml 里写的是 udp ⇒ 视觉端会去订阅 UDP 7669 而永远等不到帧
+# （现象就是窗口里一直 "Waiting for simulator frames..."）。所以这里默认钉 TCP，
+# 想用 UDP 就： DAEDALUS_UDP=1 ULTRA_VISION_SIM_PROTOCOL=udp tools/obs_gui.sh …
+# ⚠ 注释必须写在整条命令**之前**：把 # 塞进反斜杠续行的中间，会把后面（包括
+#   启动命令本身）整段注释掉，而日志文件还是上一轮的残留 —— 看起来"跑了其实没跑"。
 ULTRA_VISION_CONFIG_DIR="$RUN/configs" ULTRA_VISION_SIM_HOST=127.0.0.1 \
 ULTRA_VISION_DISABLE_CONTROL=1 \
+ULTRA_VISION_SIM_PROTOCOL="${ULTRA_VISION_SIM_PROTOCOL:-tcp}" \
 ULTRA_VISION_ESTIMATE_CSV="$RUN/estimate.csv" \
 ULTRA_VISION_OBSERVATION_CSV="$RUN/observation.csv" \
 ULTRA_VISION_SELECTOR_CSV="$RUN/selector.csv" \

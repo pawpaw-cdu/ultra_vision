@@ -11,7 +11,7 @@
 # 之后用 tools/truth_regression.py 做逐级误差对比。
 #
 # 用法：
-#   tools/auto_aim_sim_test.sh [--seconds 30] [--uv 0|1] [--sigma 1.5] [--out /tmp/auto_aim]
+#   tools/auto_aim_sim_test.sh [--seconds 30] [--uv 0|1] [--udp 0|1] [--sigma 1.5] [--out /tmp/auto_aim]
 #                               [--no-build]
 #                               [--camera armor_camera|armor_camera_mid|armor_camera_far]
 #                               [--distance 5.2]        # 沿视线挪相机，覆盖预置距离
@@ -29,6 +29,10 @@
 # --uv 1 打开 UV（像素重投影）观测（configs/tracker.yaml 的 uv_observation），
 # 这是本轮加的 A/B 开关；其余参数透传到视觉端的环境变量。
 #
+# --udp 1 把**图像流**切到仿真器的 UDP 分片流（仿真器带 DAEDALUS_UDP=1 启动，
+# 视觉端带 ULTRA_VISION_SIM_PROTOCOL=udp）。指令仍然走 TCP 7667。远程主机跑
+# 仿真时用它做 TCP/UDP 的延迟 A/B；输出目录会带 _udp 后缀，不和 TCP 的混。
+#
 # 顺序（按使用习惯）：**先编译 Ultra_Vision**，再启动仿真器
 # （simulator_system/simulator/run_host.sh，它自己会 cargo build 再运行）。
 set -euo pipefail
@@ -40,6 +44,7 @@ AIM_BIN="${AIM_BIN:-$REPO_ROOT/build_sim/auto_aim_sim}"
 
 seconds=30
 uv=0
+udp=0
 compact=0
 uv_height=""
 camera_preset="armor_camera"
@@ -61,6 +66,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --seconds) seconds="$2"; shift 2 ;;
     --uv) uv="$2"; shift 2 ;;
+    --udp) udp="$2"; shift 2 ;;
     --camera) camera_preset="$2"; shift 2 ;;
     --capture) capture="$2"; shift 2 ;;
     --distance) distance="$2"; shift 2 ;;
@@ -88,16 +94,20 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -x "$SIM_BIN" ]] || { echo "simulator not built: $SIM_BIN" >&2; exit 2; }
-[[ -x "$AIM_BIN" ]] || { echo "auto_aim not built: $AIM_BIN (cmake --target auto_aim)" >&2; exit 2; }
+[[ -x "$AIM_BIN" ]] || { echo "auto_aim not built: $AIM_BIN (cmake --target auto_aim_sim)" >&2; exit 2; }
 
 # 1) 先把 Ultra_Vision 编译好，再起仿真器（避免"编译把正在跑的进程换掉"）。
 if [[ "$build" == "1" ]]; then
   echo "building auto_aim ..."
-  cmake --build "$REPO_ROOT/build_sim" -j8 --target auto_aim >/dev/null
+  cmake --build "$REPO_ROOT/build_sim" -j8 --target auto_aim_sim >/dev/null
 fi
 
 mkdir -p "$out"
+# 图像流协议：tcp（默认）/ udp（--udp 1）。只影响收图，指令永远是 TCP 7667。
+protocol="tcp"
+[[ "$udp" == "1" ]] && protocol="udp"
 run_dir="$out/uv$uv"
+[[ "$protocol" == "udp" ]] && run_dir="${run_dir}_udp"
 mkdir -p "$run_dir"
 
 # 相机-靶车距离：默认用预置文件里的值；`--distance 5.2` 会沿着同一条视线把相机
@@ -189,6 +199,8 @@ else
     DAEDALUS_TELEMETRY_ADDR=127.0.0.1:7668 \
     DAEDALUS_TCP_ADDR=127.0.0.1:7666 \
     DAEDALUS_COMMAND_ADDR=127.0.0.1:7667 \
+    DAEDALUS_UDP="$udp" \
+    DAEDALUS_UDP_ADDR=127.0.0.1:7669 \
     ./run_host.sh > "$run_dir/sim.log" 2>&1 &
     echo $! > "$run_dir/sim.pid"
   )
@@ -208,7 +220,11 @@ fi
 sleep 2
 
 # UV 开关通过一份临时配置目录注入（不改动仓库里的 configs/）。
-cp -R "$REPO_ROOT/configs" "$run_dir/configs"
+# ⚠ 同 tools/obs_gui.sh：必须是 `configs/.`，否则 run 目录已存在时会拷成
+#   $run_dir/configs/configs/ 而视觉端继续读上一次的旧配置（踩过：hard_plate_constraint
+#   从 true 改成 false 之后，旧的 run 目录仍然跑着 true，模型整块跑偏）。
+rm -rf "$run_dir/configs/configs" 2>/dev/null || true
+cp -R "$REPO_ROOT/configs/." "$run_dir/configs/"
 python3 - "$run_dir/configs/tracker.yaml" "$uv" "$sigma" "$compact" "$uv_height" "$qpos" <<'PY'
 import re, sys
 path, uv, sigma, compact, uv_height, qpos = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6]
@@ -236,6 +252,7 @@ PY
     ULTRA_VISION_CONFIG_DIR="$run_dir/configs" \
     ULTRA_VISION_NO_DISPLAY=1 \
     ULTRA_VISION_SIM_HOST=127.0.0.1 \
+    ULTRA_VISION_SIM_PROTOCOL="$protocol" \
     ULTRA_VISION_TEST_SECONDS="$seconds" \
     ULTRA_VISION_ESTIMATE_CSV="$run_dir/estimate.csv" \
     ULTRA_VISION_OBSERVATION_CSV="$run_dir/observation.csv" \
