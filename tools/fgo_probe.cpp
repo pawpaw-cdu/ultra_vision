@@ -25,6 +25,9 @@
 
 #include <ceres/ceres.h>
 #include <Eigen/Dense>
+#include <opencv2/calib3d.hpp>
+#include <opencv2/core.hpp>
+#include <opencv2/core/eigen.hpp>
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
@@ -136,6 +139,8 @@ namespace
     {
       for (int i = 0; i < 4; ++i) sig_[i] = sig[i];
     }
+    /// 侧板（id 1/3）的高度偏移（= sp_vision 状态的 x[10]）
+    void set_h(double h) { h_ = (idx_ == 1 || idx_ == 3) ? h : 0.0; }
     template <typename T>
     bool operator()(
       const T * const C, const T * const th, const T * const P, const T * const psi, T * res) const
@@ -146,11 +151,12 @@ namespace
       const T dx = P[0] - C[0], dy = P[1] - C[1];
       res[0] = (tx * dx + ty * dy) / T(sig_[0]);
       res[1] = (nx * dx + ny * dy - T(radius_)) / T(sig_[1]);
-      res[2] = (P[2] - C[2]) / T(sig_[2]);
+      res[2] = (P[2] - C[2] - T(h_)) / T(sig_[2]);   // h_ = 侧板的高度偏移（id 1/3）
       res[3] = (psi[0] - a) / T(sig_[3]);
       return true;
     }
     double radius_, sig_[4];
+    double h_ = 0.0;
     int idx_, n_;
   };
   /// 一个角点的 2 维重投影因子
@@ -290,6 +296,10 @@ int main(int argc, char ** argv)
   std::string log_path, detlog_path;
   int window = 12;
   double radius = 0.29, sigma_px = 1.0, yaw_sign = -1.0, pitch_sign = -1.0;
+  // 侧板（id 1/3）相对前后板（id 0/2）的**高度偏移** —— 就是 sp_vision 状态里的 x[10]。
+  // ⚠ 实测这台车的两块同帧可见板 z 差 ≈0.10 m；模型假设四块等高(h=0)时，
+  //   双检测帧的最优拟合会剩 ~100px/板（0.10m @1.3m ≈ 92px）—— 这就是"四块板高度不统一"。
+  double h_offset = 0.0;
   bool single_only = false;   // 只用"最近的那一块"检测（诊断双检测的影响）
   for (int i = 1; i < argc; ++i)
   {
@@ -299,6 +309,7 @@ int main(int argc, char ** argv)
     else if (a == "--extrinsics" && i + 1 < argc) ext_path = argv[++i];
     else if (a == "--window" && i + 1 < argc) window = std::atoi(argv[++i]);
     else if (a == "--radius" && i + 1 < argc) radius = std::atof(argv[++i]);
+    else if (a == "--h" && i + 1 < argc) h_offset = std::atof(argv[++i]);
     else if (a == "--sigma-px" && i + 1 < argc) sigma_px = std::atof(argv[++i]);
     else if (a == "--yaw-sign" && i + 1 < argc) yaw_sign = std::atof(argv[++i]);
     else if (a == "--pitch-sign" && i + 1 < argc) pitch_sign = std::atof(argv[++i]);
@@ -314,6 +325,7 @@ int main(int argc, char ** argv)
   }
 
   Cam cam;
+  cv::Mat camK, camD;
   {
     const YAML::Node root = YAML::LoadFile(cam_path);
     const YAML::Node sec = root["hikcamera"] ? root["hikcamera"] : root["galaxy"];
@@ -321,6 +333,8 @@ int main(int argc, char ** argv)
     const auto D = readVec(sec["dist_coeffs"] ? sec["dist_coeffs"] : sec["distort_coeffs"]);
     cam.fx = K[0]; cam.fy = K[4]; cam.cx = K[2]; cam.cy = K[5];
     if (D.size() >= 5) { cam.k1 = D[0]; cam.k2 = D[1]; cam.p1 = D[2]; cam.p2 = D[3]; cam.k3 = D[4]; }
+    camK = (cv::Mat_<double>(3, 3) << cam.fx, 0.0, cam.cx, 0.0, cam.fy, cam.cy, 0.0, 0.0, 1.0);
+    camD = (cv::Mat_<double>(1, 5) << cam.k1, cam.k2, cam.p1, cam.p2, cam.k3);
     std::printf(
       "[fgo] 内参 fx=%.2f fy=%.2f cx=%.2f cy=%.2f  D=(%.5f %.5f %.6f %.6f %.5f)\n", cam.fx,
       cam.fy, cam.cx, cam.cy, cam.k1, cam.k2, cam.p1, cam.p2, cam.k3);
@@ -432,7 +446,9 @@ int main(int argc, char ** argv)
 
   auto plate_center = [&](const Eigen::Vector3d & C, double th, int id) {
     const double a = th + id * 2.0 * kPi / 4.0;
-    return Eigen::Vector3d(C.x() - radius * std::cos(a), C.y() - radius * std::sin(a), C.z());
+    // 与 sp_vision 的 h_armor_xyz 一致：侧板（id 1/3）的 z 比前后板高 h_offset
+    const double z = C.z() + ((id == 1 || id == 3) ? h_offset : 0.0);
+    return Eigen::Vector3d(C.x() - radius * std::cos(a), C.y() - radius * std::sin(a), z);
   };
 
   for (std::size_t fi = 0; fi < frames.size(); ++fi)
@@ -489,39 +505,175 @@ int main(int argc, char ** argv)
         f.V = last_V;
         f.w = last_w;
       }
-      // 关联：图像最近邻 + 可见性
-      // ⚠ 一块模型板在**同一帧只能被认领一次**（贪心按图像距离）。
-      //   否则同帧两块检测可能都抢到 id=0，两条矛盾的约束会把底盘直接拽飞
-      //   （实测：f≈400 起 V 冲到 ±3 m/s、ω 到 -24 rad/s，就是从这里开始的）。
+      // ---- PnP：给板位姿变量一个"贴着观测"的初值 ---------------------------------
+      // 对齐 jlu：PnP 只用来给初值（并提供 roll/pitch），yaw 交给因子去调。
+      // 之前用"底盘模型推出来的板心"当初值 —— 观测因子和 tie 因子从第一步就对着干，
+      // 双检测帧上直接掉进局部极小（实测底盘被拽到 220px 外）。
+      std::vector<Eigen::Vector3d> q(f.dets.size(), Eigen::Vector3d::Zero());
+      std::vector<double> qyaw(f.dets.size(), 0.0);
+      std::vector<bool> qok(f.dets.size(), false);
+      const std::vector<cv::Point3f> op = [&] {
+        std::vector<cv::Point3f> v;
+        for (int k = 0; k < 4; ++k)
+        {
+          const auto & o = obj[static_cast<std::size_t>(k)];
+          v.emplace_back(
+            static_cast<float>(o.x()), static_cast<float>(o.y()), static_cast<float>(o.z()));
+        }
+        return v;
+      }();
+      for (std::size_t j = 0; j < f.dets.size(); ++j)
       {
-        struct Cand { std::size_t det; int id; double d; };
-        std::vector<Cand> cands;
+        std::vector<cv::Point2f> ip;
+        for (int k = 0; k < 4; ++k)
+          ip.emplace_back(
+            static_cast<float>(f.dets[j].p[k].x()), static_cast<float>(f.dets[j].p[k].y()));
+        cv::Mat rvec, tvec;
+        if (!cv::solvePnP(op, ip, camK, camD, rvec, tvec, false, cv::SOLVEPNP_IPPE)) continue;
+        cv::Mat Rcv;
+        cv::Rodrigues(rvec, Rcv);
+        Eigen::Matrix3d Rc;
+        cv::cv2eigen(Rcv, Rc);
+        Eigen::Vector3d tc;
+        cv::cv2eigen(tvec, tc);
+        q[j] = f.R_w2c.transpose() * tc + f.cam0;
+        const Eigen::Matrix3d Rw = f.R_w2c.transpose() * Rc;
+        qyaw[j] = std::atan2(Rw(1, 0), Rw(0, 0));
+        qok[j] = true;
+      }
+      // 两块检测的 PnP 位置几乎重合 → 同一块板被检了两次：只留"看起来更近"的那块
+      if (f.dets.size() >= 2 && qok[0] && qok[1] && (q[0] - q[1]).norm() < 0.15)
+      {
+        const double w0 = 0.5 * ((f.dets[0].p[0] - f.dets[0].p[1]).norm() +
+                                 (f.dets[0].p[3] - f.dets[0].p[2]).norm());
+        const double w1 = 0.5 * ((f.dets[1].p[0] - f.dets[1].p[1]).norm() +
+                                 (f.dets[1].p[3] - f.dets[1].p[2]).norm());
+        const std::size_t keep = (w0 >= w1) ? 0 : 1;
+        f.dets = {f.dets[keep]};
+        q = {q[keep]};
+        qyaw = {qyaw[keep]};
+        qok = {qok[keep]};
+      }
+
+      // ---- 关联 ------------------------------------------------------------------
+      // ⚠ 一块模型板在**同一帧只能被认领一次**（否则同帧两块检测都抢 id=0，
+      //   两条矛盾约束会把底盘拽飞：实测 V→±3 m/s、ω→-24 rad/s）。
+      // 双检测帧用**联合假设**：板号对 (i,j) 一起评，代价里含一项**只由 PnP 决定**的
+      // 几何项 —— 两块板的间距必须等于模型里"相邻/对面"的间距（√2·r 或 2r）。
+      // 这一项不依赖底盘状态，所以它就是解开"yaw vs yaw+180°"那个分支的信息
+      // （见 docs/uv_observation.md 记的镜像位姿问题；也是 rmcs 用"锚点+按 x 序递推"解决的东西）。
+      {
+        std::vector<Eigen::Vector2d> c(f.dets.size(), Eigen::Vector2d::Zero());
         for (std::size_t j = 0; j < f.dets.size(); ++j)
         {
-          Eigen::Vector2d c = Eigen::Vector2d::Zero();
-          for (int k = 0; k < 4; ++k) c += f.dets[j].p[k];
-          c *= 0.25;
-          for (int id = 0; id < 4; ++id)
-          {
-            if (!visible(f.C, f.th, id)) continue;
-            cands.push_back({j, id, (project_world(plate_center(f.C, f.th, id)) - c).squaredNorm()});
-          }
+          for (int k = 0; k < 4; ++k) c[j] += f.dets[j].p[k];
+          c[j] *= 0.25;
         }
-        std::sort(cands.begin(), cands.end(), [](const Cand & a, const Cand & b) { return a.d < b.d; });
+        auto img_cost = [&](std::size_t j, int id) {
+          const double d = (project_world(plate_center(f.C, f.th, id)) - c[j]).norm();
+          return (d / 30.0) * (d / 30.0);
+        };
         std::vector<int> assign(f.dets.size(), -1);
-        bool used[4] = {false, false, false, false};
-        for (const Cand & c : cands)
+        if (f.dets.size() == 2 && qok[0] && qok[1])
         {
-          if (assign[c.det] >= 0 || used[c.id]) continue;
-          assign[c.det] = c.id;
-          used[c.id] = true;
+          // **解析求 θ**：两块板的 PnP 位置就确定了底盘朝向，不需要预测。
+          //   模型：q_k = C − r·u(θ + id_k·90°)，u(a) = (cos a, sin a)
+          //   ⇒ q_i − q_j = r·(R(j·90°) − R(i·90°))·u(θ)
+          //   ⇒ u(θ) = M⁻¹·(q_i − q_j)/r，θ = atan2(uᵧ, uₓ)，C = q_i + r·u。
+          //   12 个有序板号对全部枚举（含镜像/对面），用**图像重投影误差**选最优。
+          //   —— 这才是解开"yaw vs yaw+180°/镜像"的信息：间距只能分相邻/对面，
+          //     而 PnP 的两点方向能定出 θ，图像再确认是哪一对。
+          auto Rot2 = [](double a) {
+            Eigen::Matrix2d R;
+            R << std::cos(a), -std::sin(a), std::sin(a), std::cos(a);
+            return R;
+          };
+          const double step = 2.0 * kPi / 4.0;
+          double best = 1e18;
+          int bi = -1, bj = -1;
+          Eigen::Vector3d bestC = f.C;
+          double best_th = f.th;
+          for (int i = 0; i < 4; ++i)
+          {
+            for (int j = 0; j < 4; ++j)
+            {
+              if (i == j) continue;
+              const Eigen::Matrix2d M = Rot2(j * step) - Rot2(i * step);
+              const Eigen::Vector2d dq(q[0].x() - q[1].x(), q[0].y() - q[1].y());
+              const Eigen::Vector2d w = M.inverse() * (dq / radius);
+              if (!std::isfinite(w.x()) || w.norm() < 1e-6) continue;
+              const Eigen::Vector2d u = w.normalized();
+              const double th = std::atan2(u.y(), u.x());
+              // q_i = C − r·u(θ + i·90°) ⇒ C = q_i + r·u(θ + i·90°)
+              const Eigen::Vector2d ui(
+                std::cos(th + i * step), std::sin(th + i * step));
+              Eigen::Vector3d C = q[0] + radius * Eigen::Vector3d(ui.x(), ui.y(), 0.0);
+              // C.z 也要按模型反解（侧板有高度偏移），不能取两块板的均值
+              C.z() = q[0].z() - ((i == 1 || i == 3) ? h_offset : 0.0);
+              const Eigen::Vector2d P0 = project_world(plate_center(C, th, i));
+              const Eigen::Vector2d P1 = project_world(plate_center(C, th, j));
+              const double cost = (P0 - c[0]).squaredNorm() + (P1 - c[1]).squaredNorm();
+              if (cost < best) { best = cost; bi = i; bj = j; bestC = C; best_th = th; }
+            }
+          }
+          if (bi >= 0)
+          {
+            // 用解析解直接初始化这一帧的底盘（比"上一帧外推"好得多）
+            f.C = bestC;
+            f.th = best_th;
+            // 诊断：这一对板在"共用一台 4 板车"假设下的最优图像残差
+            if (std::getenv("FGO_PAIR_DEBUG") != nullptr)
+            {
+              static int pn = 0;
+              if (pn++ < 30 || pn % 200 == 0)
+                std::fprintf(
+                  stderr,
+                  "[pair] t=%.2f 最优(id=%d,%d) 每板残差 %.1fpx | PnP 间距 %.3f m | "
+                  "自检: |proj(q0)-c0|=%.1fpx  |q0-C-r·u_i|=%.4fm|q1-(C-r·u_j)|=%.4fm\n",
+                  f.t, bi, bj, std::sqrt(std::max(0.0, best) / 2.0), (q[0] - q[1]).norm(),
+                  (project_world(q[0]) - c[0]).norm(),
+                  (q[0] - plate_center(f.C, f.th, bi)).norm(),
+                  (q[1] - plate_center(f.C, f.th, bj)).norm());
+            }
+          }
+          assign[0] = bi;
+          assign[1] = bj;
+        }
+        else
+        {
+          struct Cand { std::size_t det; int id; double d; };
+          std::vector<Cand> cands;
+          for (std::size_t j = 0; j < f.dets.size(); ++j)
+            for (int id = 0; id < 4; ++id)
+            {
+              if (!visible(f.C, f.th, id)) continue;
+              cands.push_back({j, id, img_cost(j, id)});
+            }
+          std::sort(cands.begin(), cands.end(), [](const Cand & a, const Cand & b) { return a.d < b.d; });
+          bool used[4] = {false, false, false, false};
+          for (const Cand & cd : cands)
+          {
+            if (assign[cd.det] >= 0 || used[cd.id]) continue;
+            assign[cd.det] = cd.id;
+            used[cd.id] = true;
+          }
         }
         for (std::size_t j = 0; j < f.dets.size(); ++j)
         {
           const int id = assign[j] >= 0 ? assign[j] : 0;
           f.plate_id.push_back(id);
-          f.P.push_back(plate_center(f.C, f.th, id));
-          f.psi.push_back(f.th + id * 2.0 * kPi / 4.0);
+          const Eigen::Vector3d p_model = plate_center(f.C, f.th, id);
+          // PnP 初值（离底盘模型太远就退回模型值，防止坏 PnP 把局部极小带出来）
+          if (qok[j] && (q[j] - p_model).norm() < 1.0)
+          {
+            f.P.push_back(q[j]);
+            f.psi.push_back(qyaw[j]);
+          }
+          else
+          {
+            f.P.push_back(p_model);
+            f.psi.push_back(f.th + id * 2.0 * kPi / 4.0);
+          }
         }
       }
 
@@ -564,9 +716,11 @@ int main(int argc, char ** argv)
               nullptr, g.P[j].data(), &g.psi[j]);
           }
           const double sig[4] = {0.01, 0.03, 0.01, 0.005};   // 切向/径向/z/相位（对齐 jlu）
+          auto * tie = new TieCost(radius, id, 4, sig);
+          tie->set_h(h_offset);
           prob.AddResidualBlock(
             new ceres::AutoDiffCostFunction<TieCost, 4, 3, 1, 3, 1>(
-              new TieCost(radius, id, 4, sig)),
+              tie),
             nullptr, g.C.data(), &g.th, g.P[j].data(), &g.psi[j]);
         }
       }
