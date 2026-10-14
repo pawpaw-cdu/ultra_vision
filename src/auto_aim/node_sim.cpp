@@ -131,8 +131,20 @@ int main(int argc, char** argv)
         // 这一下采样**只为调试窗口**：ULTRA_VISION_NO_DISPLAY=1（回归全走这条路）时
         // 原来照样每帧做一次 1440x1080 → 640x480 的 INTER_AREA，实测 15~18 ms/帧，
         // 比整套 PnP+EKF+控制（~0.5 ms）贵 30 倍。没有窗口就整段跳过。
+        // 调试窗口的显示分辨率：默认 640x480（原来的大小）。
+        // ULTRA_VISION_GUI_SCALE=2 → 1280x960（曲线面板一起放大）；窗口由 imshow
+        // 自动跟随图像尺寸。注意 HighGUI 成本随面积涨（640x480 ≈15ms/帧，
+        // 1280x960 ≈30ms），想要的帧率高了就调小。
+        static const double gui_scale = [] {
+            const char* s = std::getenv("ULTRA_VISION_GUI_SCALE");
+            const double v = s != nullptr ? std::atof(s) : 1.0;
+            return (v > 0.25 && v < 8.0) ? v : 1.0;
+        }();
         if (runner.showDisplay()) {
-            cv::resize(image, image, cv::Size(640, 480), 0.0, 0.0, cv::INTER_AREA);
+            cv::resize(image, image,
+                       cv::Size(static_cast<int>(640 * gui_scale),
+                                static_cast<int>(480 * gui_scale)),
+                       0.0, 0.0, cv::INTER_AREA);
         }
         lap(6);
         const auto before_display = std::chrono::steady_clock::now();
@@ -142,7 +154,10 @@ int main(int argc, char** argv)
         // HighGUI 比整条处理链还贵（实测 ~15 ms/帧 vs ~0.9 ms），机器人上也没有显示器。
         // 检测图与曲线合成**一个**窗口（竖直：图在上、曲线在下），无显示时用 1ms 节流。
         if (runner.showDisplay()) {
-            const cv::Mat display = runner.curvesEnabled() ? curves.renderStacked(image) : image;
+            const cv::Mat display = runner.curvesEnabled()
+                                        ? curves.renderStacked(
+                                              image, static_cast<int>(900 * gui_scale))
+                                        : image;
             cv::imshow("Ultra Vision", display);
             runner.setKey(cv::waitKey(1));
         } else {

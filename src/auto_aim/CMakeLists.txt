@@ -159,8 +159,9 @@ if(ULTRA_VISION_BUILD_TESTS)
       target_link_libraries(local_fit_from_lightbars PRIVATE auto_aim_local_fit)
       # 因子图离线原型（第 1 步：每帧独立板位姿）。见 docs/fgo_probe.md。
       add_executable(fgo_probe ${CMAKE_SOURCE_DIR}/tools/fgo_probe.cpp)
+      target_include_directories(fgo_probe PRIVATE ${YAML_CPP_INCLUDE_DIRS})
       target_link_libraries(fgo_probe PRIVATE Eigen3::Eigen Ceres::ceres ${OpenCV_LIBS}
-          yaml-cpp)
+          ${YAML_CPP_LDFLAGS})
       add_executable(local_trajectory_fitter_test
           test/local_trajectory_fitter_test.cpp)
       target_include_directories(local_trajectory_fitter_test PRIVATE
