@@ -10,6 +10,8 @@
 #include <utility>
 #include <vector>
 
+#include "Kalman/uv_observation.hpp"
+
 #include "Kalman/linalg.hpp"   // Matrix / Vec（从本文件抽出）
 #include "Kalman/ypd_observation.hpp"
 #include "common/chassis_model.hpp"   // armorPhaseOffset（板相位约定，滤波器/模型同源）
@@ -800,6 +802,142 @@ public:
         return std::max(yaw_w, omega_w);
     }
 
+    // ======================================================================
+    // UV-EKF（刚体分解）：直接用四个灯条端点像素更新整车状态。
+    // 见 Kalman/uv_observation.hpp 的推导与两处设计说明（差分/平均的分块噪声、
+    // 以及"一次 8 维更新"取代方案里的"两次顺序更新"）。
+    // ======================================================================
+
+    /// 四个灯条端点在**世界系**，顺序 [左灯条上, 左灯条下, 右灯条上, 右灯条下]。
+    /// 与 estimation/local_trajectory_fitter 的 barEndpointV 同构（同一个刚体模型）。
+    std::array<Vec<3>, 4> uvEndpoints(int plate_id, const UvGeometry& g) const
+    {
+        const double phi = std::atan2(x_(4, 0), x_(5, 0)) + angleForPlate(plate_id);
+        const double ct = std::cos(phi), st = std::sin(phi);
+        const double sa = g.alpha_sin(), ca = g.alpha_cos();
+        // 径向 n̂=(ct,0,st)、切向 t̂=(−st,0,ct)、灯条方向 b̂=−(sa·n̂ + ca·ŷ)
+        const double nx = ct, nz = st, tx = -st, tz = ct;
+        const double bx = -sa * nx, by = -ca, bz = -sa * nz;
+        const Vec<3> center = armorPosition(plate_id);
+        const double a = 0.5 * g.plate_width, b = 0.5 * g.lightbar_len;
+        std::array<Vec<3>, 4> out;
+        const double sign_a[4] = {+1.0, +1.0, -1.0, -1.0};   // 左、左、右、右
+        const double sign_b[4] = {+1.0, -1.0, +1.0, -1.0};   // 上、下、上、下
+        for (int i = 0; i < 4; ++i)
+        {
+            const double A = sign_a[i] * a, B = sign_b[i] * b;
+            out[static_cast<std::size_t>(i)](0, 0) = center(0, 0) + A * tx + B * bx;
+            out[static_cast<std::size_t>(i)](1, 0) = center(1, 0) + B * by;
+            out[static_cast<std::size_t>(i)](2, 0) = center(2, 0) + A * tz + B * bz;
+        }
+        return out;
+    }
+
+    /// 把世界系点投到像素（针孔 + 给定的 world→camera）。
+    Vec<2> uvProject(const Vec<3>& p_world, const UvObservation& o) const
+    {
+        const double dx = p_world(0, 0) - o.camera_origin[0];
+        const double dy = p_world(1, 0) - o.camera_origin[1];
+        const double dz = p_world(2, 0) - o.camera_origin[2];
+        const double *R = o.R_world2camera.data();
+        const double X = R[0] * dx + R[1] * dy + R[2] * dz;
+        const double Y = R[3] * dx + R[4] * dy + R[5] * dz;
+        const double Z = R[6] * dx + R[7] * dy + R[8] * dz;
+        const double z = std::max(1e-3, Z);
+        Vec<2> uv;
+        uv(0, 0) = o.fx * X / z + o.cx;
+        uv(1, 0) = o.fy * Y / z + o.cy;
+        return uv;
+    }
+
+    /// 8 维残差（预测 − 观测），顺序 [u_lt,v_lt, u_lb,v_lb, u_rt,v_rt, u_rb,v_rb]。
+    Vec<8> uvResidual(const UvObservation& o, const UvGeometry & g) const
+    {
+        const auto pts = uvEndpoints(o.plate_id, g);
+        Vec<8> r;
+        for (int i = 0; i < 4; ++i)
+        {
+            const Vec<2> uv = uvProject(pts[static_cast<std::size_t>(i)], o);
+            r(2 * i, 0) = uv(0, 0) - o.corners[static_cast<std::size_t>(i)].x;
+            r(2 * i + 1, 0) = uv(1, 0) - o.corners[static_cast<std::size_t>(i)].y;
+        }
+        return r;
+    }
+
+    /// 数值雅可比 8×11：手推 8×11 解析式太容易出错（本项目有过先例），
+    /// 而 h() 只是 4 次投影、很便宜 —— 11 次额外求值换"不会写错"。
+    Matrix<8, kStateDim> uvJacobian(const UvObservation & o, const UvGeometry & g,
+                                    double base) const
+    {
+        Matrix<8, kStateDim> H;
+        const Vec<8> r0 = uvResidual(o, g);
+        for (int j = 0; j < kStateDim; ++j)
+        {
+            const double delta = 1e-6 * std::max(1.0, std::abs(x_(j, 0)));
+            ArmorEKF probe = *this;
+            probe.x_(j, 0) += delta;
+            const Vec<8> r1 = probe.uvResidual(o, g);
+            for (int i = 0; i < 8; ++i) H(i, j) = (r1(i, 0) - r0(i, 0)) / delta;
+        }
+        (void)base;
+        return H;
+    }
+
+    /// 一次 8 维 UV 更新。返回 NIS 的软权重（0 = 被门限拒绝）。
+    double updateUV(
+        const UvObservation & o, const UvGeometry & g,
+        double nis_threshold = 15.51 /* χ²(8,95%) */) {
+        if (!initialized_ || o.plate_id < 0 || o.plate_id >= 4) return 0.0;
+        if (!(o.fx > 1.0) || !(o.fy > 1.0)) return 0.0;
+
+        const Vec<8> residual = uvResidual(o, g);
+        const Matrix<8, kStateDim> H = uvJacobian(o, g, 0.0);
+
+        // R：按"差分/平均"的分块噪声构造（每根灯条一个 4×4 块：u_top,v_top,u_bot,v_bot）
+        const double sd2 = o.sigma_diff_px * o.sigma_diff_px;
+        const double sa2 = o.sigma_avg_px * o.sigma_avg_px;
+        const double diag = sa2 + 0.25 * sd2;   // Var(top) = Var(bot)
+        const double off = sa2 - 0.25 * sd2;    // Cov(top, bot)
+        Matrix<8, 8> R;
+        for (int bar = 0; bar < 2; ++bar)
+        {
+            const int b0 = 4 * bar;
+            R(b0 + 0, b0 + 0) = diag; R(b0 + 1, b0 + 1) = diag;
+            R(b0 + 2, b0 + 2) = diag; R(b0 + 3, b0 + 3) = diag;
+            R(b0 + 0, b0 + 2) = off;  R(b0 + 2, b0 + 0) = off;
+            R(b0 + 1, b0 + 3) = off;  R(b0 + 3, b0 + 1) = off;
+        }
+
+        const Matrix<kStateDim, 8> PHt = P_ * H.transpose();
+        Matrix<8, 8> S = H * PHt + R;
+        Matrix<8, 8> Sinv;
+        if (!Matrix<8, 8>::invert(S, Sinv)) return 0.0;
+
+        double nis = 0.0;
+        for (int i = 0; i < 8; ++i)
+            for (int j = 0; j < 8; ++j)
+                nis += residual(i, 0) * Sinv(i, j) * residual(j, 0);
+        if (!std::isfinite(nis) || nis > nis_threshold) return 0.0;
+
+        const Matrix<kStateDim, 8> K = PHt * Sinv;
+        for (int i = 0; i < kStateDim; ++i)
+        {
+            double dx = 0.0;
+            for (int j = 0; j < 8; ++j) dx += K(i, j) * residual(j, 0);
+            x_(i, 0) += dx;
+        }
+        Matrix<kStateDim, kStateDim> I;
+        for (int i = 0; i < kStateDim; ++i) I(i, i) = 1.0;
+        const Matrix<kStateDim, kStateDim> IKH = I - K * H;
+        P_ = IKH * P_ * IKH.transpose() + K * R * K.transpose();
+        for (int i = 0; i < kStateDim; ++i)
+            if (P_(i, i) < cfg_.P_min) P_(i, i) = cfg_.P_min;
+
+        const double norm = std::sqrt(x_(4, 0) * x_(4, 0) + x_(5, 0) * x_(5, 0));
+        if (norm > 1e-6) { x_(4, 0) /= norm; x_(5, 0) /= norm; }
+        return std::exp(-0.5 * nis);
+    }
+
     bool isInit() const { return initialized_; }
     double getYaw() const { return std::atan2(x_(4, 0), x_(5, 0)); }
     double getOmega() const { return x_(6, 0); }
@@ -843,6 +981,13 @@ public:
     double positionVariance(int axis) const {
         const int idx = axis == 0 ? 0 : (axis == 1 ? 2 : 7);
         return P_(idx, idx);
+    }
+
+    /// @brief 状态协方差对角元（诊断"P 是否真实"用；只读）。
+    ///        状态顺序：0=x_c 1=vx 2=y_c 3=vy 4=sinθ 5=cosθ 6=ω 7=z_c 8=vz 9=l 10=h。
+    double covarianceDiag(int i) const {
+        if (i < 0 || i >= kStateDim) return 0.0;
+        return P_(i, i);
     }
 
     Vec<3> getCenter() const {

@@ -334,6 +334,18 @@ if(ULTRA_VISION_BUILD_TESTS)
 
   # 局部拟合 yaw 质量门（实测分层：rmse<3px→σ_ψ≈0.6°，8~16px→22.6°，而 ω 各档都稳）。
   # 纯头文件（estimation/local_fit_gate.hpp），无额外依赖。
+  # UV-EKF（刚体分解）自检：差分灵敏度 / 更新收敛 / 错板号被 NIS 拒。
+  add_executable(uv_ekf_test
+      test/uv_ekf_test.cpp
+  )
+  target_include_directories(uv_ekf_test PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}
+      ${CMAKE_SOURCE_DIR}
+      ${OpenCV_INCLUDE_DIRS}
+  )
+  target_link_libraries(uv_ekf_test PRIVATE ${OpenCV_LIBS})
+  add_test(NAME uv_ekf_test COMMAND uv_ekf_test)
+
   add_executable(local_fit_gate_test
       test/local_fit_gate_test.cpp
   )
