@@ -23,3 +23,6 @@ CMakeCache.txt
 __pycache__/
 *.pyc
 docs/_eq/
+build_sim/
+__pycache__/
+*.pyc
