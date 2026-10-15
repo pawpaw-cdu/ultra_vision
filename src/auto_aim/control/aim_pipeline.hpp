@@ -43,6 +43,15 @@ namespace auto_aim
         /// 没有可用目标时的心跳频率（真机链路必须有：下位机靠收包超时区分
         /// "视觉活着但没目标"和"视觉掉线"；仿真链路不需要，填 0 关掉）。
         double heartbeat_hz = 0.0;
+        /// 选板器**没给出合格板**（best_armor < 0 → decision.valid == false）时的策略：
+        ///   0 = 现行为：兜底"直接瞄最后一次观测到的那块板"（bootstrap_aimer）。
+        ///   1 = 放弃：这一帧不产生新瞄点，云台保持上一拍瞄点（不再追那块判定"不合格"
+        ///       的板，也不开火）。对应参考实现 `if (没合格板) return {false, ...}` 的
+        ///       语义 —— 那边的结果同样是"这一帧的决策不带着云台走"。
+        /// 只在**有合格板**的概念存在时才有意义：静止档（targetStill）本来就是"直接瞄
+        /// 观测到的那块板"，不经过选板器的合格性判定，不受这个开关影响。
+        /// 仿真实测用 ULTRA_VISION_NO_VALID_ARMOR_POLICY 覆盖。
+        int no_valid_armor_policy = 0;
     };
 
     class AimPipeline
@@ -77,6 +86,10 @@ namespace auto_aim
             bool fire = false;
             bool fired_now = false;          // 上升沿（真机用来打日志）
             bool held_for_jump = false;      // 反跑飞守卫按住了这一帧
+            /// 这一帧选板器**没给出合格板**（触发条件，与策略无关）。
+            bool no_valid_plate = false;
+            /// 这一帧**因为** no_valid_armor_policy != 0 而放弃了兜底瞄点（策略生效）。
+            bool gave_up = false;
             double aim_yaw_error = 0.0;
             double aim_pitch_error = 0.0;
         };

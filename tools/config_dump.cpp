@@ -198,6 +198,14 @@ namespace
                   << selector.chase_omega_threshold << '\n';
         std::cout << "selector.spin_hold_enabled "
                   << selector.spin_hold_enabled << '\n';
+        std::cout << "selector.no_valid_armor_policy "
+                  << auto_aim::loadNoValidArmorPolicy(tracker_file) << '\n';
+        std::cout << "selector.lead_velocity_scale "
+                  << selector.lead_velocity_scale << '\n';
+        std::cout << "selector.spin_velocity_scale "
+                  << selector.spin_velocity_scale << '\n';
+        std::cout << "selector.spin_velocity_gate_omega "
+                  << selector.spin_velocity_gate_omega << '\n';
         std::cout << "selector.spin_fire_tolerance "
                   << selector.spin_fire_tolerance << '\n';
         std::cout << "selector.coming_angle " << selector.coming_angle << '\n';

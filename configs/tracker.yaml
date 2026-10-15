@@ -423,6 +423,21 @@ tracker:
     decide_speed: 7.0            # 判定"高速旋转"的角速度阈值，单位：弧度/秒
     low_speed_latency: 0.06      # 低速档的指令延迟补偿，单位：秒
     high_speed_latency: 0.13     # 高速档的指令延迟补偿，单位：秒
+    # ---- 提前量里怎么用"平移速度"（2026-10-15 闭环实测，按档位分开）--------
+    # 实测（仿真 3 rad/s 小陀螺、车其实不平移）：EKF 的车心速度状态在自旋时中位
+    # 2 m/s、p90 6~7 m/s（真值 0），乘 0.3~0.4 s 提前量 = 0.7~2 m 预测偏移
+    # （3 m 处 13~38°）→ 云台朝反方向甩飞、目标出 20.5° 半视场、永久失锁。
+    # 闭环 60 s A/B（同仿真器、th=2.5）：提前量里保留平移 6/6 次失控（离轴中位
+    # 2.2~89.6°、42~88% 帧出视场）；去掉平移 4/4 次稳定（中位 1.0~1.1°、0% 出视场）。
+    # 平移靶（不自旋）反过来必须留 1.0，否则瞄点滞后 v·lead（2 m/s、0.35 s、
+    # 3 m 处 ≈ 13°）。所以按 |ω| 分档：非旋转档用 lead_velocity_scale，旋转档用
+    # spin_velocity_scale（A/B 用 ULTRA_VISION_LEAD_VELOCITY_SCALE 覆盖）。
+    lead_velocity_scale: 1.0
+    spin_velocity_scale: 0.0
+    # |ω| 超过它就算"以自旋为主"，改用 spin_velocity_scale。放在 spin_omega_threshold
+    # (2.0) 会漏：自旋时 ω 估计会掉到 1.5~1.9，那几帧的 |v| 2~4 m/s 又进了提前量，
+    # 60 s 里够把云台甩出去一次。取 1.0（≈ motion_gate_enter_omega）关掉这个漏口。
+    spin_velocity_gate_omega: 1.0
     # 板号锁定：已选中的板只要仍在可打范围内就保持锁定，除非另一块明显更优
     # （代价低于锁定板的该比例时才允许切换），防止在两块角度相近的板之间来回跳。
     lock_switch_margin: 0.65
@@ -444,6 +459,13 @@ tracker:
     # 略低于理论边界 3.0（=172°/s）：留出加速度/加加速度的余量，3 rad/s 也走守角档。
     chase_omega_threshold: 2.5
     spin_hold_enabled: true
+    # ---- 没合格板时的兜底（2026-10-15）------------------------------------
+    # 选板器给出"没有一块板落在可打扇区"（coming/leaving 判定为不合格）时：
+    #   0 = 退回"直接瞄最后一次观测到的那块板"（历史行为）
+    #   1 = 放弃：这一帧不产生新瞄点，云台保持上一拍瞄点，也不开火
+    #       （参考实现 sp_vision 就是 1：`if (没合格板) return {false, ...}`）
+    # 只在"旋转/平移"档有效；静止档本来就是直接瞄观测到的板，不走合格性判定。
+    no_valid_armor_policy: 0
     spin_fire_tolerance_degrees: 6.0
     coming_angle_degrees: 60.0   # 装甲板进入可射击扇区的角度范围，单位：度
     leaving_angle_degrees: 20.0  # 装甲板离开可射击扇区的判定角度，单位：度

@@ -236,6 +236,8 @@ int auto_aim::app::RealRunner::run()
         const char* value = std::getenv("ULTRA_VISION_AIM_JUMP_LIMIT_DEG");
         return value != nullptr ? std::atof(value) : 30.0;
     }();
+    // 没合格板时：0=瞄最后观测到的板（现行为），1=放弃（保持上一拍瞄点）。
+    pipeline_cfg.no_valid_armor_policy = auto_aim::loadNoValidArmorPolicy(tracker_file);
 
     // 下位机链路 + 控制权：只有 C 板把 mode 置成"自瞄"且链路在线，才允许我们接管。
     const bool fire_enabled = std::getenv("ULTRA_VISION_DISABLE_FIRE") == nullptr;

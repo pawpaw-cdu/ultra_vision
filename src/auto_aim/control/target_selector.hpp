@@ -47,6 +47,28 @@ namespace auto_aim
         double low_speed_latency = 0.06;    // s
         double high_speed_latency = 0.13;   // s
 
+        // ---- 预测平移时对估计速度的缩放（2026-10-15，闭环实测）------------------
+        // 闭环实测（仿真 3 rad/s、车其实静止不平移）：EKF 的**车心速度**状态在自旋时
+        // 抖到 ±3 m/s（真值 0），而提前量是 0.3~0.4 s —— 预测位置被推走
+        // 3 m/s × 0.38 s ≈ 1.1 m（3 m 处 ≈ 20°），实测就是"云台朝反方向甩出去、
+        // 目标出视场、永久失锁"。参考实现不显式加观测年龄/云台时间（delay_time=0，
+        // 只用飞行时间），平移外推只有几十毫秒，噪声还没被放大。
+        //   lead_velocity_scale      = 非旋转档（|ω| ≤ spin_omega_threshold）用：平移靶
+        //                              必须留 1.0，否则瞄点滞后 v·lead（2 m/s、0.35 s、
+        //                              3 m 处 ≈ 13°）。
+        //   spin_velocity_scale      = 旋转档（|ω| > spin_omega_threshold）用：实测该档
+        //                              速度状态噪声被提前量放大成 20°+ 甩点，取 0 后
+        //                              6/6 次失控 → 0/2 次失控（3 rad/s 闭环）。
+        // 两个值都由调用方（aim_pipeline）按当前 |ω| 选一个，见那里的注释。
+        double lead_velocity_scale = 1.0;
+        double spin_velocity_scale = 1.0;
+        /// 用 spin_velocity_scale 的角速度门限（rad/s）：|ω| > 它 → 按"以自旋为主"
+        /// 处理（平移速度不可信）。默认 2.0 = spin_omega_threshold。
+        /// 实测把它放在 2.0 会漏：自旋时 ω 估计本身会掉到 1.5~1.9（真值 3.0），
+        /// 那几帧 |v| 2~4 m/s 又进了提前量，60 s 里够把云台甩出去一次
+        /// （分档 A/B 的 rep1：离轴 32% 帧 > 20.5°，其余帧正常）。
+        double spin_velocity_gate_omega = 2.0;
+
         // Plate locking: keep the chosen plate while it stays eligible unless
         // another candidate is clearly cheaper. Stops the selector from
         // alternating between two plates that sit at similar angles.

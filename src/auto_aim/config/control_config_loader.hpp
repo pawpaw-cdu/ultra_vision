@@ -124,6 +124,12 @@ inline constexpr double kDegreesToRadians = 3.14159265358979323846 / 180.0;
             selector["low_speed_latency"].as<double>(cfg.low_speed_latency);
         cfg.high_speed_latency =
             selector["high_speed_latency"].as<double>(cfg.high_speed_latency);
+        cfg.lead_velocity_scale =
+            selector["lead_velocity_scale"].as<double>(cfg.lead_velocity_scale);
+        cfg.spin_velocity_scale =
+            selector["spin_velocity_scale"].as<double>(cfg.spin_velocity_scale);
+        cfg.spin_velocity_gate_omega =
+            selector["spin_velocity_gate_omega"].as<double>(cfg.spin_velocity_gate_omega);
         cfg.lock_switch_margin =
             selector["lock_switch_margin"].as<double>(cfg.lock_switch_margin);
         cfg.motion_gate_enabled =
@@ -180,6 +186,18 @@ inline constexpr double kDegreesToRadians = 3.14159265358979323846 / 180.0;
             : tracker_file["tracker"]["predictive_aim"];
         if (!selector) return 5;
         return selector["max_control_lost_frames"].as<int>(5);
+    }
+
+    /// 没合格板时的兜底策略（0=瞄最后观测到的板，1=放弃/保持上一拍瞄点）。
+    /// 见 AimPipelineConfig::no_valid_armor_policy。
+    inline int loadNoValidArmorPolicy(const YAML::Node& tracker_file)
+    {
+        const YAML::Node selector = tracker_file["tracker"]["selector"]
+            ? tracker_file["tracker"]["selector"]
+            : tracker_file["tracker"]["predictive_aim"];
+        if (!selector) return 0;
+        const int policy = selector["no_valid_armor_policy"].as<int>(0);
+        return policy != 0 ? 1 : 0;
     }
 
     inline double loadFireAngleToleranceDegrees(const YAML::Node& tracker_file)

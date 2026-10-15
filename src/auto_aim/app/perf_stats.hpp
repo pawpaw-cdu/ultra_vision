@@ -40,6 +40,9 @@ namespace auto_aim
             // 状态机 / 决策
             int aim_valid_updates = 0;
             int aim_settled_updates = 0;
+            /// 选板器没给出合格板的帧数（触发条件），以及据此真的放弃兜底的帧数。
+            int no_valid_plate_updates = 0;
+            int give_up_updates = 0;
             int plate_switches = 0;
             int stable_spin_updates = 0;
             int missing_frames = 0;

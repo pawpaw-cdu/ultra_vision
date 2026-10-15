@@ -57,6 +57,8 @@ namespace app
                       << ", spin: " << tracker.hasRotationRate()
                       << ", aim_settled: " << stats.aim_settled_updates << "/"
                       << stats.aim_valid_updates
+                      << ", no_plate: " << stats.no_valid_plate_updates
+                      << ", give_up: " << stats.give_up_updates
                       << ", shooter: " << shooter_status
                       << ", stats.plate_switches: " << stats.plate_switches;
             {
@@ -151,6 +153,8 @@ namespace app
             stats.fps_frames = 0;
             stats.aim_valid_updates = 0;
             stats.aim_settled_updates = 0;
+            stats.no_valid_plate_updates = 0;
+            stats.give_up_updates = 0;
             stats.plate_switches = 0;
         }
 }

@@ -191,6 +191,24 @@ namespace auto_aim
                 gimbal_command_rate_hz, max_control_lost_frames,
                 fire_angle_tolerance * 180.0 / CV_PI,
                 0.0);   // 仿真链路不需要心跳
+            // 没合格板时的兜底策略：0=瞄最后观测到的板（现行为），1=放弃（保持上一拍
+            // 瞄点，不开火）。见 AimPipelineConfig；YAML 给默认值，环境变量 A/B 覆盖。
+            pipeline_cfg.no_valid_armor_policy =
+                auto_aim::loadNoValidArmorPolicy(tracker_cfg);
+            if (const char* policy_env = std::getenv("ULTRA_VISION_NO_VALID_ARMOR_POLICY")) {
+                pipeline_cfg.no_valid_armor_policy = std::atoi(policy_env) != 0 ? 1 : 0;
+            }
+            // 提前量里平移速度的缩放（A/B 开关）：0 = 只预测自转。见 lead_velocity_scale。
+            if (const char* scale_env = std::getenv("ULTRA_VISION_LEAD_VELOCITY_SCALE")) {
+                pipeline_cfg.selector.lead_velocity_scale = std::atof(scale_env);
+                pipeline_cfg.selector.spin_velocity_scale = std::atof(scale_env);
+            }
+            if (const char* spin_env = std::getenv("ULTRA_VISION_SPIN_VELOCITY_SCALE")) {
+                pipeline_cfg.selector.spin_velocity_scale = std::atof(spin_env);
+            }
+            if (const char* gate_env = std::getenv("ULTRA_VISION_SPIN_VELOCITY_GATE")) {
+                pipeline_cfg.selector.spin_velocity_gate_omega = std::atof(gate_env);
+            }
             pipeline_ = std::make_unique<auto_aim::AimPipeline>(
                 pipeline_cfg, [this](bool /*control*/, bool /*fire*/, double yaw, double yaw_vel,
                                      double yaw_acc, double pitch, double pitch_vel,
@@ -273,7 +291,10 @@ namespace auto_aim
                 "ULTRA_VISION_SELECTOR_CSV",
                 "time_us,center_x,center_y,center_z,yaw,omega,armor_id,"
                 "armor_x,armor_y,armor_z,target_yaw,target_pitch,lead,"
-                "target_yaw_velocity,target_pitch_velocity,gimbal_time,handoff,in_fire\n");
+                "target_yaw_velocity,target_pitch_velocity,gimbal_time,handoff,in_fire,"
+                // 提前量用的**平移速度**状态（世界系）。实测自旋时这一项抖到 ±3 m/s
+                // （真值 0），乘提前量就是瞄点甩飞的直接来源，所以单独落盘。
+                "vx,vy,vz\n");
             detections_recorder_ = std::make_unique<auto_aim::app::CsvSink>(
                 "ULTRA_VISION_DETECTIONS_CSV",
                 // time_us = 本机到手时刻（主链路原来用的"观测时间"）；
@@ -644,6 +665,8 @@ namespace auto_aim
             aim_yaw_error_ = outcome.aim_yaw_error;
             aim_pitch_error_ = outcome.aim_pitch_error;
             if (outcome.decision.valid) ++stats_.aim_valid_updates;
+            if (outcome.no_valid_plate) ++stats_.no_valid_plate_updates;
+            if (outcome.gave_up) ++stats_.give_up_updates;
             if (outcome.aim_ready) ++stats_.aim_settled_updates;
             if (outcome.held_for_jump) ++aim_jump_rejections_;
             if (outcome.fired_now) {
@@ -687,7 +710,10 @@ namespace auto_aim
                     << outcome.decision.target_pitch_velocity << ','
                     << outcome.decision.gimbal_time << ','
                     << outcome.decision.handoff_gain << ','
-                    << static_cast<int>(outcome.decision.in_fire_window) << '\n';
+                    << static_cast<int>(outcome.decision.in_fire_window) << ','
+                    << tracker.getTargetVelocityWorld()[0] << ','
+                    << tracker.getTargetVelocityWorld()[1] << ','
+                    << tracker.getTargetVelocityWorld()[2] << '\n';
             }
         }
 
