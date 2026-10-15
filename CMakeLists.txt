@@ -175,6 +175,56 @@ if(ULTRA_VISION_BUILD_AUTO_BUFF OR ULTRA_VISION_BUILD_RUNE)
   add_subdirectory(src/auto_buff)
 endif()
 
+# ---- 标定工具（对齐 sp_vision_25 的 calibration/）-----------------------------
+# sp_vision_25 有 calibrate_camera + calibrate_handeye(+robotworld) 这一套，我们的
+# 两个工具是同一职责（内参 / 相机→云台手眼），所以保留；与它不重合的一次性探针
+# 已经在 uv 收敛时删掉。
+# calibrate_camera：棋盘格/圆点阵 → 相机内参（有海康 SDK 时还能 --live 直接拍）
+# hand_eye_calibrate：静止标定物 + 多组云台姿态 → 相机→云台外参（手眼）
+
+add_executable(calibrate_camera tools/calibrate_camera.cpp)
+target_include_directories(calibrate_camera PRIVATE
+    ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/io
+    ${OpenCV_INCLUDE_DIRS} ${YAML_CPP_INCLUDE_DIRS})
+target_link_libraries(calibrate_camera PRIVATE ${OpenCV_LIBS} ${YAML_CPP_LDFLAGS})
+# 有海康 SDK 时把 --live 采集（直接开相机拍标定板）编进去
+if(ULTRA_VISION_USE_HIK_CAMERA AND HIK_LIB)
+  target_sources(calibrate_camera PRIVATE io/camera/HikCamera.cpp)
+  target_include_directories(calibrate_camera PRIVATE ${HIK_INC_DIR})
+  target_compile_definitions(calibrate_camera PRIVATE ULTRA_VISION_USE_HIK_CAMERA=1)
+  target_link_libraries(calibrate_camera PRIVATE ${HIK_LIB})
+  set_target_properties(calibrate_camera PROPERTIES BUILD_RPATH "${HIK_LIB_DIR}")
+endif()
+
+add_executable(hand_eye_calibrate
+    tools/hand_eye_calibrate.cpp
+    src/auto_aim/perception/detector.cpp
+    src/auto_aim/perception/pnp_solver.cpp
+    src/auto_aim/perception/armor_source.cpp
+    io/gimbal/gimbal.cpp io/gimbal/protocol.cpp io/serial/crc16.cpp io/serial/serial_port.cpp
+)
+target_include_directories(hand_eye_calibrate PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/auto_aim ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/io
+    ${OpenCV_INCLUDE_DIRS} ${YAML_CPP_INCLUDE_DIRS}
+)
+target_link_libraries(hand_eye_calibrate PRIVATE ${OpenCV_LIBS} ${YAML_CPP_LDFLAGS} Threads::Threads)
+if(ULTRA_VISION_USE_OPENVINO)
+  target_sources(hand_eye_calibrate PRIVATE
+      src/auto_aim/perception/nn_detector.cpp
+      src/auto_aim/perception/keypoint_refiner.cpp
+      src/auto_aim/perception/async_detector.cpp)
+  target_compile_definitions(hand_eye_calibrate PRIVATE ULTRA_VISION_USE_OPENVINO=1)
+  target_link_libraries(hand_eye_calibrate PRIVATE openvino::runtime)
+endif()
+# 有海康 SDK 时把手眼工具的 --live（直接开相机 + 串口 + 实时解算）也编进去
+if(ULTRA_VISION_USE_HIK_CAMERA AND HIK_LIB)
+  target_sources(hand_eye_calibrate PRIVATE io/camera/HikCamera.cpp)
+  target_include_directories(hand_eye_calibrate PRIVATE ${HIK_INC_DIR})
+  target_compile_definitions(hand_eye_calibrate PRIVATE ULTRA_VISION_USE_HIK_CAMERA=1)
+  target_link_libraries(hand_eye_calibrate PRIVATE ${HIK_LIB})
+  set_target_properties(hand_eye_calibrate PROPERTIES BUILD_RPATH "${HIK_LIB_DIR}")
+endif()
+
 # ---- sp_vision_25 的滤波器 / 底盘构造 / 重投影（**移植版**）--------------------
 # 为什么搬：用户在真机上验证过 sp_vision_25 的底盘模型构造与重投影"非常优秀"，
 # 而我们自己这套的几何学习等补丁在实车上会漂（实测 l 在 18s 内从 +3.5cm 走到
