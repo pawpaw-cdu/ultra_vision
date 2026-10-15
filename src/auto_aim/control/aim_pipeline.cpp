@@ -64,19 +64,6 @@ namespace auto_aim
             estimate.yaw = tracker_.getYawWorld();
             estimate.omega = tracker_.getOmega();
             estimate.armor_radius = tracker_.getArmorRadius();
-            // 提前量里怎么用平移速度：见 TargetSelectorConfig::lead_velocity_scale。
-            // 旋转档速度状态噪声大（实测中位 2 m/s、p90 6~7 m/s，真值 0）× 0.3~0.4 s
-            // 提前量 = 十几~几十度的瞄点误差，实测能把云台甩飞（目标出视场后永久失锁）；
-            // 缩放为 0 就是"只预测自转，不预测平移"。平移档必须保留 1.0，否则瞄点滞后。
-            const double velocity_scale =
-                std::abs(estimate.omega) > config_.selector.spin_velocity_gate_omega
-                    ? config_.selector.spin_velocity_scale
-                    : config_.selector.lead_velocity_scale;
-            if (velocity_scale != 1.0) {
-                for (auto& component : estimate.velocity) {
-                    component *= velocity_scale;
-                }
-            }
             // 未收敛（刚入靶/刚重捕）时不允许用 ω 做提前量，见 TargetEstimate::converged。
             estimate.converged = tracker_.watchdogStats().converged;
             // 观测年龄 = 现在 − 最后一次**新观测**的时刻。异步检测、慢推理、

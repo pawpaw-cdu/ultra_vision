@@ -140,18 +140,18 @@ namespace auto_aim
         }
         const TargetEstimate& estimate = estimate_used;
 
-        // The estimate is expressed at the time of the last detection, not now.
-        // Carry its age into the lead so a slow asynchronous detector is
-        // compensated instead of biasing the aim point behind the target.
-        const double estimate_age = std::max(
-            0.0, std::min(estimate.age, config_.max_lead_time));
+        // ---- 提前量口径改成参考实现的形式（2026-10-15）--------------------------
+        // 参考实现（sp_vision `aimer.cpp`）只叠"飞行时间 + 0.005 s 检测耗时"，
+        // delay_time 在配置里就是 0：**它从不把速度外推 0.3 s**。我们原来把
+        // `观测年龄 + 云台时间` 也塞进位置外推，等于让速度状态的噪声（自旋时 ±2~6 m/s、
+        // 深度换向时更大）乘上一个长视界——小陀螺甩飞、深度反向塌陷都是这一个放大器。
+        // 观测年龄该补的由"状态按时间戳外推 + 时间基对齐"负责，不再乘速度。
         // A fast target needs a larger allowance than a slow one; see the config
         // comment. The split is on the chassis yaw rate, like the reference.
         const double latency = std::abs(estimate.omega) > config_.decide_speed
             ? config_.high_speed_latency
             : config_.low_speed_latency;
-        const double seed_time = latency + estimate_age +
-            center_distance / config_.projectile_speed;
+        const double seed_time = latency + center_distance / config_.projectile_speed;
 
         // ---- 守角档：|ω| 超过云台可达上限，追板必然失败 -----------------------
         // 瞄"预测的底盘中心方位"：正对相机的近侧板与中心方位只差 asin(R/d)≈2~3°，
@@ -252,8 +252,7 @@ namespace auto_aim
                 gimbal_time = gimbalTravelTime(
                     config_, current_yaw, current_pitch, raw_yaw, raw_pitch);
 
-                const double next_time =
-                    latency + estimate_age + gimbal_time + flight_time;
+                const double next_time = latency + flight_time;
                 if (std::abs(next_time - aim_time) < 1e-4) {
                     aim_time = next_time;
                     converged = true;
