@@ -1,6 +1,7 @@
 #include "sim_receiver/vision_date_recevier.hpp"
 
 #include "tcp_input.hpp"
+#include "udp_input.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -42,7 +43,7 @@ int configuredDecodeThreads(int fallback) {
 
 // Three-stage pipeline, one thread role per stage:
 //
-//   reader thread   socket -> [32B header | JPEG]  (no decode, no copy)
+//   reader thread   socket -> [header | JPEG]      (no decode, no copy)
 //   decoder threads JPEG   -> cv::Mat              (parallel, bounded queue)
 //   consumer        cv::Mat (newest wins, stale frames dropped)
 //
@@ -50,6 +51,10 @@ int configuredDecodeThreads(int fallback) {
 // While it decoded it was not reading, so the simulator's writer blocked and the
 // observable frame rate of *both* ends collapsed to the client's decode rate.
 // Keeping the socket drained and decoding off the wire removes that coupling.
+//
+// The reader sits behind PacketSource, so the transport is a detail: TCP
+// (default) or the simulator's UDP fragment stream (`protocol: udp`).  Commands
+// always stay on TCP 7667.
 class VisionDateRecevier::Impl {
 public:
     Impl(std::string host, uint16_t port, uint16_t command_port, int decode_threads)
@@ -58,13 +63,31 @@ public:
 
     ~Impl() { stop(); }
 
+    // 图像改走 UDP 分片流（仿真器 DAEDALUS_UDP=1 的那一路）。指令仍然走 TCP。
+    void useUdp(uint16_t udp_port) {
+        udp_port_ = udp_port;
+        udp = std::make_unique<UdpInput>(input.host(), udp_port);
+    }
+
+    void useTcp() {
+        udp.reset();
+    }
+
     void overrideEndpoint(std::string host, uint16_t port) {
         stop();
         input = TcpInput(std::move(host), port);
+        if (udp) {
+            // 协议不变，只把主机（必要时还有端口）搬到新地址上。
+            udp = std::make_unique<UdpInput>(input.host(), udp_port_);
+        }
     }
 
     void overrideCommandEndpoint(uint16_t port) {
         command_port_ = port;
+    }
+
+    PacketSource& image() {
+        return udp ? static_cast<PacketSource&>(*udp) : static_cast<PacketSource&>(input);
     }
 
     bool connect() {
@@ -85,7 +108,15 @@ public:
             latest_frame.release();
         }
 
-        connected_.store(input.connect());
+        const bool ok = image().connect();
+        if (udp) {
+            std::cout << "Simulator image stream: UDP " << input.host() << ':' << udp_port_
+                      << " (subscribed; commands TCP " << command_port_ << ')' << std::endl;
+        } else {
+            std::cout << "Simulator image stream: TCP " << input.host() << ':' << input.port()
+                      << std::endl;
+        }
+        connected_.store(ok);
         reader = std::thread([this] { readLoop(); });
         decoders.reserve(static_cast<std::size_t>(decode_threads_));
         for (int i = 0; i < decode_threads_; ++i) {
@@ -163,9 +194,14 @@ private:
     };
 
     void readLoop() {
+        PacketSource& source = image();
         while (!stop_requested_.load()) {
             SimPacket packet;
-            if (!input.readPacket(packet)) {
+            const ReadStatus status = source.read(packet);
+            if (status == ReadStatus::Idle) {
+                continue;   // 流正常，只是这段时间没有帧（UDP poll 超时）
+            }
+            if (status == ReadStatus::Error) {
                 connected_.store(false);
                 for (int i = 0; i < 5 && !stop_requested_.load(); ++i) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -204,7 +240,7 @@ private:
                 raw_queue.pop_front();
             }
 
-            cv::Mat decoded = TcpInput::decode(item.packet);
+            cv::Mat decoded = decodePacket(item.packet);
             if (decoded.empty()) {
                 continue;
             }
@@ -274,8 +310,9 @@ private:
     void stop() {
         stop_requested_.store(true);
         // Unblock the reader parked in recv() so shutdown does not wait for the
-        // socket timeout; the reader still owns closing the descriptor.
-        input.shutdownImage();
+        // socket timeout; the reader still owns closing the descriptor.  (UDP
+        // polls with a short timeout, so it needs no wake-up.)
+        image().shutdown();
         raw_cv.notify_all();
         frame_cv.notify_all();
         command_cv.notify_all();
@@ -291,10 +328,13 @@ private:
         if (command_worker.joinable()) {
             command_worker.join();
         }
+        image().close();
         input.close();
     }
 
     TcpInput input;
+    std::unique_ptr<UdpInput> udp;
+    uint16_t udp_port_ = 7669;
     uint16_t command_port_ = 7667;
     const int decode_threads_;
     std::thread reader;
@@ -346,8 +386,29 @@ VisionDateRecevier::VisionDateRecevier(const std::string& config_path)
         if (node["command_port"]) {
             overrideCommandEndpoint(static_cast<uint16_t>(node["command_port"].as<int>()));
         }
+        // 图像流协议：tcp（默认）/ udp。udp 时图像走仿真器 DAEDALUS_UDP=1 那一路
+        // 分片流（默认端口 7669），指令仍然走 TCP 7667。见 simulator_system/API.md §1.1。
+        if (node["protocol"] && node["protocol"].as<std::string>() == "udp") {
+            const uint16_t udp_port = node["udp_port"]
+                ? static_cast<uint16_t>(node["udp_port"].as<int>()) : 7669;
+            impl_->useUdp(udp_port);
+        }
     } catch (const std::exception& err) {
         std::cerr << "Failed to load simulator config: " << err.what() << std::endl;
+    }
+
+    // 环境变量覆盖（脚本 A/B 用，不必改配置文件）：
+    //   ULTRA_VISION_SIM_PROTOCOL=udp|tcp
+    //   ULTRA_VISION_SIM_UDP_PORT=7669
+    if (const char* protocol = std::getenv("ULTRA_VISION_SIM_PROTOCOL")) {
+        const std::string value(protocol);
+        if (value == "udp") {
+            const char* port_env = std::getenv("ULTRA_VISION_SIM_UDP_PORT");
+            const int port = port_env != nullptr ? std::atoi(port_env) : 7669;
+            impl_->useUdp(static_cast<uint16_t>(std::max(1, std::min(65535, port))));
+        } else if (value == "tcp") {
+            impl_->useTcp();
+        }
     }
 }
 

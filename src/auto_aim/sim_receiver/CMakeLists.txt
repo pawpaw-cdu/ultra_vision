@@ -6,7 +6,9 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(YAML_CPP REQUIRED yaml-cpp)
 
 add_library(sim_receiver STATIC
+    src/sim_packet.cpp
     src/tcp_input.cpp
+    src/udp_input.cpp
     src/vision_date_recevier.cpp
     src/telemetry_receiver.cpp
 )

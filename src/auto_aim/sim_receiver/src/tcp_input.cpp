@@ -11,7 +11,6 @@
 
 #include <cerrno>
 #include <cstring>
-#include <opencv2/imgcodecs.hpp>
 #include <utility>
 
 namespace sim_receiver {
@@ -19,7 +18,10 @@ namespace sim_receiver {
 namespace {
 
 constexpr uint32_t kMagic = 0x44414544; // "DAED"
-constexpr uint32_t kVersion = 2;   // v2 = v1 + 真实云台姿态 (gimbal_yaw/pitch)
+constexpr size_t kBaseHeaderLen = 32;   // v1: 32 字节（无云台姿态）
+constexpr size_t kHeaderLenV2 = 40;     // v2: 再追加 gimbal_yaw/pitch（f32）
+constexpr uint32_t kVersionV1 = 1;
+constexpr uint32_t kVersionV2 = 2;
 
 uint32_t readU32(const uint8_t* p) {
     return (static_cast<uint32_t>(p[0]) << 24) |
@@ -36,7 +38,6 @@ uint64_t readU64(const uint8_t* p) {
     return value;
 }
 
-// 包头里的云台姿态是 f32 big-endian（Rust 侧 to_be_bytes）。
 float readF32(const uint8_t* p) {
     const uint32_t bits = readU32(p);
     float value = 0.0f;
@@ -89,45 +90,6 @@ int connectSocketAddress(const std::string& host, uint16_t port) {
 }
 
 } // namespace
-
-BufferPool::Buffer BufferPool::acquire(std::size_t size) {
-    std::shared_ptr<std::vector<uint8_t>> storage;
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (!free_.empty()) {
-            storage = std::move(free_.back());
-            free_.pop_back();
-        }
-    }
-    if (!storage) {
-        storage = std::make_shared<std::vector<uint8_t>>();
-    }
-    // Exact size: the decoder consumes the whole buffer, so it must not carry
-    // stale bytes from a larger previous frame.
-    if (storage->size() != size) {
-        storage->resize(size);
-    }
-
-    // The deleter owns one reference and returns the storage to the pool when the
-    // last borrower drops it.  weak_ptr keeps this correct even if the pool is
-    // destroyed while a buffer is still in flight (endpoint reconfiguration).
-    std::weak_ptr<BufferPool> weak = shared_from_this();
-    return Buffer(storage.get(), [weak, storage](std::vector<uint8_t>*) mutable {
-        if (auto pool = weak.lock()) {
-            pool->release(std::move(storage));
-        }
-    });
-}
-
-std::size_t BufferPool::freeCount() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return free_.size();
-}
-
-void BufferPool::release(std::shared_ptr<std::vector<uint8_t>> buffer) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    free_.push_back(std::move(buffer));
-}
 
 TcpInput::TcpInput(std::string host, uint16_t port)
     : host_(std::move(host)), port_(port), pool_(std::make_shared<BufferPool>()) {}
@@ -237,7 +199,7 @@ void TcpInput::closeImage() {
     }
 }
 
-void TcpInput::shutdownImage() {
+void TcpInput::shutdown() {
     const int fd = sock_.load();
     if (fd >= 0) {
         ::shutdown(fd, SHUT_RDWR);
@@ -271,15 +233,16 @@ bool TcpInput::readExact(void* buffer, size_t size) {
     return true;
 }
 
-bool TcpInput::readPacket(SimPacket& packet) {
+ReadStatus TcpInput::read(SimPacket& packet) {
     packet = SimPacket{};
     if (sock_.load() < 0 && !connectOnce()) {
-        return false;
+        return ReadStatus::Error;
     }
 
-    if (!readExact(header_.data(), header_.size())) {
+    // 先读完 32 字节公共前缀：magic/version/width/height/payload_len/timestamp/seq。
+    if (!readExact(header_.data(), kBaseHeaderLen)) {
         closeImage();
-        return false;
+        return ReadStatus::Error;
     }
 
     const uint32_t magic = readU32(header_.data());
@@ -289,13 +252,32 @@ bool TcpInput::readPacket(SimPacket& packet) {
     const uint32_t payload_len = readU32(header_.data() + 16);
     const uint64_t timestamp_us = readU64(header_.data() + 20);
     const uint32_t seq = readU32(header_.data() + 28);
-    const float gimbal_yaw = readF32(header_.data() + 32);
-    const float gimbal_pitch = readF32(header_.data() + 36);
 
-    if (magic != kMagic || version != kVersion || payload_len == 0 ||
-        payload_len > 20 * 1024 * 1024 || width == 0 || height == 0) {
+    if (magic != kMagic) {
         closeImage();
-        return false;
+        return ReadStatus::Error;
+    }
+
+    // v2 在 32 字节后追加真实云台姿态。必须读完再按 payload_len 读 JPEG，
+    // 否则每帧会错位 8 字节、后面全部解码失败。
+    float gimbal_yaw = 0.0f;
+    float gimbal_pitch = 0.0f;
+    if (version == kVersionV2) {
+        if (!readExact(header_.data() + kBaseHeaderLen, kHeaderLenV2 - kBaseHeaderLen)) {
+            closeImage();
+            return ReadStatus::Error;
+        }
+        gimbal_yaw = readF32(header_.data() + 32);
+        gimbal_pitch = readF32(header_.data() + 36);
+    } else if (version != kVersionV1) {
+        // 未知版本：宁可断开重连，也别按错误的头长继续读下去。
+        closeImage();
+        return ReadStatus::Error;
+    }
+
+    if (payload_len == 0 || payload_len > 20 * 1024 * 1024 || width == 0 || height == 0) {
+        closeImage();
+        return ReadStatus::Error;
     }
 
     // No copy: the JPEG bytes land straight in a pooled buffer that the decoder
@@ -303,7 +285,7 @@ bool TcpInput::readPacket(SimPacket& packet) {
     BufferPool::Buffer payload = pool_->acquire(payload_len);
     if (!readExact(payload->data(), payload->size())) {
         closeImage();
-        return false;   // payload returns itself to the pool
+        return ReadStatus::Error;   // payload returns itself to the pool
     }
 
     packet.payload = std::move(payload);
@@ -314,22 +296,15 @@ bool TcpInput::readPacket(SimPacket& packet) {
     packet.height = height;
     packet.gimbal_yaw = gimbal_yaw;
     packet.gimbal_pitch = gimbal_pitch;
-    return true;
-}
-
-cv::Mat TcpInput::decode(const SimPacket& packet) {
-    if (!packet.payload || packet.payload->empty()) {
-        return cv::Mat();
-    }
-    return cv::imdecode(*packet.payload, cv::IMREAD_COLOR);
+    return ReadStatus::Frame;
 }
 
 bool TcpInput::readFrame(SimFrame& frame) {
     SimPacket packet;
-    if (!readPacket(packet)) {
+    if (read(packet) != ReadStatus::Frame) {
         return false;
     }
-    cv::Mat decoded = decode(packet);
+    cv::Mat decoded = decodePacket(packet);
     if (decoded.empty()) {
         return false;
     }

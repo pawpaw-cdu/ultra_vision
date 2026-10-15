@@ -5,5 +5,19 @@
 # 注意网络要真的通（不同网段/NAT 里连不上时，视觉端会一直
 # "Waiting for simulator frames"），并且**仿真器必须跑在有 GPU 的机器上**：
 # 1440x1080@30 在软件渲染（VM/无 GPU 驱动）上只有个位数 fps，自瞄没法用。
-host: 10.117.214.138
+host: 10.117.214.242
 port: 7666
+
+# 图像流协议：tcp（默认，可靠、有队头阻塞）/ udp（低延迟，可能丢帧）。
+# 仿真器跑在**远程主机**（NUC 等）时 UDP 更稳：TCP 的重传/队头阻塞会让
+# 延迟和抖动变差，而视觉端本来只要"最新一帧"，丢包表现为掉帧而不是卡顿。
+#
+# 用 UDP 时要保证仿真器那侧也开了这一路（camera.yaml 写 protocol: udp，
+# 或启动时给 DAEDALUS_UDP=1），它默认监听 0.0.0.0:7669：
+protocol: udp
+udp_port: 7669        # 对应仿真器的 DAEDALUS_UDP_ADDR 端口
+# 指令（FIRE / GIMBAL / RESET）**仍然走 TCP 7667**，可靠且量小，不受这里影响。
+# 也可以不改文件，用环境变量临时覆盖：
+#   ULTRA_VISION_SIM_PROTOCOL=udp  ULTRA_VISION_SIM_UDP_PORT=7669
+# protocol: tcp
+# udp_port: 7669
