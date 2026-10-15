@@ -64,14 +64,11 @@ namespace auto_aim
         //                              速度状态噪声被提前量放大成 20°+ 甩点，取 0 后
         //                              6/6 次失控 → 0/2 次失控（3 rad/s 闭环）。
         // 两个值都由调用方（aim_pipeline）按当前 |ω| 选一个，见那里的注释。
-        double lead_velocity_scale = 1.0;
-        double spin_velocity_scale = 1.0;
         /// 用 spin_velocity_scale 的角速度门限（rad/s）：|ω| > 它 → 按"以自旋为主"
         /// 处理（平移速度不可信）。默认 2.0 = spin_omega_threshold。
         /// 实测把它放在 2.0 会漏：自旋时 ω 估计本身会掉到 1.5~1.9（真值 3.0），
         /// 那几帧 |v| 2~4 m/s 又进了提前量，60 s 里够把云台甩出去一次
         /// （分档 A/B 的 rep1：离轴 32% 帧 > 20.5°，其余帧正常）。
-        double spin_velocity_gate_omega = 2.0;
 
         // Plate locking: keep the chosen plate while it stays eligible unless
         // another candidate is clearly cheaper. Stops the selector from

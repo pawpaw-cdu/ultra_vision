@@ -432,12 +432,9 @@ tracker:
     # 平移靶（不自旋）反过来必须留 1.0，否则瞄点滞后 v·lead（2 m/s、0.35 s、
     # 3 m 处 ≈ 13°）。所以按 |ω| 分档：非旋转档用 lead_velocity_scale，旋转档用
     # spin_velocity_scale（A/B 用 ULTRA_VISION_LEAD_VELOCITY_SCALE 覆盖）。
-    lead_velocity_scale: 1.0
-    spin_velocity_scale: 0.0
     # |ω| 超过它就算"以自旋为主"，改用 spin_velocity_scale。放在 spin_omega_threshold
     # (2.0) 会漏：自旋时 ω 估计会掉到 1.5~1.9，那几帧的 |v| 2~4 m/s 又进了提前量，
     # 60 s 里够把云台甩出去一次。取 1.0（≈ motion_gate_enter_omega）关掉这个漏口。
-    spin_velocity_gate_omega: 1.0
     # 板号锁定：已选中的板只要仍在可打范围内就保持锁定，除非另一块明显更优
     # （代价低于锁定板的该比例时才允许切换），防止在两块角度相近的板之间来回跳。
     lock_switch_margin: 0.65

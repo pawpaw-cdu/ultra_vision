@@ -198,17 +198,6 @@ namespace auto_aim
             if (const char* policy_env = std::getenv("ULTRA_VISION_NO_VALID_ARMOR_POLICY")) {
                 pipeline_cfg.no_valid_armor_policy = std::atoi(policy_env) != 0 ? 1 : 0;
             }
-            // 提前量里平移速度的缩放（A/B 开关）：0 = 只预测自转。见 lead_velocity_scale。
-            if (const char* scale_env = std::getenv("ULTRA_VISION_LEAD_VELOCITY_SCALE")) {
-                pipeline_cfg.selector.lead_velocity_scale = std::atof(scale_env);
-                pipeline_cfg.selector.spin_velocity_scale = std::atof(scale_env);
-            }
-            if (const char* spin_env = std::getenv("ULTRA_VISION_SPIN_VELOCITY_SCALE")) {
-                pipeline_cfg.selector.spin_velocity_scale = std::atof(spin_env);
-            }
-            if (const char* gate_env = std::getenv("ULTRA_VISION_SPIN_VELOCITY_GATE")) {
-                pipeline_cfg.selector.spin_velocity_gate_omega = std::atof(gate_env);
-            }
             pipeline_ = std::make_unique<auto_aim::AimPipeline>(
                 pipeline_cfg, [this](bool /*control*/, bool /*fire*/, double yaw, double yaw_vel,
                                      double yaw_acc, double pitch, double pitch_vel,

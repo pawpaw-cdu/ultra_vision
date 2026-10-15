@@ -124,12 +124,6 @@ inline constexpr double kDegreesToRadians = 3.14159265358979323846 / 180.0;
             selector["low_speed_latency"].as<double>(cfg.low_speed_latency);
         cfg.high_speed_latency =
             selector["high_speed_latency"].as<double>(cfg.high_speed_latency);
-        cfg.lead_velocity_scale =
-            selector["lead_velocity_scale"].as<double>(cfg.lead_velocity_scale);
-        cfg.spin_velocity_scale =
-            selector["spin_velocity_scale"].as<double>(cfg.spin_velocity_scale);
-        cfg.spin_velocity_gate_omega =
-            selector["spin_velocity_gate_omega"].as<double>(cfg.spin_velocity_gate_omega);
         cfg.lock_switch_margin =
             selector["lock_switch_margin"].as<double>(cfg.lock_switch_margin);
         cfg.motion_gate_enabled =
