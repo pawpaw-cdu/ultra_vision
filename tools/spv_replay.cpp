@@ -354,7 +354,11 @@ int main(int argc, char* argv[])
     if (!out_path.empty())
     {
         out.open(out_path, std::ios::out | std::ios::trunc);
-        out << "t,state,n_det,sx,sy,sz,yaw,omega,r,l,h,detfit_med,detfit_max\n";
+        // 尾部追加 EKF 状态协方差 P 的对角线（σ²）与 NIS：用来判断"滤波器自己
+        // 报的不确定度是否真实"。spv 的状态是 [x,vx,y,vy,z,vz,a,w,r,l,h]。
+        out << "t,state,n_det,sx,sy,sz,yaw,omega,r,l,h,detfit_med,detfit_max";
+        for (int i = 0; i < 11; ++i) out << ",P" << i;
+        out << ",nis,nis_pre\n";
     }
 
     const auto base_time = std::chrono::steady_clock::now();
@@ -571,12 +575,23 @@ int main(int argc, char* argv[])
 
         double sx = 0, sy = 0, sz = 0, yaw = 0, omega = 0, rr = 0, ll = 0, hh = 0;
         double med = -1.0, mx = -1.0;
+        std::array<double, 11> pdiag{};
+        double nis = -1.0;
+        double nis_pre = -1.0;
         if (!targets.empty())
         {
             const spv::Target& tgt = targets.front();
             const Eigen::VectorXd x = tgt.ekf_x();
             sx = x[0]; sy = x[2]; sz = x[4];
             yaw = x[6]; omega = x[7]; rr = x[8]; ll = x[9]; hh = x[10];
+            // 状态协方差对角线（σ²）：P 是否"真实"就看它与实际误差/残差是否匹配。
+            const auto& ekf = tgt.ekf();
+            if (ekf.P.rows() == 11)
+                for (int i = 0; i < 11; ++i) pdiag[static_cast<std::size_t>(i)] = ekf.P(i, i);
+            const auto nis_it = ekf.data.find("nis");
+            if (nis_it != ekf.data.end()) nis = nis_it->second;
+            const auto nis_pre_it = ekf.data.find("nis_pre");
+            if (nis_pre_it != ekf.data.end()) nis_pre = nis_pre_it->second;
             if (tracker.state() == "tracking") ++tracked;
 
             // 重投影：sp_vision 自己的颜色标签（model 摆的板）→ 投影 → 与每个检测比
@@ -611,10 +626,13 @@ int main(int argc, char* argv[])
         }
 
         if (out)
+        {
             out << std::fixed << std::setprecision(4) << t << ',' << tracker.state() << ','
                 << fr.dets.size() << ',' << sx << ',' << sy << ',' << sz << ',' << yaw << ','
-                << omega << ',' << rr << ',' << ll << ',' << hh << ',' << med << ',' << mx
-                << '\n';
+                << omega << ',' << rr << ',' << ll << ',' << hh << ',' << med << ',' << mx;
+            for (int i = 0; i < 11; ++i) out << ',' << pdiag[static_cast<std::size_t>(i)];
+            out << ',' << nis << ',' << nis_pre << '\n';
+        }
         ++rows;
     }
 
