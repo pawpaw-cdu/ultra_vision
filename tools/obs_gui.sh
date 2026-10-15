@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # 观测模式：弹两个窗口（仿真器预览 + 算法端 "Ultra Vision"），相机静止（视觉端不接管
 # 云台，ULTRA_VISION_DISABLE_CONTROL=1），用于看不同小陀螺转速下的观测/跟踪效果。
+# OBS_GUI_CONTROL=1 时**不冻结云台**：视觉端按正常闭环接管云台，用于看"追板/守角"
+# 实际跟得上跟不上（云台动了、目标可能出画，这是正常现象）。
 #
 # 用法:
 #   tools/obs_gui.sh [gyro_speed_rad_s=3.0] [distance_m=3.0] [camera_preset=armor_camera_far]
@@ -8,6 +10,7 @@
 #   tools/obs_gui.sh 2.0          # 2 rad/s
 #   tools/obs_gui.sh 5.0 6.5      # 5 rad/s，6.5 m
 #   ULTRA_VISION_LOCAL_FIT=1 ULTRA_VISION_LOCAL_FIT_ALPHA_DEG=0 tools/obs_gui.sh 3.0   # 同时开局部拟合器
+#   OBS_GUI_CONTROL=1 tools/obs_gui.sh 3.0                       # 云台不冻结，闭环跟随
 #
 # 转速在仿真器**启动时**确定（DAEDALUS_SMALL_GYRO_SPEED，进程内固定），换转速要重跑本脚本。
 # Ctrl-C 退出并关掉仿真器。
@@ -18,6 +21,9 @@ SPEED="${1:-3.0}"
 DIST="${2:-3.0}"
 CAM="${3:-armor_camera_far}"
 RUN="${RUN:-/tmp/obs_gui}"
+# 云台开关：默认冻结（观测模式，相机不动）。OBS_GUI_CONTROL=1 → 不设
+# ULTRA_VISION_DISABLE_CONTROL，视觉端按正常闭环下发云台指令（跟得上/跟飞都看得见）。
+OBS_GUI_CONTROL="${OBS_GUI_CONTROL:-0}"
 
 [[ -x "$REPO/build_sim/auto_aim_sim" ]] || { echo "先构建 build_sim/auto_aim_sim" >&2; exit 2; }
 mkdir -p "$RUN"
@@ -69,7 +75,11 @@ trap cleanup EXIT
 
 for _ in $(seq 1 120); do nc -z 127.0.0.1 7666 2>/dev/null && break; sleep 1; done
 if ! nc -z 127.0.0.1 7666 2>/dev/null; then echo "仿真器没起来:" >&2; tail -5 "$RUN/sim.log" >&2; exit 3; fi
-echo "[obs] sim up: gyro=${SPEED} rad/s dist=${DIST} m; 视觉端 GUI（云台冻结，只观测）..."
+if [[ "$OBS_GUI_CONTROL" == "0" ]]; then
+  echo "[obs] sim up: gyro=${SPEED} rad/s dist=${DIST} m; 视觉端 GUI（云台冻结，只观测）..."
+else
+  echo "[obs] sim up: gyro=${SPEED} rad/s dist=${DIST} m; 视觉端 GUI（**云台不冻结**，闭环接管，会跟着转）..."
+fi
 
 # 协议要**两侧一致**：本脚本起仿真器时没有给 DAEDALUS_UDP=1（= TCP），但
 # configs/simulator.yaml 里写的是 udp ⇒ 视觉端会去订阅 UDP 7669 而永远等不到帧
@@ -77,10 +87,17 @@ echo "[obs] sim up: gyro=${SPEED} rad/s dist=${DIST} m; 视觉端 GUI（云台�
 # 想用 UDP 就： DAEDALUS_UDP=1 ULTRA_VISION_SIM_PROTOCOL=udp tools/obs_gui.sh …
 # ⚠ 注释必须写在整条命令**之前**：把 # 塞进反斜杠续行的中间，会把后面（包括
 #   启动命令本身）整段注释掉，而日志文件还是上一轮的残留 —— 看起来"跑了其实没跑"。
-ULTRA_VISION_CONFIG_DIR="$RUN/configs" ULTRA_VISION_SIM_HOST=127.0.0.1 \
-ULTRA_VISION_DISABLE_CONTROL=1 \
-ULTRA_VISION_SIM_PROTOCOL="${ULTRA_VISION_SIM_PROTOCOL:-tcp}" \
-ULTRA_VISION_ESTIMATE_CSV="$RUN/estimate.csv" \
-ULTRA_VISION_OBSERVATION_CSV="$RUN/observation.csv" \
-ULTRA_VISION_SELECTOR_CSV="$RUN/selector.csv" \
+# 云台开关只影响**视觉端**：DISABLE_CONTROL 存在时视觉端不发云台命令（相机静止）。
+export ULTRA_VISION_CONFIG_DIR="$RUN/configs"
+export ULTRA_VISION_SIM_HOST=127.0.0.1
+export ULTRA_VISION_SIM_PROTOCOL="${ULTRA_VISION_SIM_PROTOCOL:-tcp}"
+export ULTRA_VISION_ESTIMATE_CSV="$RUN/estimate.csv"
+export ULTRA_VISION_OBSERVATION_CSV="$RUN/observation.csv"
+export ULTRA_VISION_SELECTOR_CSV="$RUN/selector.csv"
+if [[ "$OBS_GUI_CONTROL" == "0" ]]; then
+  export ULTRA_VISION_DISABLE_CONTROL=1
+else
+  # 调用方 shell 里可能残留着这个变量，显式清掉，否则"不冻结"会静默失效。
+  unset ULTRA_VISION_DISABLE_CONTROL
+fi
 "$REPO/build_sim/auto_aim_sim" > "$RUN/vision.log" 2>&1
