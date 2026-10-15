@@ -1151,6 +1151,24 @@ int auto_aim::app::RealRunner::run()
                 const double drop = 0.5 * 9.81 * flight * flight / std::max(0.5, distance);
                 const double err_az = 0.0 - az;
                 const double err_el = (-drop) - el;
+                // ---- 几何增量（主回路，2026-10-15）------------------------------
+                // `last_decision.target_yaw/target_pitch` 是**内部系绝对角**，选板（coming
+                // 侧）、相位提前量、弹道下坠都已经在里面；`camera_pose` 是同系的当前姿态。
+                // 所以 (target − pose) 就是"瞄点相对当前视轴偏了多少"，与上面用像素框算出的
+                // az/el **同构**（静止档时两者是同一个量，所以符号沿用现场验证过的 sy/sp，
+                // 不需要再猜坐标系）。增益 1.0 = 把这个几何增量整份下发 —— 等价于 sp_vision
+                // 直接发绝对角，但我们仍然保持"回传角 + 增量"的形式（对符号/零点免疫）。
+                // 没有这一项时，实车瞄的永远是"当前检测到的那块板"，选板与弹丸飞行期间的
+                // 相位提前量都被丢掉（3 rad/s、3 m、25 m/s ⇒ 板沿圆周走 7.6 cm ≈ 半个板宽）。
+                const bool geom_ok = last_decision.valid &&
+                    std::isfinite(last_decision.target_yaw) &&
+                    std::isfinite(last_decision.target_pitch) && camera_pose.valid;
+                const double err_geom_az = geom_ok
+                    ? -auto_aim::GimbalAimer::normalizeAngle(
+                          last_decision.target_yaw - camera_pose.yaw)
+                    : 0.0;
+                const double err_geom_el =
+                    geom_ok ? -(last_decision.target_pitch - camera_pose.pitch) : 0.0;
                 // ---- 跳变门：识别到的板在物理板之间跳时，单帧偏差会突跳 ±12~16°。
                 // 突变先不接受（累计到连续 0.4s 才重新锚定），避免把积分推飞。
                 constexpr double kJumpGate = 6.0 * M_PI / 180.0;
@@ -1266,8 +1284,12 @@ int auto_aim::app::RealRunner::run()
                 //   pipe_send 的**随误差变化的速率限幅**（≤150/110°/s）兜着，
                 //   小误差那一段有死区停车，所以这次才敢往上加。
                 // 若现场还嫌快/有振，`ULTRA_VISION_SERVO_SPEED=0.7` 直接等比回退。
-                const double kpYaw = 0.20 * kpScale;
-                const double kpPitch = 0.16 * kpScale;
+                // 2026-10-15：几何增量成为主回路（gain 1.0，见下面的 off_*_new）之后，
+                // 这两个增益退化成**观测残差**的权重。留 0.05：它只在"瞄点被模型带跑/没
+                // 及时更新"时把云台往真板上拉一把；再大就会跟相位提前量对着干（追板档里
+                // 板本来就不在视轴上，偏差可达 ±8°，0.2 的权重 = 1.6° 的系统性偏置）。
+                const double kpYaw = 0.05 * kpScale;
+                const double kpPitch = 0.05 * kpScale;
                 // ---- 积分项：专门治 pitch 的结构性静差 ----------------------
                 // 电控 pitch 的角度环/速度环**都是 Ki=0、IMaxout=0**（gimbal_task.h），
                 // 重力补偿调用又是注释掉的（gimbal_task.c:1873），所以 pitch 天生有
@@ -1299,18 +1321,19 @@ int auto_aim::app::RealRunner::run()
                 // 阈值放到 15°：符号已经定了（两轴 sp=+1，见上面的推导），现在积分是
                 // **负反馈**里的消静差项，可以早点介入；幅值上限仍然是 ±5°。
                 const bool integrate_ok = authority_ok &&
-                    std::abs(err_az) < 15.0 * M_PI / 180.0 &&
-                    std::abs(err_el) < 15.0 * M_PI / 180.0;
-                // 死区里不积分（见下面"误差死区"的注释）：否则积分会继续涨，涨到把云台
-                // 从停住的位置又推走 —— 那正好是"点头"的成因。
-                const bool dead_yaw = std::abs(err_az) < servo_deadband_rad;
-                const bool dead_pitch = std::abs(err_el) < servo_deadband_rad;
+                    std::abs(err_geom_az) < 15.0 * M_PI / 180.0 &&
+                    std::abs(err_geom_el) < 15.0 * M_PI / 180.0;
+                // 死区判定与积分都改用**几何误差**：图像误差在追板/守角档里本来就不是 0
+                // （瞄点在板的前方 / 瞄车心），拿它当"到了没"的判据会永远不进死区、还会让
+                // 积分被提前量偏置顶到限幅。几何误差为 0 才是真的"瞄上了"。
+                const bool dead_yaw = std::abs(err_geom_az) < servo_deadband_rad;
+                const bool dead_pitch = std::abs(err_geom_el) < servo_deadband_rad;
                 if (integrate_ok && !dead_yaw) {
-                    servo_int_yaw_ += err_az * dt_obs;
+                    servo_int_yaw_ += err_geom_az * dt_obs;
                     servo_int_yaw_ = std::max(-kIntegralLimit, std::min(kIntegralLimit, servo_int_yaw_));
                 }
                 if (integrate_ok && !dead_pitch) {
-                    servo_int_pitch_ += err_el * dt_obs;
+                    servo_int_pitch_ += err_geom_el * dt_obs;
                     servo_int_pitch_ =
                         std::max(-kIntegralLimit, std::min(kIntegralLimit, servo_int_pitch_));
                 }
@@ -1328,16 +1351,25 @@ int auto_aim::app::RealRunner::run()
                 }
                 servo_rate_az_ = 0.7 * servo_rate_az_ + 0.3 * rate_az;
                 servo_rate_el_ = 0.7 * servo_rate_el_ + 0.3 * rate_el;
-                // ---- 误差死区：小于它就把偏置清零（= 发"保持"，云台停在原地）------
-                // 在死区里继续输出偏置 = 每拍都让下位机再走一点（本项目的结构是
-                // cmd = 回传角 + off），那就是连续"点头"的来源。清零后它才真正停住。
-                // （dead_yaw / dead_pitch 在上面算积分时已经用到。）
-                double off_yaw_new = sy * (kpYaw * err_az + servo_ki_ * servo_int_yaw_ -
+                // ---- 偏置 = 几何增量(1.0) + 观测残差(小权重 kpYaw/kpPitch) + 静差积分 - 阻尼
+                // 观测残差只留小权重的用处是"瞄点被模型带跑"时把云台拉回真板；
+                // 但它在追板/守角档里天生带偏（板不在视轴上），权重给大了会跟提前量对着干。
+                // 静差（下位机 pitch 环 Ki=0 + 重力补偿被注释掉 ⇒ 命令与回传差 0.4~3.4°）
+                // 由几何误差的积分消掉：cmd = 回传角 + off 这个结构下，物理角会比命令少一个
+                // bias，几何误差里就带着这个 bias，积分累积出来正好补上。
+                constexpr double kGeomGain = 1.0;   // 几何增量整份下发（feedforward）
+                double off_yaw_new = sy * (kGeomGain * err_geom_az + kpYaw * err_az +
+                                           servo_ki_ * servo_int_yaw_ -
                                            servo_kd_ * servo_rate_az_);
-                double off_pitch_new = sp * (kpPitch * err_el + servo_ki_ * servo_int_pitch_ -
+                double off_pitch_new = sp * (kGeomGain * err_geom_el + kpPitch * err_el +
+                                             servo_ki_ * servo_int_pitch_ -
                                              servo_kd_ * servo_rate_el_);
-                if (dead_yaw) off_yaw_new = 0.0;
-                if (dead_pitch) off_pitch_new = 0.0;
+                // ---- 死区：进死区**保持上一拍偏置**，不清零 -------------------------
+                // 清零等于"命令 = 当前回传角"，而下位机的角度环有 bias ⇒ 它会自己往下走
+                // 一个 bias，误差再涨回来 —— 那就是 §19 那个"点头"极限环。保持偏置才是
+                // 真正"停住"（云台继续停在原来那个绝对角上）。
+                if (dead_yaw) off_yaw_new = servo_prev_off_yaw_;
+                if (dead_pitch) off_pitch_new = servo_prev_off_pitch_;
                 // ---- 每拍步长限幅（抗极限环的关键，比总幅值限幅更重要）----
                 // 下位机是 172°/s 的斜坡 + 我们这边 ~0.1 s 的总延迟；如果**一拍**的偏置
                 // 跳变就超过"它在延迟时间内能走完的量"，它必然过冲 → 误差反向 → 再跳回来，
