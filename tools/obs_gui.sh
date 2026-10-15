@@ -91,6 +91,11 @@ fi
 export ULTRA_VISION_CONFIG_DIR="$RUN/configs"
 export ULTRA_VISION_SIM_HOST=127.0.0.1
 export ULTRA_VISION_SIM_PROTOCOL="${ULTRA_VISION_SIM_PROTOCOL:-tcp}"
+# 装甲板旋转半径：仿真靶真值 0.21 m（仿真器 truth/模型 radius 列都是 0.2103），
+# configs/tracker.yaml 里的 0.29 是**实车**标定值。不覆盖的话，仿真里模型会把四块板
+# 画在偏大 8 cm 的圆周上 —— 追板时瞄点就系统性偏 8 cm（3 m 处 ≈ 2.7°），看起来像
+# "模型/瞄点不对"，其实是半径口径串了。实车要用 yaml 的值就别设这个变量。
+export ULTRA_VISION_ARMOR_RADIUS="${ULTRA_VISION_ARMOR_RADIUS:-0.21}"
 export ULTRA_VISION_ESTIMATE_CSV="$RUN/estimate.csv"
 export ULTRA_VISION_OBSERVATION_CSV="$RUN/observation.csv"
 export ULTRA_VISION_SELECTOR_CSV="$RUN/selector.csv"
