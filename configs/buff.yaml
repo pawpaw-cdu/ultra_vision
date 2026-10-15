@@ -75,7 +75,7 @@ rune:
     #   8.25 m -> 1.0    6.9 m -> 1.6    6.05 m -> 2.0
     # <1 是"数字变焦"：中心裁剪再 letterbox，把远处（画面里只有几十像素）的
     # 符放大回训练尺度。仿真 6 m 处的小符约占画面 1/9 宽，用 0.5（2 倍变焦）。
-    # 实测（2026-09-24，小符 20 s ×3 轮对照，见 docs/energy_rune_issue_audit.md §11）：
+    # 实测（2026-09-24，小符 20 s ×3 轮对照，见 git 历史里的 docs/energy_rune_issue_audit.md §11）：
     #   1.0 → 有新观测的帧 22%、class0 可用 25%、PnP 距离误差 +0.2%
     #   1.6 → 有新观测的帧 36%、class0 可用 44%、PnP 距离误差 +2.8%（预算 <+4.3%）
     # 观测帧 +64%，是本轮唯一被证实有效的检出增益。--pad 可随时 A/B。
@@ -272,7 +272,7 @@ rune:
     # 而"用 hub↔靶心偏移覆盖"会引入 ±20% 的方位依赖长尾（§13）。默认关。
     correct_depth_with_radius: false
     # 用回转椭圆拟合的半长轴测距（消掉瞬时偏移在轨道远侧被透视压短导致的 +20% 长尾，
-    # 见 docs/energy_rune_issue_audit.md §13）。攒不够样本时自动退回瞬时偏移。
+    # 见 git 历史里的 docs/energy_rune_issue_audit.md §13）。攒不够样本时自动退回瞬时偏移。
     correct_depth_with_orbit_fit: true
     min_plate_offset_px: 8.0
     # 观测距离闸门：超出这个范围的观测直接判为不可解（仿真里画面底部的反光
@@ -288,7 +288,7 @@ rune:
     yaw_offset_deg: 0.0
     pitch_offset_deg: 0.0
     fire_gap_time: 0.7      # 两次开火的最小间隔（秒）。0.45 是试出来的、证据不足，
-                            # 先保持基线的 0.7；开火语义按 docs/energy_rune_vs_rp26.md #8 重做后再定
+                            # 先保持基线的 0.7；开火语义按 git 历史里的 docs/energy_rune_vs_rp26.md #8 重做后再定
     predict_time: 0.12      # 额外提前量（秒）：覆盖下发延迟（每条 GIMBAL 都要新建连接）
     # 观测寿命（秒）：超过这段时间没有新的解算结果，瞄准改为"瞄圆心"（参考实现
     # temp.data_life=0.2）。否则外推会把云台按 60°/s 一路甩出画面再触发归位。

@@ -19,7 +19,7 @@
 //     ① 板心在相机系的位置 ② 该板法向的 ψ ③ 板心深度 t_z。
 //     ⚠ **不要拿拟合器的 C_z 当 t_z**：C_z 是"旋转中心"深度，与板心深度相差
 //     [R_cv·(R·n̂ + h·ẑ)]_z（R=0.2、θ=90° 时就是 20 cm），见
-//     docs/plan_audit_6d_pose.md §2.1。
+//     git 历史里的 docs/plan_audit_6d_pose.md §2.1。
 
 #include <array>
 

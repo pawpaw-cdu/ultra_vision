@@ -444,7 +444,7 @@ namespace auto_aim
         // （见 common/chassis_model.hpp）。**2026-10-11 之前这段调用被删掉了**：
         // updateChassisFromFit 零调用点、local_fit_apply_geometry_ 无自增 →
         // use_fit_radius 变成死配置（而 yaml 里它一直是 true）、状态行的 geometry= 恒为 0。
-        // 见 docs/local_fit_tracker_responsibility_audit.md 审计项 F。
+        // 见 git 历史里的 docs/local_fit_tracker_responsibility_audit.md 审计项 F。
         if (cfg_.local_fit.use_fit_radius && slow_ok)
         {
             updateChassisFromFit(fit->R, fit->alpha, fit->h);

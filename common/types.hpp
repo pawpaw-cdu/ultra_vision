@@ -123,7 +123,7 @@ namespace auto_aim
     /// **同一张表**。拟合器自己那张表是 `LocalTrajectoryFitConfig::plate_yaw_offsets`，
     /// 两处必须一致 —— 否则"拟合 yaw"和"EKF yaw"会差 ±90°/180°：四块板完全对称时
     /// 还能靠"模 90° 吸附"掩盖，一旦启用逐板几何（plate_distance / l / h）就会
-    /// 让模型分叉。见 docs/local_fit_tracker_responsibility_audit.md 审计项 G。
+    /// 让模型分叉。见 git 历史里的 docs/local_fit_tracker_responsibility_audit.md 审计项 G。
     struct LocalFitResult
     {
         bool valid = false;

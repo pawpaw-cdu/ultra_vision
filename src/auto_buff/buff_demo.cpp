@@ -7,7 +7,7 @@
 //   rune_diag.cpp   —— 诊断层：CSV/遥测真值/录帧/静态试射/汇总打印；
 //   rune_detector/solver/target/aimer/model/refiner —— 算法本体。
 //
-// 常用环境变量（详见 README 与 docs/energy_rune_issue_audit.md）：
+// 常用环境变量（详见 README 与 git 历史里的 docs/energy_rune_issue_audit.md）：
 //   ULTRA_VISION_CONFIG_DIR          配置目录（默认 configs）
 //   ULTRA_VISION_RUNE_MODE           small|large，覆盖配置里的 mode
 //   ULTRA_VISION_RUNE_VIDEO          用视频回放代替仿真器

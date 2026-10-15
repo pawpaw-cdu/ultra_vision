@@ -160,7 +160,7 @@ python3 tools/rune_lattice_replay.py <run_dir> --sweep --assign nearest
 # 也可以只给相位，自动摆 5 片：--n5 11   （相位 0 = 正上方，顺时针）
 
 # 注意：状态分类的阈值**尚未可信**（两类实测重叠，见
-# docs/energy_rune_issue_audit.md §46），现在只写进 CSV 观察，不接开火闸门。
+# git 历史里的 docs/energy_rune_issue_audit.md §46），现在只写进 CSV 观察，不接开火闸门。
 ```
 
 常用环境变量：`ULTRA_VISION_RUNE_CSV`（逐帧 CSV）、`ULTRA_VISION_RUNE_DEBUG=1`
@@ -193,7 +193,7 @@ python3 tools/rune_lattice_replay.py <run_dir> --sweep --assign nearest
   都落在"输入里轨道半径 ≈ 50~60 px"（实拍 ~60、仿真 ~50）。
   `input_pad_adaptive: true` 可以自动把它钉住（实测与手调的各自最优等价），
   但**默认关**：默认 `input_pad_scale: 1.6` 按实拍定，跑仿真时用
-  `--pad 1.3` 或把 target 设 52。详见 `docs/energy_rune_issue_audit.md` §47。
+  `--pad 1.3` 或把 target 设 52。详见 git 历史里的 `docs/energy_rune_issue_audit.md` §47。
 - **新模型对"已激活"外观是盲的**：实拍里从"打完一片"那一刻起，网络对已激活片的
   类别分长期 ≤0.01（不是被阈值筛掉），只对未激活目标片出框。所以已激活片的几何
   只能靠槽位格点/相位外推补，不能指望"网络给 ROI + 经典判状态"。见 §48。

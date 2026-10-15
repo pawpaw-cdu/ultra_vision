@@ -8,7 +8,7 @@
 // 而 `updateWithLocalFit` 固定传 plate_id=0 → **局部拟合器的 yaw 观测整条链路
 // 是空操作**，依赖它的三套机制（模 90° 吸附 / yaw 常值偏置学习 / 按 |ω| 混合）
 // 全部空转。这个 bug 在真机上表现为"开了 use_yaw 却毫无变化"。
-// 见 docs/local_fit_tracker_responsibility_audit.md 审计项 D。
+// 见 git 历史里的 docs/local_fit_tracker_responsibility_audit.md 审计项 D。
 //
 // 判据（对每个 plate_id）：告诉滤波器"这块板的相位比预测大 5°"，
 // 底盘 yaw 必须**朝同方向**移动，且增益接近 1（K = P/(P+R) 不会正好 1）。

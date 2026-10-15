@@ -5,7 +5,7 @@
 //
 // 现场观察：丢掉目标就回标定位姿是最糟的选择 —— RuneTarget::reset() 会把相位
 // 与几何全丢掉，重新捕获要 0.5~1 s，而这段时间本来可以用来打下一片。所以策略是
-// **分级**的（逐条都留在数据里，见 docs/energy_rune_issue_audit.md）：
+// **分级**的（逐条都留在数据里，见 git 历史里的 docs/energy_rune_issue_audit.md）：
 //   1) 还有"最后已知符心"且不旧于 park_on_center_max_age_s →
 //      把相机停在那个方向，估计器继续滑行，网络一报出扇叶就能立刻接上；
 //   2) 符心也过期了，且连续没有可用目标超过 recenter_after_frames 帧 →

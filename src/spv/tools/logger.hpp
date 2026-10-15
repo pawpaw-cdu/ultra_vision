@@ -6,7 +6,7 @@
 // 但默认什么都不做。要临时看日志就把 SPV_LOG_VERBOSE 设上（打到 stderr）。
 //
 // 注意：这是**移植层**的替换件，不是 sp_vision 的原件；滤波器/构造/重投影的逻辑
-// 一行没动（见 docs/spv_port.md 的说明）。
+// 一行没动（见 git 历史里的 docs/spv_port.md 的说明）。
 
 #include <cstdlib>
 #include <iostream>

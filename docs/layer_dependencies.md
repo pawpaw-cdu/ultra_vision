@@ -66,4 +66,4 @@ io/  →  perception/  →  Kalman/  →  control/  →  io/(下发帧)
 - 两个入口现在都只依赖 `app/`（+ 标准库/OpenCV）；`Kalman/`/`perception/`/`control/`
   的 include 都在能力层与 `app/` 内部。
 - 下一步（NUC 验证）：把 `app/real_runner` 的 `run()` 拆成
-  `initialize()` + 阶段方法，见 `docs/real_entry_refactor_plan.md`。
+  `initialize()` + 阶段方法（原计划见 git 历史里的 `docs/real_entry_refactor_plan.md`）。

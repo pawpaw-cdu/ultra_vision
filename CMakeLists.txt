@@ -231,7 +231,7 @@ endif()
 # −16cm）。所以底座换成它的实现，局部拟合器只在这个底座上做 A/B。
 # 只搬了 armor/target/tracker/solver + extended_kalman_filter/math_tools；
 # 裁掉全向感知重载与 spdlog（换零依赖桩）；滤波器逻辑一行没动，namespace 改 spv。
-# 见 src/spv/tools/logger.hpp 与 docs/spv_port.md。
+# 见 src/spv/tools/logger.hpp 与 git 历史里的 docs/spv_port.md。
 find_package(Eigen3 QUIET)
 if(Eigen3_FOUND)
   add_library(spv_core STATIC

@@ -95,7 +95,7 @@ namespace auto_aim
         // "模 90° 吸附"掩盖，启用逐板几何（plate_distance / l / h）后就变成模型分叉。
         // 2026-10-11 从 {0, 90, 180, 270} 改成本表（两者差一次 id 反射 0↔1、2↔3，
         // 模型的几何解不变，只是 θ 的代表元对齐）。见
-        // docs/local_fit_tracker_responsibility_audit.md 审计项 G。
+        // git 历史里的 docs/local_fit_tracker_responsibility_audit.md 审计项 G。
         std::vector<double> plate_yaw_offsets{
             0.5 * M_PI, 0.0, -0.5 * M_PI, -M_PI};
     };

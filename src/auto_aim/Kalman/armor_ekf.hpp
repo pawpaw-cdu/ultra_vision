@@ -648,7 +648,7 @@ public:
         // 2026-10-11 修：原来写的是 (cos_total, -sin_total)，导致 plate 0/2 的
         // 更新增益恰好为 0（yaw 完全不动）、plate 3 反号；而 updateWithLocalFit
         // 固定传 plate_id=0 → **局部拟合器的 yaw 观测整条链路是空操作**。
-        // 有限差分与直接注入双重验证见 docs/local_fit_tracker_responsibility_audit.md
+        // 有限差分与直接注入双重验证见 git 历史里的 docs/local_fit_tracker_responsibility_audit.md
         // 审计项 D（修复前：plate 0/2 → +0.000°，plate 3 → −4.751°，plate 1 → +4.751°）。
         Matrix<1, kStateDim> H;
         H(0, 4) = x_(5, 0);
@@ -885,7 +885,8 @@ public:
 
     /// 差分残差（4 维）：每根灯条 (Δu, Δv) = (观测 − 预测)，与 updateAngle 同约定
     /// ⚠ 这里是 (z − h)：EKF 形式是 x += K·(z − h)。第一版写成 (h − z)，结果把 yaw 往反方向推。
-    /// **与平移无关** —— 这正是它能单独定 θ 的原因（打破 C↔θ 退化，见 uv_ekf_feasibility.md §3.1）。
+    /// **与平移无关** —— 这正是它能单独定 θ 的原因（打破 C↔θ 退化，见
+    /// git 历史里的 docs/uv_ekf_feasibility.md §3.1）。
     Vec<4> uvDiffResidual(const UvObservation & o, const UvGeometry & g) const
     {
         const auto pts = uvEndpoints(o.plate_id, g);
@@ -971,7 +972,7 @@ public:
 
         // **两步**：先差分（与平移无关 → 单独定 θ/R），再平均（在 θ 已知下定 C）。
         // 单板下 C 与 θ 近退化，合成一次 8 维会把修正劈错方向（实测发散，见
-        // docs/uv_ekf_feasibility.md §3.1）—— 顺序不能反，也不能合并。
+        // git 历史里的 docs/uv_ekf_feasibility.md §3.1）—— 顺序不能反，也不能合并。
         // 噪声：端点单次 σ 已知 ⇒ 差分 σ=√2σ、平均 σ=σ/√2（可由 obs 覆盖）。
         const double s_corner = std::sqrt(0.5 * (o.sigma_diff_px * o.sigma_diff_px +
                                                  o.sigma_avg_px * o.sigma_avg_px));

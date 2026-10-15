@@ -45,7 +45,7 @@ namespace auto_aim::energy
         bool correct_depth_with_radius = true;
         double min_plate_offset_px = 4.0;
         /// 用"回转椭圆拟合的半长轴"测距（消掉瞬时偏移的透视 foreshortening；
-        /// 见 rune_orbit_fit.hpp 与 docs/energy_rune_issue_audit.md §13）。
+        /// 见 rune_orbit_fit.hpp 与 git 历史里的 docs/energy_rune_issue_audit.md §13）。
         /// 拟合还没攒够样本时自动退回瞬时偏移。
         bool correct_depth_with_orbit_fit = true;
         /// 椭圆拟合的窗口：轨道静止，窗口越长弧段越完整、拟合越稳。实测 2.5 s
