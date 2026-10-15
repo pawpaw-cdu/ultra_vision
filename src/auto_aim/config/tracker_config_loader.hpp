@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 
 #include <yaml-cpp/yaml.h>
 
@@ -161,6 +162,13 @@ namespace auto_aim
             cfg.default_dt = kalman["default_dt"].as<double>(cfg.default_dt);
             cfg.armor_radius =
                 kalman["armor_radius"].as<double>(cfg.armor_radius);
+            // env 覆盖（仿真/实车切换用）：仿真车的装甲板回转半径真值是 0.2101，
+            // 实车实测约 0.29（见 docs/design_decision_local_fit.md 的标定一节），
+            // 两者不能共用同一个配置值。
+            if (const char * r = std::getenv("ULTRA_VISION_ARMOR_RADIUS")) {
+                const double v = std::atof(r);
+                if (v > 0.05 && v < 1.0) cfg.armor_radius = v;
+            }
             // 重投影模型外推（时间基）是否连中心一起按底速平移；见 TrackerConfig 注释。
             cfg.model_lead_center =
                 kalman["model_lead_center"].as<bool>(cfg.model_lead_center);
