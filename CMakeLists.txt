@@ -48,8 +48,8 @@ if(NOT DEFINED OpenCV_DIR AND EXISTS "/opt/homebrew/opt/opencv@4/lib/cmake/openc
 endif()
 
 # ---- 海康（Hikrobot MVS）相机 SDK 探测 ---------------------------------------
-# 放在**根**作用域：io/camera/HikCamera.cpp 要编进 auto_aim，tools/hik_probe 也要用
-# 同一个库；原来只在 src/auto_aim 子目录里找，工具目录拿不到 HIK_LIB。
+# 放在**根**作用域：io/camera/HikCamera.cpp 要编进 auto_aim，根作用域才能把它
+# 的 include/lib 交给子目录（原来只在 src/auto_aim 里找，别处拿不到 HIK_LIB）。
 option(ULTRA_VISION_USE_HIK_CAMERA "Build the Hikvision (MVS SDK) camera driver" OFF)
 set(ULTRA_VISION_HIK_SDK_ROOT "/opt/MVS" CACHE PATH "MVS SDK root (include/ + lib/)")
 set(HIK_LIB "")

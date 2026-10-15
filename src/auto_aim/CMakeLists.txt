@@ -91,8 +91,7 @@ endif()
 set(AUTO_AIM_REAL_TARGET auto_aim_real)
 
   # ---- 可选：海康相机（MVS SDK）--------------------------------------------
-  # SDK 的**探测**在根 CMakeLists（Hik SDK 属于 io 层依赖，tools/hik_probe 也要用），
-  # 这里只负责把它编进真机入口。
+  # SDK 的**探测**在根 CMakeLists（Hik SDK 属于 io 层依赖），这里只负责把它编进真机入口。
   if(ULTRA_VISION_USE_HIK_CAMERA AND HIK_LIB)
     target_sources(${AUTO_AIM_REAL_TARGET} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../../io/camera/HikCamera.cpp)
