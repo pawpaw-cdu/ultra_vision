@@ -24,7 +24,11 @@ namespace auto_aim
         //   ≤ chase_omega_threshold         → 追板档（现有逻辑，拦截迭代已含云台时间）
         //   >  chase_omega_threshold         → 守角档（瞄预测的底盘中心）——**极端工况的
         //     退化保证**，不是最终策略；真正的修法是让决策层在高速下不抖。
-        double chase_omega_threshold = 3.0;   // rad/s（经验值，见上）
+        // **2026-10-15 更新**：门槛从 2.5 抬到 7.0（见 configs/tracker.yaml 的实测）。
+        // 原来"高速必须守角"的结论是拿"提前量 × 车心速度噪声"这个 bug 当物理限制
+        // 得出的；bug 修掉后 3/5 rad/s 追板（= sp_vision 的做法）实测稳，且追板时
+        // 命令 yaw 与真值板方位的夹角中位 0.7~0.9°。守角现在只是 >7 rad/s 的兜底。
+        double chase_omega_threshold = 7.0;   // rad/s（= sp_vision decision_speed，见上）
         bool spin_hold_enabled = true;        // 守角档开关（A/B 用）
         /// @brief 守角档开火窗：预测弹丸到达时刻，最近的板与守角（底盘中心方位）的
         ///        夹角上限。近侧板与中心方位天然只差 asin(R/d)≈2~3°，所以 6° 足够，
