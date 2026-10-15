@@ -148,11 +148,19 @@ namespace auto_aim
             // 停在上一拍瞄点上，与参考实现"没合格板就 return false"一致。
             const auto& observed = tracker_.getLastObservedArmor();
             if (observed.tvec.rows == 3 && observed.solve_result) {
-                const std::array<double, 3> target_camera{{
+                std::array<double, 3> target_camera{{
                     observed.tvec.at<double>(0),
                     observed.tvec.at<double>(1),
                     observed.tvec.at<double>(2),
                 }};
+                // 弹道下坠：和上面"静止档"、选板器的追板/守角档用同一套补偿。少了这一项，
+                // 兜底分支的 pitch 会比正常档位低一个 drop（3 m ≈ 1.3°），一进一出就是
+                // "pitch 抽一下"。
+                const double distance = std::sqrt(
+                    target_camera[0] * target_camera[0] + target_camera[1] * target_camera[1] +
+                    target_camera[2] * target_camera[2]);
+                const double flight_time = distance / std::max(1.0, selector_.projectileSpeed());
+                target_camera[1] -= 0.5 * config_.selector.gravity * flight_time * flight_time;
                 desired = bootstrap_aimer_.solveTargetAngles(target_camera, current_yaw,
                                                             current_pitch);
                 desired.velocity_valid = false;

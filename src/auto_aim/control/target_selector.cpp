@@ -165,14 +165,24 @@ namespace auto_aim
                 estimate.center[2] + estimate.velocity[2] * seed_time}};
             const double horizontal = std::hypot(center_pred[0], center_pred[2]);
             if (horizontal > 1e-6 && center_pred[2] > 0.0) {
+                // 弹道下坠：这里必须和追板档用**同一套**补偿，否则两档在 |ω| 门限
+                // 附近来回切时，命令 pitch 会一次跳一个 drop（3 m、25 m/s ≈ 1.3°，
+                // 5 m ≈ 1.9°）—— 实测就是"pitch 偶尔抽一下"（2026-10-15：1 rad/s 跑
+                // 里 ω 在 2.5 门限上下跳，pitch 在 0.53° 与 1.86° 之间跳 1.33°，
+                // 差的正好是 drop 1.29°）。
+                const double flight_time = center_distance / config_.projectile_speed;
+                const double drop = 0.5 * config_.gravity * flight_time * flight_time;
+                // 相机系 y 向下：下坠要让瞄点抬高 → y 减小。
+                const std::array<double, 3> aim_point{{
+                    center_pred[0], center_pred[1] - drop, center_pred[2]}};
                 result.valid = true;
                 result.armor_id = -1;
-                result.aim_point = center_pred;
+                result.aim_point = aim_point;
                 result.target_yaw = std::atan2(center_pred[0], center_pred[2]);
-                result.target_pitch = std::atan2(-center_pred[1], horizontal);
+                result.target_pitch = std::atan2(-aim_point[1], horizontal);
                 result.predicted_yaw = result.target_yaw;
                 result.distance = center_distance;
-                result.flight_time = center_distance / config_.projectile_speed;
+                result.flight_time = flight_time;
                 result.lead_time = seed_time;
                 result.target_yaw_velocity = 0.0;
                 result.target_pitch_velocity = 0.0;
