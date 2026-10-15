@@ -188,7 +188,7 @@ int auto_aim::app::RealRunner::run()
             : 1.0;
     // ---- 实车数据集录制（可选）：ULTRA_VISION_RECORD=<目录> ----
     // 录图像 + 每帧的输入（姿态/弹速/模式）+ 我们的输出，之后可以离线用
-    // tools/replay_dataset 重新跑同一套流水线，改代码/改配置后对比效果。
+    // 离线回放重新跑同一套流水线，改代码/改配置后对比效果。
     //   ULTRA_VISION_RECORD_EVERY_N   每 N 帧录一帧（默认 3；相机 ~95fps → ~30fps）
     //   ULTRA_VISION_RECORD_MAX_FRAMES 最多录多少帧（默认 0 = 不限，按需设防止写满盘）
     //   ULTRA_VISION_RECORD_QUALITY   JPEG 质量（默认 85）
@@ -310,7 +310,7 @@ int auto_aim::app::RealRunner::run()
 
     // ---- 下发坐标系转换（唯一一处；瞄准 / 心跳 / 速度前馈都从这里出去）----
     // 2026-09-29 实测量定：下位机 yaw/pitch 闭环比较的是 **IMU 世界系角**，不是回传的
-    // 电机角（`tools/gimbal_sign_probe --world`：把世界系当前值发回去云台不动 0.2~0.9°，
+    // 电机角（world 回传实测：把世界系当前值发回去云台不动 0.2~0.9°，
     // 发电机系当前值一次跑 35.7°；台阶 1:1）。这也正是 sp_vision 的做法——它下发的
     // 就是世界系绝对角，所以不需要任何符号/零点处理。
     //
@@ -640,7 +640,7 @@ int auto_aim::app::RealRunner::run()
         // 现场事实：同一台车的四块板印的是同一个数字。sp_vision_25 就是拿它做目标身份
         // （Target::update 里按 armor.name 过滤），用它可以把"选哪块板/选谁的板"从
         // 纯几何问题变成身份问题。这一列先只**记录**，不改任何行为 —— 有了实车数据
-        // 才能在 tools/replay_obs_csv 上做 A/B（见该工具与 configs/tracker.yaml 注释）。
+        // 才能做离线 A/B（见 configs/tracker.yaml 注释）。
         "armor_number\n");
     // 底盘模型逐帧导出（ULTRA_VISION_MODEL_CSV=/tmp/model.csv 时才落盘）：
     // 模型中心/四块板心（相机系）+ 车心(yaw/ω 世界系) + 观测板 PnP + 几何 + 指标。
@@ -657,7 +657,7 @@ int auto_aim::app::RealRunner::run()
     // 为什么必须有它：真机是把本帧**所有**检测喂给 tracker 的，而 observation.csv 只记
     // "最后被接受的那一块" —— 拿它离线回放时，模型对**另外几块板**的解释误差（也就是
     // "底盘构造对不对"）根本量不出来（实车实测：静止单板 model_fit 0.9px，而同帧双板
-    // 27~50px）。有了这一份，tools/replay_obs_csv 才能复现真机口径并做 A/B。
+    // 27~50px）。有了这一份，离线回放才能复现真机口径并做 A/B。
     // 角点顺序与 Points_2D 一致：u0,v0=左下 u1,v1=左上 u2,v2=右上 u3,v3=右下。
     auto detection_recorder = std::make_unique<auto_aim::app::CsvSink>(
         "ULTRA_VISION_DETECTIONS_CSV",

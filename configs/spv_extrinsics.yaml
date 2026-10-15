@@ -1,6 +1,6 @@
 # sp_vision_25（NUC 上实跑的那份）的相机内外参 —— 原样抄自
 #   nuc:~/sp_vision_25/configs/standard3.yaml   (2026-10-10 19:50 的现场版本)
-# 用途：tools/spv_replay 用它当 sp_vision 侧的相机模型（--spv-yaml，默认就是本文件）。
+# 用途：sp_vision 侧的相机模型（内外参约定与 configs/camera.yaml 那组不同）。
 #
 # **为什么不用 configs/camera.yaml 里那组**：那份 R_camera2gimbal 与 sp_vision 期望的
 # 约定不一致（实测直接把重投影指标从 3.4px 打到 149px，同一份数据）；NUC 上这份是

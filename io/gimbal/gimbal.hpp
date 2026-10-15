@@ -32,7 +32,7 @@ namespace io
         int reconnect_after_errors = 3000;    // 累计读错误到该值尝试重连
         bool require_connection = false;      // true = 打不开就退出（比赛模式）
         // ---- 下发命令的坐标系（2026-09-29 实测量定）-------------------------
-        // 结论（`tools/gimbal_sign_probe --world` 两次 + 台阶测试）：
+        // 结论（world 回传两次 + 台阶测试）：
         //   C 板 yaw/pitch 闭环比较的**不是**回传的电机角，而是**IMU 世界系角**：
         //     cmd_yaw   = +az_x   （基轴 x 在世界系的方位角）
         //     cmd_pitch = -el_x   （基轴 x 的俯仰角取反）

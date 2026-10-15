@@ -176,7 +176,7 @@ namespace auto_aim::energy
         config.detector.require_inactive_class =
             detector["require_inactive_class"].as<bool>(true);
         // 扇叶状态分类（经典特征，华南虎/SCUT 的面积区间思路；见 rune_blade_state.hpp）。
-        // 阈值必须按实拍标注帧标定 —— 用 tools/buff_state_probe 同一条代码路径量。
+        // 阈值必须按实拍标注帧标定 —— 编译同一份 rune_blade_state.cpp 的路径量。
         if (const YAML::Node state = detector["blade_state"]) {
             auto& blade_state = config.detector.blade_state;
             blade_state.red_minus_blue = state["red_minus_blue"].as<double>(60.0);

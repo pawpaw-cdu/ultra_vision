@@ -14,7 +14,6 @@ cmake --build build -j
 ```bash
 cmake --build build --target auto_aim -j
 cmake --build build --target energy_demo -j
-cmake --build build --target hsv_tuner -j
 ```
 
 顶层 CMake 会去找 OpenCV、yaml-cpp，以及随仓库带的**大恒 Galaxy SDK**。SDK 架构默认：
@@ -102,20 +101,17 @@ ctest --test-dir build_sim -R gimbal      # 协议帧 + 伪终端整链路
    （同样的零位 = 车头正前方）。状态行里的 `mcu: ... yaw= ... pitch= ...` 与画面上的
    估计框可以直接对照。
 
-### 实车 bring-up（三步）
+### 实车 bring-up（两步）
 
 ```bash
-# 1) 下位机链路：收帧率 / CRC / 模式（--send 再下发一条 mode=1）
-./build/gimbal_probe configs 8 --send
-
-# 2) 相机 + 内参：<文件夹> 里放 15~30 张不同角度的标定板照片，直接解
+# 1) 相机 + 内参：<文件夹> 里放 15~30 张不同角度的标定板照片，直接解
 ./build/calibrate_camera <图片文件夹> --cols 11 --rows 8 --size 15
 #    没现成照片就先采：空格存一张（只在该帧找到板时才存），q 退出后**自动接着解算**
 ./build/calibrate_camera ~/calib_board --live --cols 11 --rows 8 --size 15
 #    结果直接写 camera_intrinsics.yaml（旧照片不会丢，重复跑会接着编号），
 #    把输出粘到 configs/camera.yaml 的 hikcamera 段
 
-# 3) 手眼（相机→云台外参）：一个进程内开相机 + 开串口 + 找标定板 + 解算
+# 2) 手眼（相机→云台外参）：一个进程内开相机 + 开串口 + 找标定板 + 解算
 ./build/hand_eye_calibrate --live
 #    把标定板**静止**摆在画面里；云台 yaw 大范围扫、pitch 分组单独变（至少 8 组，
 #    必须绕两个不同轴，只在一条线上扫数学上退化）
@@ -137,7 +133,7 @@ ctest --test-dir build_sim -R gimbal      # 协议帧 + 伪终端整链路
 曲线四个 panel 分别是 yaw（命令 vs 观测）、pitch（命令 vs 观测）、瞄点像素误差、
 距离（观测 vs 估计）；同一 panel 的两条线共用一条纵轴、图例各占一行。
 `ULTRA_VISION_CURVES=0` 可关曲线，`ULTRA_VISION_CURVE_CSV=<path>` 同时落 CSV
-（配合 `tools/rune_curve.py` 之类离线重画），`ULTRA_VISION_NO_DISPLAY=1` 完全不出窗口
+（配合离线重画脚本），`ULTRA_VISION_NO_DISPLAY=1` 完全不出窗口
 （跑回归/看真实帧率时用，HighGUI 每帧要 ~20 ms）。
 曲线现在默认"按需采集"：只有开窗口或给了 `ULTRA_VISION_CURVE_CSV` 才采，
 显式 `ULTRA_VISION_CURVES=1/0` 仍然可以强制开/关。
@@ -164,25 +160,12 @@ csv / control / overlay / resize），并对 pnp+ekf 同时给出**线程 CPU �
 `config_loader.hpp` 里没写的项一律回落到那些默认值，所以想临时覆盖某个内部
 参数，直接往 yaml 里写回同名键即可。
 
-改这两边任何一处，都用 `config_dump` 核账（它打印真正加载进结构体的每个值）：
-
-```bash
-./build_sim/config_dump > /tmp/before; ...改...; ./build_sim/config_dump > /tmp/after
-diff /tmp/before /tmp/after      # 有效的值必须一行不差
-```
+改这两边任何一处都要核账：加载进结构体的每个值必须和 yaml 里的写法一一对上。
 
 `energy_demo` 可以跟一个配置目录 + 一个视频路径：
 
 ```bash
 ./build/src/auto_buff/energy_demo src/auto_buff/config src/auto_buff/result.mp4
-```
-
-`hsv_tuner` 默认打开 0 号相机，也可以只用一个视频路径当参数。界面上的 `Show Red` /
-`Show Blue` 决定哪些颜色参与生成掩膜；按 `e` 会把调好的红/蓝 HSV 阈值按 YAML 打印出来：
-
-```bash
-./build/hsv_tuner
-./build/hsv_tuner test_vid_pic/buff_test.mp4
 ```
 
 ## 测试
@@ -200,23 +183,10 @@ ctest --test-dir build --output-on-failure
   未初始化就被装甲板配对过滤器读到——之所以一直没被发现，就是因为没有任何测试对检测器
   输出做过断言。期望值放在 `detector_expectations.csv`：神经网络的类别**精确匹配**，
   传统检测的数量按"至少"比较。
-* `truth_regression_selftest` 检查 `tools/truth_regression.py` 的度量代码，它把一次联调
-  录制的数据，按阶段生成对仿真器自己 `dataset.csv` 的精度报告：
-
-```bash
-# 前提：仿真跑过一遍并录了 CSV
-python3 tools/truth_regression.py --truth truth.csv \
-    --observation observation.csv --estimate estimate.csv --selector selector.csv
-```
-
-它报告观测误差（检测器 + PnP）、车体中心误差（估计器）和板半径（几何模型），任一阶段
-超出阈值就以非零码退出。
-
 * `armor_ekf_uv_test` 钉住 `Kalman/armor_ekf.hpp` 里新增的 UV（像素域重投影）观测：
   纯数学、不需要仿真。它检查预测的装甲板角点投影回去是否和检测器标注的几何对齐，以及
   滤波器能否从 1 px 的角点噪声里收敛（位置/yaw/yaw 角速度）。A/B 开关是
-  `tracker.kalman.uv_observation`（默认关，见 `docs/uv_observation.md`）；
-  `tools/auto_aim_sim_test.sh --uv 0|1` 跑仿真对比并打印各阶段误差。
+  `tracker.kalman.uv_observation`（默认关，见 `docs/uv_observation.md`）。
 
 macOS/Homebrew 注意：那里的 `opencv` 是当前大版本（5.x），4.x 在 keg-only 的 `opencv@4`
 里。顶层 CMake 在装了 `opencv@4` 时优先用它——因为旧的 `opencv` keg 可能引用一个已经不
