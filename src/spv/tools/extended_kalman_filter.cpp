@@ -49,6 +49,16 @@ Eigen::VectorXd ExtendedKalmanFilter::update(
   Eigen::VectorXd x_prior = x;
   Eigen::MatrixXd K = P * H.transpose() * (H * P * H.transpose() + R).inverse();
 
+  // 标准 NIS：用**先验**状态算残差、用**先验**协方差算 S = H·P⁻·Hᵀ + R。
+  // 下面的 nis 用的是更新后残差（r = z − h(x⁺)），量级偏小、不能直接和
+  // χ²(m) 比；诊断"P 是否真实"要用这一路。m = 4（yaw/pitch/distance/armor_yaw）。
+  {
+    const Eigen::VectorXd r_pre = z_subtract(z, h(x_prior));
+    const Eigen::MatrixXd S_pre = H * P * H.transpose() + R;
+    const double nis_pre = r_pre.transpose() * S_pre.inverse() * r_pre;
+    data["nis_pre"] = nis_pre;
+  }
+
   // Stable Compution of the Posterior Covariance
   // https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python/blob/master/07-Kalman-Filter-Math.ipynb
   P = (I - K * H) * P * (I - K * H).transpose() + K * R * K.transpose();
