@@ -209,21 +209,6 @@ if(ULTRA_VISION_BUILD_AUTO_AIM)
   add_subdirectory(src/auto_aim)
 endif()
 
-# 用 sp_vision 的 solver/tracker 回放实车检测流（见 tools/spv_replay.cpp）。
-if(TARGET spv_core)
-  add_executable(spv_replay tools/spv_replay.cpp)
-  if(TARGET auto_aim_local_fit)
-    target_link_libraries(spv_replay PRIVATE auto_aim_local_fit)
-    target_compile_definitions(spv_replay PRIVATE ULTRA_VISION_HAVE_LOCAL_FIT=1)
-  endif()
-  target_include_directories(spv_replay PRIVATE
-      ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src/auto_aim ${CMAKE_SOURCE_DIR}/src
-      ${CMAKE_SOURCE_DIR}/common
-      ${OpenCV_INCLUDE_DIRS} ${YAML_CPP_INCLUDE_DIRS})
-  target_link_libraries(spv_replay PRIVATE spv_core
-      ${OpenCV_LIBS} ${YAML_CPP_LDFLAGS} Threads::Threads)
-endif()
-
 if(ULTRA_VISION_BUILD_TESTS)
   # 单元测试全部放在顶层 tests/（对齐 sp_vision 的组织方式），算法目录里不放测试。
   add_subdirectory(tests)
