@@ -91,7 +91,7 @@ cmake --build build_sim -j8 --target spin_geometry_estimator_test
 
 ## 后续接入（尚未做，按此顺序）
 
-1. **离线验证**：用 `tools/replay_dataset` 录一段小陀螺，离线跑本估计器，与现有 tracker 的
+1. **离线验证**：录一段小陀螺（离线回放），跑本估计器，与现有 tracker 的
    yaw/中心逐帧对比，量化收益。
 2. **低频只读**：`app/` 起一个 5~10 Hz worker，滑窗跑估计器，只打日志/曲线，不改控制。
 3. **加约束以缩短窗口**：现在只跟一根灯条；改为联合"同一块板两根灯条 / 多块板"的残差，

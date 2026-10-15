@@ -6,7 +6,7 @@
 #                         [--width 640] [--height 480] [--fps 30] [--open-loop]
 #                         [-- <额外的 rp26_sim 参数>]
 #
-# 数据流与 Ultra_Vision 的 tools/rune_sim_test.sh 完全一致（同一个仿真器、同样的端口）：
+# 数据流与 Ultra_Vision 的仿真回归脚本完全一致（同一个仿真器、同样的端口）：
 #   daedalus 7666 帧 -> rp26_sim（深大检测+算法）-> 7667 云台/开火指令；7668 遥测打分。
 #
 # 产出：

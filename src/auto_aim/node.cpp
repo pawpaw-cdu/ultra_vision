@@ -5,7 +5,7 @@
 // 入口只负责各自的 IO）。本文件只做"解析配置目录 + 跑"。
 //
 // 注意：本入口需要大恒 Galaxy / 海康 MVS SDK，本机（macOS）不编译；
-// 构建与验证见 tools/build_real.sh（NUC）。
+// 构建与验证在 NUC 上做（原先的一键脚本已随 uv 收敛移出主线，见 git 历史）。
 
 #include "app/config_paths.hpp"
 #include "app/real_runner.hpp"

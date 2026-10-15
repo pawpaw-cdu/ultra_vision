@@ -142,7 +142,7 @@ rune:
     #     "这一帧的几何能不能信"；
     #   * 圆心融合：R 标轮廓的 fitEllipse 中心与网络 k2 加权平均（两者相差
     #     max_center_gap_px 之外就不融合，避免把误检引进来）。
-    # 默认 enabled=false：先做 A/B（tools/rune_ab.sh 或 rune_sim_test.sh 对照），
+    # 默认 enabled=false：先做 A/B（开/关各跑一遍仿真对照），
     # 确认曲线与命中率都变好再打开。RED 阈值 30 是仿真器画面实测值
     # （他们的 50 在仿真器上只剩 11% 可用灯臂）。
     refiner:

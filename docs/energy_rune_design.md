@@ -70,7 +70,7 @@ rg -n "energy_node" Ultra_Vision/**/CMakeLists.txt                    # 无命�
 | 高频指令调度 | `src/auto_aim/control/gimbal_controller.*` | 直接复用 |
 | 火控 | `src/auto_aim/control/shooter.*` | 复用状态机，输入换成能量机关决策 |
 | 遥测 | `node_sim.cpp` 的 `ULTRA_VISION_*_CSV` | 复用写法，新增 rune CSV |
-| 回归工具 | `tools/truth_regression.py`、`src/auto_aim/test/` | 复用，扩展 rune 阶段 |
+| 回归工具 | `src/auto_aim/test/` | 复用，扩展 rune 阶段 |
 
 ### 1.2 现有能量机关链路（buff/auto_buff）
 
@@ -186,13 +186,13 @@ Inactive(1.0s) ──► Activating ──命中全部目标──► Activated(
 | 时间基准 | `steady_clock` | 图像时间戳（`StandardClock`） | 统一到图像时间戳 |
 | PnP 几何 | 有（320×382mm，与仿真不符） | 有（装甲板） | 重新标定 + 配置化 |
 | 配置驱动 | 部分（detector/tracker/solve 三个 YAML） | `config_loader.hpp` 统一 | 并入 `configs/` |
-| 遥测/回归 | 无 | CSV + `truth_regression.py` | 复用并扩展 |
+| 遥测/回归 | 无 | CSV + 逐级误差报告 | 复用并扩展 |
 | 单元测试 | 无 | 有 | 新增能量机关测试 |
 
 顺带发现的三处“抽屉里的资产”：
 
 1. `configs/buff.yaml`：原先写好的 `buff_type/small_buff/large_buff/kalman/roi/hsv` 草案
-   **没有任何代码加载它**（只有 `tools/hsv_tuner.cpp` 把它当字符串模板打印）。它已被改写为
+   **没有任何代码加载它**（当时只有一个调参工具把它当字符串模板打印）。它已被改写为
    新链路的正式配置（见第 6 节）。
 2. **`sp_vision_25` 里已有成套的能量机关实现和已训练模型**，这是本次并入的真正起点：
    `tasks/auto_buff/`（`buff_detector/solver/target/aimer/type` + `yolo11_buff`）、
@@ -239,7 +239,7 @@ configs/buff.yaml          # 由“草案”升级为正式配置（rune 段）
 - **新增**：本模块自己的配置加载（`rune_config.hpp`）、坐标/符号适配层
   （把仿真器的云台角与 sp_vision 的 z-up 世界系对齐）、内参随帧尺寸缩放、自检测试。
 - **后续接入**：激活状态机（点亮集合 + 命中窗口）、`GimbalController`/`Shooter` 复用、
-  `truth_regression` 报告。
+  逐级误差报告。
 - **不继承**：`energy_node.cpp`、`auto_aim/perception/energy_detector.*`、`auto_buff` 的贪心匹配、
   常量 `dt=0.033` 与 `steady_clock` 时间基准。
 
@@ -377,7 +377,7 @@ rune:
 | **M2 跟踪** ✅（数值）/ ⏳（仿真） | EKF 跟踪 + 72° 格点折叠 + 丢失外推 + 时间戳统一 | 自检：小符跟踪 < 7°、0.15 s 预测 < 4°；大符 4 s 内辨识 ω 误差 < 0.30 rad/s，0.25 s 预测优于匀速外推。**待接仿真 rune-only 场景做端到端复核** |
 | **M3 点亮集合** ⏳ | `multi_candidate=true` 下的多扇叶格点分配 + 点亮集合输出 + 跨帧三态一致性 | 点亮扇叶识别准确率 > 99%；小符/大符“本轮该打哪个”不串号 |
 | **M4 激活状态机 + 火控** ⏳ | 窗口/超时/已命中集合状态机、`Shooter` 与 `GimbalController` 接入、`FIRE` 节流 | rune-only 仿真里自动完成小符 5 次命中、大符 2+2+1；记录激活成功率、超时率、平均用时 |
-| **M5 并入与回归** ⏳ | 并入 `node_sim.cpp`（`ULTRA_VISION_RUNE_MODE` 切换）、`truth_regression` 扩展、实车标定 | `ctest` 全绿；两条 pipeline 互不影响；有能量机关阶段误差报告 |
+| **M5 并入与回归** ⏳ | 并入 `node_sim.cpp`（`ULTRA_VISION_RUNE_MODE` 切换）、逐级误差回归扩展、实车标定 | `ctest` 全绿；两条 pipeline 互不影响；有能量机关阶段误差报告 |
 
 配套建议：给仿真器补一份能量机关真值导出（当前只有 `armor_chassis` 会写 `dataset.csv`），
 字段建议 `time_us,face,mode,target_index,state,cx,cy,R,phase,omega`，

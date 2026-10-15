@@ -426,7 +426,7 @@ namespace auto_aim
                            "（默认已是 1440x1080）\n"
                         << "[input]        或 DAEDALUS_CAPTURE_WIDTH=1440"
                            " DAEDALUS_CAPTURE_HEIGHT=1080，"
-                           "或 tools/auto_aim_sim_test.sh --capture 1440x1080"
+                           "或按 1440x1080 采集后再喂进来"
                         << std::endl;
                 }
             }

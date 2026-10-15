@@ -6,7 +6,7 @@
 > src/auto_aim/      自瞄（原样保留）
 > src/auto_buff/     能量机关：buff_demo（薄入口）+ rune_*（算法）+ support/
 > tests/             单元测试（buff_target_test / buff_state_test），不进算法目录
-> tools/             脚本 + buff_model_bench（模型选型探针）
+> tools/             rp26_sim（外部对照仿真）+ sim（仿真相机预设）
 > ```
 >
 > 构建目标（对齐 sp_vision 的 `tasks/auto_buff`：算法是 **OBJECT 库**、入口是薄 executable）：
@@ -16,7 +16,6 @@
 > | `auto_buff` | OBJECT 库 | 算法本体 + 诊断层（可被任意入口/测试复用） |
 > | `auto_buff_demo` | executable | 薄入口：参数/环境 → 配置 → `runRune()` |
 > | `buff_target_test` / `buff_state_test` | 测试 | 顶层 `tests/`，`ctest -R buff` 运行 |
-> | `buff_model_bench` | 工具 | 模型延迟/输入尺寸选型 |
 >
 > 旧的 `src/auto_buff/energy_node.cpp` + 那一代 `energy_demo`（华南虎式 demo、硬编码
 > 路径、只吃本地视频）**已删除**（git 历史里可查），它与现在的流水线是同一件事的两代。
@@ -127,41 +126,21 @@
 ## 7. 运行、调试与评估
 
 ```bash
-# 端到端仿真回归（自动起停仿真器 + 统计命中/激活）
-tools/rune_sim_test.sh --preset low --mode small --seconds 30 --repeat 2
-tools/rune_sim_test.sh --preset low_large --mode large --seconds 30 --pad 1.36 --record-frames
+# 构建（算法是 OBJECT 库，入口是薄 executable）
+cmake -S . -B build_rune -DULTRA_VISION_BUILD_RUNE=ON -DULTRA_VISION_BUILD_TESTS=ON
+cmake --build build_rune -j
 
-# 曲线（可用性 / 相位 / 距离 / 每轮命中），是"误差来源"的第一手数据
-python3 tools/rune_curve.py <run_dir> --truth-distance 6.05
-
-# 单次跑分（检出率 / 延迟 / 距离）
-python3 tools/rune_model_score.py <run_dir> --truth-distance 6.05
-
-# 槽位记账 vs 仿真真值（掩码一致率 / 闸门误挡）
-python3 tools/rune_state_agreement.py <run_dir>
-
-# 用录下来的 CSV 离线扫描格点参数（不必每次跑仿真）
-python3 tools/rune_lattice_replay.py <run_dir> --sweep --assign nearest
+# 端到端：仿真 / 视频 / 相机（环境变量见 buff_demo.cpp）
+./build_rune/auto_buff_demo
 
 # 纯算法自检（无仿真、无模型）
-# 注意：需要带 -DULTRA_VISION_BUILD_TESTS=ON 配置构建目录，否则没有该目标：
-#   cmake -S . -B build_rune -DULTRA_VISION_BUILD_RUNE=ON -DULTRA_VISION_BUILD_TESTS=ON
-./build_rune/src/auto_buff/rune_target_test
-./build_rune/src/auto_buff/rune_pipeline_state_test
-
-# 模型延迟/输入尺寸选型
-./build_rune/src/auto_buff/rune_model_bench models/openvino/....xml --image x.png
-
-# 扇叶状态分类（经典面积特征）的**离线标定探针**：编译同一份
-# rune_blade_state.cpp，只把 hub/轨道/靶心换成人工标注（网络检不到的"已激活"
-# 外观只能人标），于是两张标注帧的量在同一条代码路径上、可以直接比
-./build_rune/buff_state_probe /tmp/frame.png --hub 947,440 --orbit 125 \
-    --blade 970,320 --blade 843,377 --dump /tmp/probe.png
-# 也可以只给相位，自动摆 5 片：--n5 11   （相位 0 = 正上方，顺时针）
-
-# 注意：状态分类的阈值**尚未可信**（两类实测重叠，见
-# git 历史里的 docs/energy_rune_issue_audit.md §46），现在只写进 CSV 观察，不接开火闸门。
+./build_rune/tests/buff_target_test
+./build_rune/tests/buff_state_test
 ```
+
+> 本节原先还有一整套仿真回归（`rune_sim_test.sh`）、曲线/跑分/槽位一致/格点离线回放
+> 脚本、模型选型探针与扇叶状态分类标定探针，它们已随 uv 收敛移出主线（内容在 git 历史里）。
+> 扇叶状态分类的阈值仍然**不可信**（两类实测重叠），现在只写进 CSV 观察，不接开火闸门。
 
 常用环境变量：`ULTRA_VISION_RUNE_CSV`（逐帧 CSV）、`ULTRA_VISION_RUNE_DEBUG=1`
 （打印 `[frame]/[rune detect]/[rune pick]/[fire]` 轨迹）、`ULTRA_VISION_NO_DISPLAY=1`、

@@ -10,7 +10,7 @@
 //   * 坐标变换用他们的 TFTree：我们把"当前云台姿态"按他们的约定填进去，
 //     约定推导见 reportPoseRotation()；
 //   * 逐帧 CSV 记录他们的下发角、像素残差与自洽性检查，便于和 Ultra_Vision 的
-//     tools/rune_curve.py 输出对齐比较。
+//     曲线输出对齐比较。
 
 #include <algorithm>
 #include <array>

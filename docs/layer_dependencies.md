@@ -1,7 +1,8 @@
 # 分层依赖方向（B3）
 
 > 目标：把 `src/auto_aim/` 的依赖方向**定死并可检查**，让"能力模块 + 薄组合根"和
-> sp_vision 的 `tasks/ + src/*.cpp` 一一对应。检查脚本：`tools/dep_lint.sh`。
+> sp_vision 的 `tasks/ + src/*.cpp` 一一对应。（当初的自动检查脚本已随 uv 收敛移出主线，
+> 下面第 3 节的规则现在靠 review 守。）
 
 ## 1. 层与职责
 
@@ -30,7 +31,7 @@ io/  →  perception/  →  Kalman/  →  control/  →  io/(下发帧)
 一句话：**数据往上（io→perception→Kalman→control），命令往下（control→io 下发帧），
 `app/` 是唯一的横切装配点，入口只做 IO。**
 
-## 3. 硬规则（`tools/dep_lint.sh` 会失败的情况）
+## 3. 硬规则（违反即视为依赖方向被破坏）
 
 1. `perception/` 不得 `#include "control/..."` —— 检测不得依赖控制。
 2. `perception/` 不得 `#include "io/..."` —— 检测不得依赖硬件。

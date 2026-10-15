@@ -23,8 +23,6 @@ UV 观测把这一层去掉：**直接把四个角点像素放进滤波器**，�
 | `Kalman/tracker.hpp/.cpp` | `setCameraIntrinsics()`、`uvCamera()`、`armorUvObservation()`；单板与多板两条更新路径都支持 UV（多板同帧 = 同一刚体、每多一块多 8 个约束） |
 | `configs/tracker.yaml` | `uv_observation`（默认 **false**）、`uv_sigma_px`、`uv_nis_threshold`；板面尺寸**复用 `pnp` 段**，保证"重投影的模型"和"观测的角点"是同一个几何量 |
 | `test/armor_ekf_uv_test.cpp` | 纯数学自检：投影自洽 + 1 px 噪声下收敛（位置/朝向/角速度） |
-| `tools/auto_aim_sim_test.sh` | 仿真 A/B：起（或**附着到已在跑的**）仿真器 → 跑视觉端 → 用 `tools/truth_regression.py` 出逐级误差 |
-
 两个实现细节值得记下来，都是踩过的坑：
 
 1. **雅可比用中心差分**。状态只有 9 维、每块板 4 个角点，一次更新多算 ~72 次投影，
@@ -51,7 +49,7 @@ uv ekf: centre 0.072 m, yaw 0.029 rad, omega 0.082 rad/s, residual 0.89 px
 静止/慢速时重投影残差 RMS **0.5~1.2 px**（与角点噪声一致 ✓）；
 旋转中会出现 5~6 px（运动模糊 + 帧与位姿的时间差）。
 
-### 3.3 仿真 A/B（`tools/auto_aim_sim_test.sh --uv 0|1`）
+### 3.3 仿真 A/B（uv0 / uv1 各跑一遍对照）
 
 同一时长（25 s）先后各跑一次：
 
@@ -63,7 +61,7 @@ uv ekf: centre 0.072 m, yaw 0.029 rad, omega 0.082 rad/s, residual 0.89 px
 
 **结论：暂时是 UV 更差，所以默认保持关闭。** 同时这条 A/B 目前**不干净**：
 仿真每轮的重合（小陀螺）相位不同，`omega` 中位在 0.01~2.7 rad/s 之间跳，
-而 `truth_regression.py` 的门限（0.05 / 0.06 m）是按静止场景定的；
+而当时那套逐级误差门限（0.05 / 0.06 m）是按静止场景定的；
 `observation error` 那一列还受"哪块板被选中"影响（它记录的是被选中板的 PnP 输出），
 所以不能当作纯 PnP 质量指标。要下结论必须先做**受控对比**。
 
@@ -95,7 +93,7 @@ uv ekf: centre 0.072 m, yaw 0.029 rad, omega 0.082 rad/s, residual 0.89 px
    下一步按 jlu_vision 的做法把"重投影 + 朝向/半径因子"**一起**用（我先试了直接叠加
    `updateAngle`，反而更差 1.06 m —— 说明叠加的位置/权重不对，要在关联层解决，
    而不是把两个量测硬塞在同一个 EKF 更新里）。
-2. **受控 A/B**：关掉仿真的小陀螺（或按 `truth_regression` 的逐帧输出只比较
+2. **受控 A/B**：关掉仿真的小陀螺（或按逐级误差的逐帧输出只比较
    "静止段"），uv0/uv1 各跑 2~3 轮取中位；这才是能下结论的数据。
 2. **时间一致性**：旋转中 5~6 px 的残差说明"帧曝光时刻 / 相机位姿时刻 / 状态推进时刻"
    之间有系统偏差（估计 10~30 ms）。YPD 路径对这个不敏感（角度量测），UV 路径直接吃

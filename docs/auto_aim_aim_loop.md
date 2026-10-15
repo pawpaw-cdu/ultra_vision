@@ -1,7 +1,7 @@
 # auto_aim 瞄准闭环：口径、实测、当前结论
 
-2026-09-26。配套工具 `tools/auto_aim_aim_check.py`，配套工况开关
-`tools/auto_aim_sim_test.sh --distance/--pan/--pan-lead/--gyro`。
+2026-09-26。当时配套的闭环检查脚本与仿真工况开关（`--distance/--pan/--pan-lead/--gyro`）
+已随 uv 收敛移出主线，内容见 git 历史。
 
 ## 1. 仿真里的瞄准闭环长什么样
 
@@ -129,7 +129,7 @@ stateDiverged / watchdogStats`），参数在 `configs/tracker.yaml` 的 `watchd
 `init()`；`LOST` 会让 `AimPipeline::track_usable = false`，即只发心跳（mode=0）
 不再给云台下目标，避免"追着假目标跑/大角度摆"。
 
-实测（`~/real_full`，静止单板，1400 帧，`build/replay_dataset`）：
+实测（`~/real_full`，静止单板，1400 帧，离线回放）：
 
 | 工况 | 整段最大拒绝比例 | 触发重初始化 | 估计 vs 观测 | 重投影 |
 | --- | --- | --- | --- | --- |
@@ -162,7 +162,7 @@ stateDiverged / watchdogStats`），参数在 `configs/tracker.yaml` 的 `watchd
 ## 8. 静止靶云台抖动：噪声来源与闸门（2026-09-29）
 
 现象：静止靶上"估计出的模型中心一直在动"，云台上下左右明显抖。
-测量手段：`tools/replay_dataset ~/real_full --dump aim.csv`（逐帧落
+测量手段：离线回放 `~/real_full` 并逐帧落盘（逐帧落
 中心/速度/ω/瞄点/前馈/观测，静止靶下**所有非零量都是噪声**），口径见下。
 
 链路（实车 `~/real_full`，2.2 m，48 fps，1400 帧）：
@@ -235,11 +235,8 @@ OFF = 0.23/0.56° 而且"估计 vs 观测"退化到 9.6/77 mm、重投影 7.2/50
 配置在 `configs/serial.yaml`：`command_yaw_sign` 默认 = `yaw_sign`（同坐标系），
 `command_pitch_sign` 默认 +1。
 
-量法（真机，跑 auto_aim 之前单独跑，只动 3°/1.2 s，结束强制 mode=0）：
-
-```
-./build/gimbal_sign_probe --pitch      # 打印"命令 ↔ 回传"同号/反号 + 该填的值
-```
+量法（真机，跑 auto_aim 之前单独跑，只动 3°/1.2 s，结束强制 mode=0）：发一条很小的
+pitch 命令，看"命令 ↔ 回传"是同号还是反号，把该填的值写进 `configs/serial.yaml`。
 
 对照：sp_vision 的 aimer 输出 `yaw = atan2(aim.y, aim.x) + yaw_offset` 是**它读到的同一个
 IMU 系**（`io/gimbal` 回传的 yaw 与它下发的 yaw 同一坐标系），所以它不需要任何符号转换；
@@ -250,7 +247,7 @@ IMU 系**（`io/gimbal` 回传的 yaw 与它下发的 yaw 同一坐标系），�
 
 现象：实车上识别到装甲板后云台朝一个方向转一段时间/角度（不是"一直加速"，是跑到错的目标点）。
 
-量法（`tools/gimbal_sign_probe`，逐层排除；每次都要**清空云台活动范围**）：
+量法（用链路探针逐层排除；每次都要**清空云台活动范围**）：
 
 | 步骤 | 命令 | 结果 | 说明 |
 | --- | --- | --- | --- |
@@ -278,7 +275,7 @@ cmd_pitch = −el_x            +  gain_pitch_sign           · Δ(内部 pitch)
 
 Δ 是"本次要发的内部角 − 当前姿态角"，所以**不需要标定任何零点常数**（实测基准来自
 当前四元数）；换机器人只重量 `configs/serial.yaml` 里那四个符号即可
-（`gimbal_sign_probe --world` 直接给结论）。没有 IMU 样本的那一拍**不发**（保持），
+（用 world 回传直接给结论）。没有 IMU 样本的那一拍**不发**（保持），
 不允许退化成"发内部电机角"的错口径。
 
 安全开关：命令坐标系没量准之前用 `ULTRA_VISION_DISABLE_CONTROL=1 ./build/auto_aim`
