@@ -117,6 +117,35 @@ namespace auto_aim
                 (near_err <= 1.5 * best_err + 1e-9) ? near_idx : best_idx;
             armor.rvec = rvecs[chosen];
             armor.tvec = tvecs[chosen];
+
+            // ---- 观测"尺度自洽"闸门（2026-10-16，实车 4ms 数据实测）--------------
+            // 检测出来的装甲板天然是底盘的一部分：它的**像素尺度**必须和 PnP 解出的深度
+            // 自洽—— 期望板宽像素 ≈ fx · W / z。但实测有一批观测解出 **18 m**（板宽应当
+            // 只剩 ~18 px），而实测框有上百像素（比例 5~6 倍）⇒ 这类"又远又大"的观测把
+            // 模型拽飞、watchdog 反复重初始化（离线有效帧只剩 15%）。
+            // 这里不信任它：比例超出 [kMinScale, kMaxScale] 就判该观测无效（返回 false）。
+            //   * 上限 1.5：板有 15° 灯条倾角 + 近距透视，实测宽度最多略微超过
+            //     fx·W/z，给 50% 余量；
+            //   * 下限 0.45：板侧转时视在宽度按 cos(yaw) 收缩（60° 时 0.5），再留余量。
+            //   * 阈值是标定值，确认后可挪进 configs/tracker.yaml 的 pnp 段。
+            constexpr double kMinScaleRatio = 0.45;
+            constexpr double kMaxScaleRatio = 1.50;
+            {
+                const double plate_w = (armor.armor_type == auto_aim::small)
+                    ? static_cast<double>(geometry.small_width)
+                    : static_cast<double>(geometry.large_width);
+                const double z = armor.tvec.at<double>(2);
+                const double fx = camera_matrix.at<double>(0, 0);
+                const double observed_px = cv::norm(img_points[1] - img_points[2]);
+                if (std::isfinite(z) && z > 0.1 && fx > 1.0 && observed_px > 1.0 &&
+                    plate_w > 1e-3) {
+                    const double ratio = observed_px / (fx * plate_w / z);
+                    if (!std::isfinite(ratio) || ratio < kMinScaleRatio ||
+                        ratio > kMaxScaleRatio) {
+                        return false;   // 尺度不自洽 → 这颗观测不可信
+                    }
+                }
+            }
             // 降自由度精修（fit_single，上科大 2026 §5A.4）：固定 tvec + 竖直板约束，
             // 只在方位角上做一维重投影最小化。失败时保留 IPPE 的结果。
             refineArmorYaw(armor, camera_matrix, dist_coeffs, geometry);
