@@ -116,13 +116,17 @@ namespace auto_aim
             constexpr double kMinScaleRatio = 0.45;
             constexpr double kMaxScaleRatio = 1.50;
             constexpr double kMinUpright = 0.707;   // cos45°：板竖直方向与图像竖直的夹角上限
+            // 姿态只做**优先项**而不是硬门：大偏航角（板接近侧对相机）是合法工况，
+            // 只是"远解"同样会表现为姿态异常；所以给非竖直解加一个大代价，
+            // 有竖直解时一定选竖直的，没有时退回"尺度自洽里残差最小"的那个。
+            constexpr double kNonUprightPenalty = 1000.0;
             const double plate_w = (armor.armor_type == auto_aim::small)
                 ? static_cast<double>(geometry.small_width)
                 : static_cast<double>(geometry.large_width);
             const double fx = camera_matrix.at<double>(0, 0);
             const double observed_px = cv::norm(img_points[1] - img_points[2]);
             std::size_t chosen = rvecs.size();
-            double best_err = std::numeric_limits<double>::max();
+            double best_score = std::numeric_limits<double>::max();
             for (std::size_t i = 0; i < rvecs.size(); ++i) {
                 const double z = tvecs[i].at<double>(2);
                 if (!std::isfinite(z) || z <= 0.1) continue;
@@ -130,18 +134,21 @@ namespace auto_aim
                     const double ratio = observed_px / (fx * plate_w / z);
                     if (!std::isfinite(ratio) || ratio < kMinScaleRatio ||
                         ratio > kMaxScaleRatio) {
-                        continue;
+                        continue;   // 尺度不自洽（如 18 m 远解）→ 硬门，直接丢
                     }
                 }
                 cv::Mat rotation;
                 cv::Rodrigues(rvecs[i], rotation);
                 const double upright = std::abs(rotation.at<double>(1, 1));
-                if (std::isfinite(upright) && upright < kMinUpright) continue;
                 const double e = i < static_cast<std::size_t>(reproj_errs.total())
                     ? reproj_errs.at<double>(static_cast<int>(i)) : 0.0;
-                if (std::isfinite(e) && e < best_err) { best_err = e; chosen = i; }
+                double score = std::isfinite(e) ? e : best_score;
+                if (!(std::isfinite(upright) && upright >= kMinUpright)) {
+                    score += kNonUprightPenalty;
+                }
+                if (score < best_score) { best_score = score; chosen = i; }
             }
-            if (chosen >= rvecs.size()) return false;   // 全部解都被机械约束否掉 → 丢弃观测
+            if (chosen >= rvecs.size()) return false;   // 尺度全不自洽 → 丢弃观测
             armor.rvec = rvecs[chosen];
             armor.tvec = tvecs[chosen];
             // 降自由度精修（fit_single，上科大 2026 §5A.4）：固定 tvec + 竖直板约束，
