@@ -99,53 +99,51 @@ namespace auto_aim
                 rvecs.empty() || tvecs.size() != rvecs.size()) {
                 return false;
             }
-            std::size_t near_idx = 0;
-            double near_z = std::numeric_limits<double>::max();
-            std::size_t best_idx = 0;
+            // ---- 选解：机械约束优先（学吉林大学 sortPnPResult + RMCS 的剪枝）------
+            // 平面板的近解/远解重投影几乎一样（实测同一块板：1.43 m vs 18.56 m，残差都在
+            // 1 px 量级），靠像素挑不出来 —— 但**机械约束**能挑：
+            //   ① 深度为正、且在"板宽像素 vs fx·W/z"的尺度自洽区间内（上一轮加的闸门）；
+            //   ② **板必须大致竖直**：板平面内竖直方向（对象点 y 轴）在相机系里应当接近
+            //      图像竖直方向（|R[1][1]| ≥ cos45°）。远解要求板近乎倒伏，会被这条挡掉
+            //      —— 这正是 RMCS 用"pitch 与期望值差 >40° 就丢"的等价形式，且不需要
+            //      相机姿态（我们这里没有 pose）。
+            //   ③ 幸存解里取**重投影误差最小**（RMCS 的做法；吉大是在误差比接近时才
+            //      用姿态判据，思路一致）。
+            // 一个解都活不下来 → 判该观测无效（宁可丢，也不喂错深度）。
+            //   * 尺度上下限：上限 1.5（15° 灯条倾角 + 近距透视），下限 0.45（侧转
+            //     cos(yaw) 收缩，60° 时 0.5，留余量）。标定后可挪进 tracker.yaml 的
+            //     pnp 段。
+            constexpr double kMinScaleRatio = 0.45;
+            constexpr double kMaxScaleRatio = 1.50;
+            constexpr double kMinUpright = 0.707;   // cos45°：板竖直方向与图像竖直的夹角上限
+            const double plate_w = (armor.armor_type == auto_aim::small)
+                ? static_cast<double>(geometry.small_width)
+                : static_cast<double>(geometry.large_width);
+            const double fx = camera_matrix.at<double>(0, 0);
+            const double observed_px = cv::norm(img_points[1] - img_points[2]);
+            std::size_t chosen = rvecs.size();
             double best_err = std::numeric_limits<double>::max();
             for (std::size_t i = 0; i < rvecs.size(); ++i) {
                 const double z = tvecs[i].at<double>(2);
-                const double e = i < static_cast<std::size_t>(reproj_errs.total())
-                    ? reproj_errs.at<double>(static_cast<int>(i)) : 0.0;
-                if (std::isfinite(z) && z > 0.1 && z < near_z) { near_z = z; near_idx = i; }
-                if (std::isfinite(e) && e < best_err) { best_err = e; best_idx = i; }
-            }
-            const double near_err = near_idx < static_cast<std::size_t>(reproj_errs.total())
-                ? reproj_errs.at<double>(static_cast<int>(near_idx)) : best_err;
-            // 近解的残差在最佳解的 1.5 倍以内 → 取近解（挡住十几米的远解）
-            const std::size_t chosen =
-                (near_err <= 1.5 * best_err + 1e-9) ? near_idx : best_idx;
-            armor.rvec = rvecs[chosen];
-            armor.tvec = tvecs[chosen];
-
-            // ---- 观测"尺度自洽"闸门（2026-10-16，实车 4ms 数据实测）--------------
-            // 检测出来的装甲板天然是底盘的一部分：它的**像素尺度**必须和 PnP 解出的深度
-            // 自洽—— 期望板宽像素 ≈ fx · W / z。但实测有一批观测解出 **18 m**（板宽应当
-            // 只剩 ~18 px），而实测框有上百像素（比例 5~6 倍）⇒ 这类"又远又大"的观测把
-            // 模型拽飞、watchdog 反复重初始化（离线有效帧只剩 15%）。
-            // 这里不信任它：比例超出 [kMinScale, kMaxScale] 就判该观测无效（返回 false）。
-            //   * 上限 1.5：板有 15° 灯条倾角 + 近距透视，实测宽度最多略微超过
-            //     fx·W/z，给 50% 余量；
-            //   * 下限 0.45：板侧转时视在宽度按 cos(yaw) 收缩（60° 时 0.5），再留余量。
-            //   * 阈值是标定值，确认后可挪进 configs/tracker.yaml 的 pnp 段。
-            constexpr double kMinScaleRatio = 0.45;
-            constexpr double kMaxScaleRatio = 1.50;
-            {
-                const double plate_w = (armor.armor_type == auto_aim::small)
-                    ? static_cast<double>(geometry.small_width)
-                    : static_cast<double>(geometry.large_width);
-                const double z = armor.tvec.at<double>(2);
-                const double fx = camera_matrix.at<double>(0, 0);
-                const double observed_px = cv::norm(img_points[1] - img_points[2]);
-                if (std::isfinite(z) && z > 0.1 && fx > 1.0 && observed_px > 1.0 &&
-                    plate_w > 1e-3) {
+                if (!std::isfinite(z) || z <= 0.1) continue;
+                if (fx > 1.0 && observed_px > 1.0 && plate_w > 1e-3) {
                     const double ratio = observed_px / (fx * plate_w / z);
                     if (!std::isfinite(ratio) || ratio < kMinScaleRatio ||
                         ratio > kMaxScaleRatio) {
-                        return false;   // 尺度不自洽 → 这颗观测不可信
+                        continue;
                     }
                 }
+                cv::Mat rotation;
+                cv::Rodrigues(rvecs[i], rotation);
+                const double upright = std::abs(rotation.at<double>(1, 1));
+                if (std::isfinite(upright) && upright < kMinUpright) continue;
+                const double e = i < static_cast<std::size_t>(reproj_errs.total())
+                    ? reproj_errs.at<double>(static_cast<int>(i)) : 0.0;
+                if (std::isfinite(e) && e < best_err) { best_err = e; chosen = i; }
             }
+            if (chosen >= rvecs.size()) return false;   // 全部解都被机械约束否掉 → 丢弃观测
+            armor.rvec = rvecs[chosen];
+            armor.tvec = tvecs[chosen];
             // 降自由度精修（fit_single，上科大 2026 §5A.4）：固定 tvec + 竖直板约束，
             // 只在方位角上做一维重投影最小化。失败时保留 IPPE 的结果。
             refineArmorYaw(armor, camera_matrix, dist_coeffs, geometry);
