@@ -83,10 +83,40 @@ namespace auto_aim
                 armor.left.bottom, armor.left.top,
                 armor.right.top, armor.right.bottom};
 
-            if (!cv::solvePnP(obj_points, img_points, camera_matrix, dist_coeffs,
-                              armor.rvec, armor.tvec, false, cv::SOLVEPNP_IPPE)) {
+            // ---- 平面板 PnP 的**双解剔除**（2026-10-16，实车 4ms 数据实测）--------
+            // 之前的写法是 solvePnP(..., SOLVEPNP_IPPE)：IPPE 内部只吐**一个**解，
+            // 而平面板的近解/远解重投影几乎一样（同一块板：近解 1.43 m / 远解 18.56 m，
+            // 两者残差都在 1 px 量级）——一旦翻到远解，模型把被观测板放到十几米外，
+            // 重投影"整块飞掉"，还会顺着它把车心/yaw/ω 带歪（watchdog 反复重初始化）。
+            // 姿态角上 IPPE 给的"主解"是按残差挑的，所以这里改成拿**全部解**再用
+            // "近解优先、但残差不能明显更差"来选：真正的物理约束是"板就在眼前"。
+            std::vector<cv::Mat> rvecs;
+            std::vector<cv::Mat> tvecs;
+            cv::Mat reproj_errs;
+            if (!cv::solvePnPGeneric(obj_points, img_points, camera_matrix, dist_coeffs,
+                                     rvecs, tvecs, false, cv::SOLVEPNP_IPPE, cv::noArray(),
+                                     cv::noArray(), reproj_errs) ||
+                rvecs.empty() || tvecs.size() != rvecs.size()) {
                 return false;
             }
+            std::size_t near_idx = 0;
+            double near_z = std::numeric_limits<double>::max();
+            std::size_t best_idx = 0;
+            double best_err = std::numeric_limits<double>::max();
+            for (std::size_t i = 0; i < rvecs.size(); ++i) {
+                const double z = tvecs[i].at<double>(2);
+                const double e = i < static_cast<std::size_t>(reproj_errs.total())
+                    ? reproj_errs.at<double>(static_cast<int>(i)) : 0.0;
+                if (std::isfinite(z) && z > 0.1 && z < near_z) { near_z = z; near_idx = i; }
+                if (std::isfinite(e) && e < best_err) { best_err = e; best_idx = i; }
+            }
+            const double near_err = near_idx < static_cast<std::size_t>(reproj_errs.total())
+                ? reproj_errs.at<double>(static_cast<int>(near_idx)) : best_err;
+            // 近解的残差在最佳解的 1.5 倍以内 → 取近解（挡住十几米的远解）
+            const std::size_t chosen =
+                (near_err <= 1.5 * best_err + 1e-9) ? near_idx : best_idx;
+            armor.rvec = rvecs[chosen];
+            armor.tvec = tvecs[chosen];
             // 降自由度精修（fit_single，上科大 2026 §5A.4）：固定 tvec + 竖直板约束，
             // 只在方位角上做一维重投影最小化。失败时保留 IPPE 的结果。
             refineArmorYaw(armor, camera_matrix, dist_coeffs, geometry);
