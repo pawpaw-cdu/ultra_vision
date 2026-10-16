@@ -83,74 +83,10 @@ namespace auto_aim
                 armor.left.bottom, armor.left.top,
                 armor.right.top, armor.right.bottom};
 
-            // ---- 平面板 PnP 的**双解剔除**（2026-10-16，实车 4ms 数据实测）--------
-            // 之前的写法是 solvePnP(..., SOLVEPNP_IPPE)：IPPE 内部只吐**一个**解，
-            // 而平面板的近解/远解重投影几乎一样（同一块板：近解 1.43 m / 远解 18.56 m，
-            // 两者残差都在 1 px 量级）——一旦翻到远解，模型把被观测板放到十几米外，
-            // 重投影"整块飞掉"，还会顺着它把车心/yaw/ω 带歪（watchdog 反复重初始化）。
-            // 姿态角上 IPPE 给的"主解"是按残差挑的，所以这里改成拿**全部解**再用
-            // "近解优先、但残差不能明显更差"来选：真正的物理约束是"板就在眼前"。
-            std::vector<cv::Mat> rvecs;
-            std::vector<cv::Mat> tvecs;
-            cv::Mat reproj_errs;
-            if (!cv::solvePnPGeneric(obj_points, img_points, camera_matrix, dist_coeffs,
-                                     rvecs, tvecs, false, cv::SOLVEPNP_IPPE, cv::noArray(),
-                                     cv::noArray(), reproj_errs) ||
-                rvecs.empty() || tvecs.size() != rvecs.size()) {
+            if (!cv::solvePnP(obj_points, img_points, camera_matrix, dist_coeffs,
+                              armor.rvec, armor.tvec, false, cv::SOLVEPNP_IPPE)) {
                 return false;
             }
-            // ---- 选解：机械约束优先（学吉林大学 sortPnPResult + RMCS 的剪枝）------
-            // 平面板的近解/远解重投影几乎一样（实测同一块板：1.43 m vs 18.56 m，残差都在
-            // 1 px 量级），靠像素挑不出来 —— 但**机械约束**能挑：
-            //   ① 深度为正、且在"板宽像素 vs fx·W/z"的尺度自洽区间内（上一轮加的闸门）；
-            //   ② **板必须大致竖直**：板平面内竖直方向（对象点 y 轴）在相机系里应当接近
-            //      图像竖直方向（|R[1][1]| ≥ cos45°）。远解要求板近乎倒伏，会被这条挡掉
-            //      —— 这正是 RMCS 用"pitch 与期望值差 >40° 就丢"的等价形式，且不需要
-            //      相机姿态（我们这里没有 pose）。
-            //   ③ 幸存解里取**重投影误差最小**（RMCS 的做法；吉大是在误差比接近时才
-            //      用姿态判据，思路一致）。
-            // 一个解都活不下来 → 判该观测无效（宁可丢，也不喂错深度）。
-            //   * 尺度上下限：上限 1.5（15° 灯条倾角 + 近距透视），下限 0.45（侧转
-            //     cos(yaw) 收缩，60° 时 0.5，留余量）。标定后可挪进 tracker.yaml 的
-            //     pnp 段。
-            constexpr double kMinScaleRatio = 0.45;
-            constexpr double kMaxScaleRatio = 1.50;
-            constexpr double kMinUpright = 0.707;   // cos45°：板竖直方向与图像竖直的夹角上限
-            // 姿态只做**优先项**而不是硬门：大偏航角（板接近侧对相机）是合法工况，
-            // 只是"远解"同样会表现为姿态异常；所以给非竖直解加一个大代价，
-            // 有竖直解时一定选竖直的，没有时退回"尺度自洽里残差最小"的那个。
-            constexpr double kNonUprightPenalty = 1000.0;
-            const double plate_w = (armor.armor_type == auto_aim::small)
-                ? static_cast<double>(geometry.small_width)
-                : static_cast<double>(geometry.large_width);
-            const double fx = camera_matrix.at<double>(0, 0);
-            const double observed_px = cv::norm(img_points[1] - img_points[2]);
-            std::size_t chosen = rvecs.size();
-            double best_score = std::numeric_limits<double>::max();
-            for (std::size_t i = 0; i < rvecs.size(); ++i) {
-                const double z = tvecs[i].at<double>(2);
-                if (!std::isfinite(z) || z <= 0.1) continue;
-                if (fx > 1.0 && observed_px > 1.0 && plate_w > 1e-3) {
-                    const double ratio = observed_px / (fx * plate_w / z);
-                    if (!std::isfinite(ratio) || ratio < kMinScaleRatio ||
-                        ratio > kMaxScaleRatio) {
-                        continue;   // 尺度不自洽（如 18 m 远解）→ 硬门，直接丢
-                    }
-                }
-                cv::Mat rotation;
-                cv::Rodrigues(rvecs[i], rotation);
-                const double upright = std::abs(rotation.at<double>(1, 1));
-                const double e = i < static_cast<std::size_t>(reproj_errs.total())
-                    ? reproj_errs.at<double>(static_cast<int>(i)) : 0.0;
-                double score = std::isfinite(e) ? e : best_score;
-                if (!(std::isfinite(upright) && upright >= kMinUpright)) {
-                    score += kNonUprightPenalty;
-                }
-                if (score < best_score) { best_score = score; chosen = i; }
-            }
-            if (chosen >= rvecs.size()) return false;   // 尺度全不自洽 → 丢弃观测
-            armor.rvec = rvecs[chosen];
-            armor.tvec = tvecs[chosen];
             // 降自由度精修（fit_single，上科大 2026 §5A.4）：固定 tvec + 竖直板约束，
             // 只在方位角上做一维重投影最小化。失败时保留 IPPE 的结果。
             refineArmorYaw(armor, camera_matrix, dist_coeffs, geometry);
