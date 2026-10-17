@@ -102,15 +102,35 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
     if (!input.open(config, config_dir, video_path)) return -1;
     const std::string& frame_dir = input.frameDir();
 
+    // 观测隔离实验：保持物理相机不动，避免云台闭环把目标在画面里来回拖动。
+    //   now              = 从启动开始冻结在初始/指定姿态
+    //   activation       = 正常闭环打出第一次真值激活后冻结并停火
+    enum class GimbalFreezeMode { None, Now, AfterActivation };
+    GimbalFreezeMode freeze_mode = GimbalFreezeMode::None;
+    if (const char* freeze = std::getenv("ULTRA_VISION_RUNE_GIMBAL_FREEZE")) {
+        const std::string value(freeze);
+        if (value == "activation") {
+            freeze_mode = GimbalFreezeMode::AfterActivation;
+        } else if (value != "0") {
+            freeze_mode = GimbalFreezeMode::Now;
+        }
+    }
+    bool gimbal_frozen = freeze_mode == GimbalFreezeMode::Now;
+    double frozen_yaw = 0.0;
+    double frozen_pitch = 0.0;
+
     // 云台由 100 Hz 轨迹生成器驱动：视觉只发布目标角与目标角速度，轨迹生成器
     // 负责加加速度受限的平滑运动和高频下发。
     // 记录真正下发出去的高频指令，用于量化平滑度（每帧 CSV 看不到 100 Hz 细节）。
     auto_aim::energy::rune_diag::GimbalTrace trace;
     auto_aim::GimbalController gimbal_controller(
         config.gimbal,
-        [&input, &trace](double yaw, double pitch) {
-            trace.record(yaw, pitch, auto_aim::StandardClock::nowSeconds());
-            return input.sendGimbal(yaw, pitch);
+        [&input, &trace, &gimbal_frozen, &frozen_yaw,
+         &frozen_pitch](double yaw, double pitch) {
+            const double sent_yaw = gimbal_frozen ? frozen_yaw : yaw;
+            const double sent_pitch = gimbal_frozen ? frozen_pitch : pitch;
+            trace.record(sent_yaw, sent_pitch, auto_aim::StandardClock::nowSeconds());
+            return input.sendGimbal(sent_yaw, sent_pitch);
         },
         config.gimbal_command_rate_hz);
     auto_aim::AimSignalFilter aim_filter(config.aim_filter);
@@ -139,6 +159,10 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             commanded_yaw = yaw_deg * CV_PI / 180.0;
             commanded_pitch = pitch_deg * CV_PI / 180.0;
         }
+    }
+    if (gimbal_frozen) {
+        frozen_yaw = commanded_yaw;
+        frozen_pitch = commanded_pitch;
     }
 
     cv::Mat frame;
@@ -274,6 +298,16 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             auto_aim::energy::rune_diag::consumeTelemetry(
                 input.pollTelemetry(), input.groundTruth(), rune_mode_name,
                 telemetry_stats, &scored_hit_this_frame);
+            if (freeze_mode == GimbalFreezeMode::AfterActivation && !gimbal_frozen &&
+                telemetry_stats.scored > 0) {
+                gimbal_frozen = true;
+                frozen_yaw = commanded_yaw;
+                frozen_pitch = commanded_pitch;
+                std::cout << "Energy rune: first scored hit observed; gimbal frozen at yaw="
+                          << frozen_yaw * 180.0 / CV_PI
+                          << " deg pitch=" << frozen_pitch * 180.0 / CV_PI
+                          << " deg for observation audit" << std::endl;
+            }
             if (scored_hit_this_frame) {
                 round_guard.noteScoredHit(auto_aim::StandardClock::nowSeconds());
             }
@@ -312,7 +346,7 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
 
         // 用轨迹生成器的历史快照取"这一帧曝光时刻"的云台姿态，而不是我们自己
         // 记的下发值：异步下发 + 帧延迟下两者能差好几度。
-        if (!video_mode) {
+        if (!video_mode && !gimbal_frozen) {
             const auto pose = gimbal_controller.snapshotAt(frame_time_us);
             if (pose.valid) {
                 commanded_yaw = pose.yaw;
@@ -831,10 +865,11 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                 // 二次裁决（否则会把已经判好的火又挡掉）。
                 const bool fire_ok =
                     bore_sight.enabled
-                        ? (command.shoot && fire_enabled)
+                        ? (command.shoot && fire_enabled && !gimbal_frozen)
                         : (aim_in_control
-                               ? (fire_request && fire_enabled)
-                               : (command.shoot && fire_enabled && !command.blade_switched &&
+                               ? (fire_request && fire_enabled && !gimbal_frozen)
+                               : (command.shoot && fire_enabled && !gimbal_frozen &&
+                                  !command.blade_switched &&
                                   aim_ready && (!round_snapshot.hold) && blade_engageable));
                 if (fire_ok) {
                     input.sendFire();
@@ -984,6 +1019,7 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             sources.slot_factor_assigned = factor_snapshot.assigned_count;
             sources.slot_factor_target_observed = factor_snapshot.target_observed;
             sources.slot_factor_margin = factor_snapshot.margin;
+            sources.gimbal_frozen = gimbal_frozen;
             const auto orbit = solver.lastOrbitFit();
             sources.orbit_valid = orbit.valid;
             sources.orbit_semi_major_px = orbit.semi_major_px;

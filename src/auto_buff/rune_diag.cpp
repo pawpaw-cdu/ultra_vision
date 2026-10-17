@@ -324,6 +324,7 @@ namespace auto_aim::energy::rune_diag
         row.roi_w = roi.width;
         row.roi_h = roi.height;
         row.model_letterbox_scale = detector.modelLetterboxScale();
+        row.gimbal_frozen = sources.gimbal_frozen ? 1 : 0;
         row.orbit_ok = sources.orbit_valid ? 1 : 0;
         row.orbit_samples = sources.orbit_samples;
         row.orbit_ratio = sources.orbit_ratio;
@@ -431,7 +432,7 @@ namespace auto_aim::energy::rune_diag
                     "slot_factor_enabled,slot_factor_valid,slot_factor_target,"
                     "slot_factor_mask,slot_factor_assigned,slot_factor_target_observed,"
                     "slot_factor_margin,roi_active,roi_fallback,roi_x,roi_y,roi_w,roi_h,"
-                    "model_letterbox_scale\n";
+                    "model_letterbox_scale,gimbal_frozen\n";
         return true;
     }
 
@@ -511,7 +512,8 @@ namespace auto_aim::energy::rune_diag
                  << row.slot_factor_assigned << ',' << row.slot_factor_target_observed << ','
                  << row.slot_factor_margin << ',' << row.roi_active << ','
                  << row.roi_fallback << ',' << row.roi_x << ',' << row.roi_y << ','
-                 << row.roi_w << ',' << row.roi_h << ',' << row.model_letterbox_scale << '\n';
+                 << row.roi_w << ',' << row.roi_h << ',' << row.model_letterbox_scale << ','
+                 << row.gimbal_frozen << '\n';
     }
 
 
