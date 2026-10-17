@@ -18,12 +18,11 @@
 #include "auto_buff/rune_refiner.hpp"
 #include "auto_buff/rune_plate_refiner.hpp"
 #include "auto_buff/rune_blade_state.hpp"
+#include "auto_buff/rune_track_lifecycle.hpp"
 #include "auto_buff/rune_types.hpp"
 
 namespace auto_aim::energy
 {
-    enum class RuneTrackStatus { Track, TemporaryLost, Lost };
-
     struct RuneDetectorConfig
     {
         RuneModelConfig model;
@@ -73,7 +72,10 @@ namespace auto_aim::energy
             int switch_confirm_frames = 2;
         };
         PhaseAssocConfig phase_assoc;
-        int max_lost_frames = 20;   // sp_vision LOSE_MAX
+        // 状态滞回按时间而不是帧数计算：检测帧率和异步推理延迟变化时，
+        // "20 帧"可能代表 0.5~1.0 s，行为不一致。
+        double status_track_hold_s = 0.15;
+        double status_lost_timeout_s = 0.8;
         int gray_threshold = 100;   // used to localise the rune centre
         int dilate_size = 5;
         double center_mask_ratio = 0.8;    // mask radius / blade half-size
@@ -173,8 +175,8 @@ namespace auto_aim::energy
         // lattice spacing is known.
         std::optional<PowerRune> detectBest(const cv::Mat& bgr_image, double timestamp = -1.0);
 
-        RuneTrackStatus status() const { return status_; }
-        int lostCount() const { return lost_; }
+        RuneTrackStatus status() const { return lifecycle_.currentStatus(); }
+        int lostCount() const { return lifecycle_.rejectedFrames(); }
         // 本帧**过滤前**的全部候选（类别 + 靶心位置）。类别是语义：
         //   0 = 未激活（该打的那片，也是构建格点模型的锚点）
         //   1/2 = 已激活（已经打过的片）——它们不该被丢弃，而是用来更新
@@ -285,7 +287,7 @@ namespace auto_aim::energy
                                           const cv::Mat& bgr_image, double timestamp);
         /// @brief 逐帧算画布缩放（config.canvas_adaptive），让机关保持在训练尺度。
         void updateCanvasScale(const cv::Mat& bgr_image);
-        void handleLost();
+        void handleLost(double timestamp);
 
         RuneDetectorConfig config_;
         RuneModel model_;
@@ -319,8 +321,8 @@ namespace auto_aim::energy
         int assoc_sign_mismatch_ = 0;
         // 本帧是否因为"离预测相位太远"而丢弃了观测（诊断用）。
         bool assoc_rejected_ = false;
-        RuneTrackStatus status_ = RuneTrackStatus::Lost;
-        int lost_ = 0;
+        RuneTrackLifecycle lifecycle_;
+        double last_eval_time_ = 0.0;
         std::optional<PowerRune> last_powerrune_;
         std::vector<cv::Point2f> lit_centers_;
         std::array<int, 3> class_counts_{0, 0, 0};

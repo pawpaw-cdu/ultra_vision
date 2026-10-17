@@ -113,7 +113,10 @@ namespace auto_aim::energy
 
         // ---- detector -------------------------------------------------------
         const YAML::Node detector = rune["detector"];
-        config.detector.max_lost_frames = detector["max_lost_frames"].as<int>(20);
+        config.detector.status_track_hold_s =
+            detector["status_track_hold_s"].as<double>(0.15);
+        config.detector.status_lost_timeout_s =
+            detector["status_lost_timeout_s"].as<double>(0.8);
         config.detector.gray_threshold = detector["gray_threshold"].as<int>(100);
         config.detector.dilate_size = detector["dilate_size"].as<int>(5);
         config.detector.center_mask_ratio = detector["center_mask_ratio"].as<double>(0.8);

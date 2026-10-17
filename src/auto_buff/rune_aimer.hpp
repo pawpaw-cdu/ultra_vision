@@ -82,10 +82,10 @@ namespace auto_aim::energy
         // `now` is the current time; both in seconds on the same clock.
         // `detection_age_override` >= 0 时用它代替 `now - timestamp` 作为提前量：
         // 调用方可以传"平滑后的帧到瞄准延迟"，既保留延迟补偿、又不引入处理耗时抖动。
-        RuneCommand aim(RuneTarget& target, double timestamp, double now,
+        RuneCommand aim(const RuneTarget& target, double timestamp, double now,
                         double detection_age_override = -1.0, int slot_offset = 0);
         // 观测过期时的保底瞄准：瞄圆心，不外推扇叶位置，也不开火。
-        RuneCommand aimCenter(RuneTarget& target, double timestamp, double now,
+        RuneCommand aimCenter(const RuneTarget& target, double timestamp, double now,
                               double detection_age_override = -1.0);
 
         double bulletSpeed() const { return config_.bullet_speed; }
@@ -94,9 +94,11 @@ namespace auto_aim::energy
         void setObservedBladeSwitch(bool value) { observed_switch_ = value; }
 
     private:
-        RuneCommand aimImpl(RuneTarget& target, double timestamp, double now, bool center_only,
-                            double detection_age_override, double phase_offset);
-        bool sendAngles(RuneTarget& target, double predict_time, double bullet_speed,
+        RuneCommand computeAim(const RuneTarget& target, double timestamp, double now,
+                               bool center_only, double detection_age_override,
+                               double phase_offset) const;
+        void commitCommand(RuneCommand& command, double now, bool center_only);
+        bool sendAngles(const RuneTarget& target, double predict_time, double bullet_speed,
                         const Eigen::Vector3d& plate_in_buff, double& yaw_world,
                         double& pitch_up, double& fly_time, double phase_offset) const;
 

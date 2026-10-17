@@ -12,23 +12,27 @@ namespace auto_aim::energy
 {
     RuneAimer::RuneAimer(const RuneAimerConfig& config) : config_(config) {}
 
-    bool RuneAimer::sendAngles(RuneTarget& target, double predict_time, double bullet_speed,
+    bool RuneAimer::sendAngles(const RuneTarget& target, double predict_time, double bullet_speed,
                                const Eigen::Vector3d& plate_in_buff, double& yaw_world,
                                double& pitch_up, double& fly_time, double phase_offset) const
     {
         const double speed = bullet_speed < 10.0 ? 24.0 : bullet_speed;
+        // Prediction mutates the estimator. Every candidate must therefore start
+        // from the same captured state; otherwise the second slot is solved from
+        // a phase already advanced by the first candidate.
+        RuneTarget predicted = target;
 
         // First pass: aim where the plate is now, take its flight time.
-        target.predict(predict_time);
-        Eigen::Vector3d aim_in_world = target.pointBuffToWorld(plate_in_buff, phase_offset);
+        predicted.predict(predict_time);
+        Eigen::Vector3d aim_in_world = predicted.pointBuffToWorld(plate_in_buff, phase_offset);
         double distance = std::hypot(aim_in_world[0], aim_in_world[1]);
         double height = aim_in_world[2];
         const Trajectory first(speed, distance, height, config_.gravity);
         if (first.unsolvable) return false;
 
         // Second pass: re-predict for that flight time and re-solve.
-        target.predict(first.fly_time);
-        aim_in_world = target.pointBuffToWorld(plate_in_buff, phase_offset);
+        predicted.predict(first.fly_time);
+        aim_in_world = predicted.pointBuffToWorld(plate_in_buff, phase_offset);
         distance = std::hypot(aim_in_world[0], aim_in_world[1]);
         height = aim_in_world[2];
         const Trajectory second(speed, distance, height, config_.gravity);
@@ -43,29 +47,35 @@ namespace auto_aim::energy
         return true;
     }
 
-    RuneCommand RuneAimer::aim(RuneTarget& target, double timestamp, double now,
+    RuneCommand RuneAimer::aim(const RuneTarget& target, double timestamp, double now,
                                double detection_age_override, int slot_offset)
     {
         // `slot_offset`：瞄"跟踪片往前 k 个槽位"的那片（参考 sp_vision 的换片逻辑：
         // 命中后直接转到新亮起的那片，而不是继续盯着旧片或退回符心）。
-        RuneCommand command = aimImpl(target, timestamp, now, false, detection_age_override,
-                                      0.0);
-        if (slot_offset == 0 || !command.control) return command;
-        const double phase = slot_offset * 2.0 * kPi / 5.0;
-        RuneCommand shifted = aimImpl(target, timestamp, now, false, detection_age_override,
-                                      phase);
-        return shifted.control ? shifted : command;
+        RuneCommand command =
+            computeAim(target, timestamp, now, false, detection_age_override, 0.0);
+        if (slot_offset != 0) {
+            const double phase = slot_offset * 2.0 * kPi / 5.0;
+            RuneCommand shifted =
+                computeAim(target, timestamp, now, false, detection_age_override, phase);
+            if (shifted.control) command = shifted;
+        }
+        if (command.control) commitCommand(command, now, false);
+        return command;
     }
 
-    RuneCommand RuneAimer::aimCenter(RuneTarget& target, double timestamp, double now,
+    RuneCommand RuneAimer::aimCenter(const RuneTarget& target, double timestamp, double now,
                                      double detection_age_override)
     {
-        return aimImpl(target, timestamp, now, true, detection_age_override, 0.0);
+        RuneCommand command =
+            computeAim(target, timestamp, now, true, detection_age_override, 0.0);
+        if (command.control) commitCommand(command, now, true);
+        return command;
     }
 
-    RuneCommand RuneAimer::aimImpl(RuneTarget& target, double timestamp, double now,
-                                   bool center_only, double detection_age_override,
-                                   double phase_offset)
+    RuneCommand RuneAimer::computeAim(const RuneTarget& target, double timestamp, double now,
+                                      bool center_only, double detection_age_override,
+                                      double phase_offset) const
     {
         RuneCommand command;
         if (target.isUnsolvable()) return command;
@@ -102,6 +112,7 @@ namespace auto_aim::energy
         command.pitch = pitch;
         command.fly_time = fly_time;
         command.aim_roll = target.ekfX().size() > 5 ? target.ekfX()[5] : 0.0;
+        command.control = true;
 
         // Feedforward: probe the same aim solution a little further ahead and
         // difference it. The plate orbits at up to 120 deg/s on the large rune,
@@ -110,18 +121,21 @@ namespace auto_aim::energy
         // MPC planner feeds its controller).
         {
             constexpr double kProbeDt = 0.05;
-            RuneTarget probe = target;
             double probe_yaw = 0.0;
             double probe_pitch = 0.0;
             double probe_fly = 0.0;
-            if (sendAngles(probe, future + kProbeDt, config_.bullet_speed,
+            if (sendAngles(target, future + kProbeDt, config_.bullet_speed,
                            aim_point_in_buff, probe_yaw, probe_pitch, probe_fly,
                            phase_offset)) {
                 command.yaw_velocity = -limitRad(probe_yaw - yaw_world) / kProbeDt;
                 command.pitch_velocity = (probe_pitch - pitch_up) / kProbeDt;
             }
         }
+        return command;
+    }
 
+    void RuneAimer::commitCommand(RuneCommand& command, double now, bool center_only)
+    {
         // 输出角斜率限制：把"重捕获/换片"造成的大回弹摊成平滑过渡，避免云台猛甩。
         // 注意：只在**幅值变化大**时生效，正常跟踪不受影响；换靶时也照常允许
         // （换靶本来就该快速对准，只是不再一步跳到位）。
@@ -135,8 +149,9 @@ namespace auto_aim::energy
 
         const double switch_limit = config_.switch_angle_deg * kPi / 180.0;
         const bool angle_changed =
-            last_angle_valid_ && (std::abs(limitRad(last_yaw_ - yaw)) > switch_limit ||
-                                  std::abs(limitRad(last_pitch_ - pitch)) > switch_limit);
+            last_angle_valid_ &&
+            (std::abs(limitRad(last_yaw_ - command.yaw)) > switch_limit ||
+             std::abs(limitRad(last_pitch_ - command.pitch)) > switch_limit);
 
         // 换叶判定（顺序即优先级）：
         //   1) 状态估计器报告的"观测接管"= 真的换叶（相位/圆心跳变被二次确认）。
@@ -169,8 +184,8 @@ namespace auto_aim::energy
             command.control = true;
         }
         command.blade_switched = switch_fanblade_;
-        last_yaw_ = yaw;
-        last_pitch_ = pitch;
+        last_yaw_ = command.yaw;
+        last_pitch_ = command.pitch;
         last_angle_valid_ = true;
 
         if (!last_fire_initialized_) {
@@ -194,6 +209,5 @@ namespace auto_aim::energy
             command.shoot = true;
             last_fire_time_ = now;
         }
-        return command;
     }
 } // namespace auto_aim::energy

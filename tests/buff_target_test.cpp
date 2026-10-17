@@ -108,8 +108,11 @@ namespace
 
         // The command must point at that predicted plate.
         RuneTarget aim_target = target;
+        const auto state_before_aim = aim_target.ekfX();
         const RuneCommand command = aimer.aim(aim_target, last_time, last_time);
         check(command.control, "small rune: aimer must produce a control command");
+        check((aim_target.ekfX() - state_before_aim).norm() < 1e-12,
+              "small rune: aiming must not mutate the published target state");
         const Eigen::Vector3d plate = truth.platePosition(truth_roll);
         const double expected_yaw = -std::atan2(plate[1], plate[0]);
         const double expected_pitch =
@@ -122,6 +125,19 @@ namespace
         check(std::abs(command.pitch - expected_pitch) < 3.5 * kPi / 180.0,
               "small rune: aim pitch matches the predicted plate (got " +
                   std::to_string((command.pitch - expected_pitch) * 180.0 / kPi) + " deg)");
+
+        // A shifted-slot candidate must be solved from the same base state and
+        // commit the cooldown only once. The old implementation consumed the
+        // shot on the base slot, then returned a shifted command with shoot=false.
+        RuneTarget shifted_target = target;
+        const auto state_before_shift = shifted_target.ekfX();
+        RuneAimer shifted_aimer(aimer_config);
+        const RuneCommand shifted =
+            shifted_aimer.aim(shifted_target, last_time, last_time, -1.0, 1);
+        check(shifted.control, "shifted slot: candidate must produce control");
+        check(shifted.shoot, "shifted slot: the first valid shot must not be consumed by a trial candidate");
+        check((shifted_target.ekfX() - state_before_shift).norm() < 1e-12,
+              "shifted slot: candidate evaluation must not mutate the target");
     }
 
     // 观测到"已激活的那片"（class 1/2）时，估计器的相位必须留在**跟踪槽位**上，

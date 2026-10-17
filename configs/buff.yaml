@@ -98,7 +98,10 @@ rune:
     num_threads: 4
 
   detector:
-    max_lost_frames: 20    # 连续丢失帧数上限（sp_vision LOSE_MAX）
+    # 状态机按**时间**滞回，不按帧数：检测帧率/异步推理变化时，
+    # 固定 20 帧可能代表 0.5~1.0 s，行为会漂移。
+    status_track_hold_s: 0.15   # 短时间内即使观测被拒，仍保持 TRACK
+    status_lost_timeout_s: 0.8  # 超过这段时间没有接受观测才进入 LOST
     gray_threshold: 100    # 圆心精定位的二值化阈值
     dilate_size: 5
     center_mask_ratio: 0.8

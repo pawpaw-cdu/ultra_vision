@@ -325,8 +325,8 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         if (probe_skip_detect && (++probe_frame_index % 2 == 1)) {
             rune = probe_last_rune;
         } else {
-            rune = config.detector.multi_candidate ? detector->detect(frame)
-                                                   : detector->detectBest(frame);
+            rune = config.detector.multi_candidate ? detector->detect(frame, timestamp)
+                                                   : detector->detectBest(frame, timestamp);
             if (probe_skip_detect) probe_last_rune = rune;
         }
         profiler.add("detect", stage_ms(stage_detect_start));
@@ -528,6 +528,49 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             smoothed_lead_latency_s = -1.0;
         }
 
+        // ---- 图像相位（对 72° 取模）：类别命中/命中保持都用它，比 EKF 的 roll
+        //      稳得多，也不会被解缠影响。
+        constexpr double kSlot = 2.0 * CV_PI / 5.0;
+        double aim_phase = std::numeric_limits<double>::quiet_NaN();
+        double aim_phase_full = std::numeric_limits<double>::quiet_NaN();
+        if (rune.has_value() && rune->solved) {
+            const cv::Point2f center = rune->r_center;
+            const cv::Point2f aim = rune->target().center;
+            const double aim_angle = std::atan2(aim.y - center.y, aim.x - center.x);
+            aim_phase = std::fmod(aim_angle, kSlot);
+            if (aim_phase < 0.0) aim_phase += kSlot;
+            aim_phase_full = std::fmod(aim_angle * 180.0 / CV_PI, 360.0);
+            if (aim_phase_full < 0.0) aim_phase_full += 360.0;
+        }
+        {
+            auto_aim::energy::RuneRoundGuard::Frame round_frame;
+            round_frame.solved = rune.has_value() && rune->solved;
+            round_frame.aim_phase = aim_phase;
+            round_frame.blade_class = detector->targetClass();
+            round_frame.scored_hit = scored_hit_this_frame;
+            round_frame.blade_switched =
+                target.bladeSwitched() || slot_snapshot.switch_confirmed;
+            if (round_frame.solved) {
+                const cv::Point2f picked = rune->target().center;
+                const double orbit_px = std::max(1.0, cv::norm(picked - rune->r_center));
+                for (const auto& candidate : detector->lastCandidates()) {
+                    if (candidate.class_id == 0) continue;
+                    if (cv::norm(candidate.center - picked) > 0.35 * orbit_px) {
+                        ++round_frame.active_witness;
+                    }
+                }
+                round_frame.blade_center = picked;
+            }
+            // Update before publishing the aim state: the control thread must use
+            // this frame's hold/switch decision, not the previous frame's.
+            round_guard.update(round_frame, now);
+        }
+        const auto round_snapshot = round_guard.snapshot();
+        scored_hit_this_frame = false;
+        fired_this_frame = false;
+        aim_err_yaw_deg = -1.0;
+        aim_err_pitch_deg = -1.0;
+
         // 瞄准解算：aim_in_control=true 时由控制线程按 100 Hz 用"当前时刻"重算
         // （sp_vision 的 commandgener 结构），这里只发布状态、并取回它算出的指令。
         auto_aim::energy::RuneCommand command;
@@ -546,7 +589,7 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             // 命中保持期内按 sp_vision 的判据转到**新亮起的那片**：在候选里找
             // "按我们的记账还没打过"的那片（优先 class 0），用它的槽位偏移瞄准。
             int retarget_offset = 0;
-            if (retarget_new_blade && round_guard.snapshot().hold) {
+            if (retarget_new_blade && round_snapshot.hold) {
                 // sp_vision：命中后要打的是"新亮起的那片"，由选择器给出（几何判据）。
                 const auto selection =
                     target_selector.select(detector->litBladeCenters());
@@ -557,7 +600,7 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                     }
                 }
             }
-            const bool holding = round_guard.snapshot().hold;
+            const bool holding = round_snapshot.hold;
             aim_input.center_only = (!observation_fresh || holding) && retarget_offset == 0;
             aim_input.slot_offset = retarget_offset;
             // 与帧级闸门同源（见上面的 blade_engageable）：类别说"可打"**并且**
@@ -567,13 +610,11 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             aim_input.engageable =
                 class_engageable &&
                 (retarget_offset != 0 || !aimed_slot_activated);
-            // 注意：与本帧的 round_guard.update() 相比，这里是**上一帧**的结论
-            // （与拆分前的内联顺序一致，发布出去的 hold 晚一帧）。
             aim_input.hold = holding;
             aim_bridge.publish(aim_input);
             command = aim_bridge.lastCommand();
         } else {
-            command = (observation_fresh && !round_guard.snapshot().hold)
+            command = (observation_fresh && !round_snapshot.hold)
                           ? aimer.aim(predicted, timestamp, now, smoothed_lead_latency_s)
                           : aimer.aimCenter(predicted, timestamp, now, smoothed_lead_latency_s);
         }
@@ -594,63 +635,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             aim_roll_deg = predicted.ekfX()[5] * 180.0 / CV_PI;
         }
 
-        // ---- 图像相位（对 72° 取模）：类别命中/命中保持都用它，比 EKF 的 roll
-        //      稳得多，也不会被解缠影响。
-        constexpr double kSlot = 2.0 * CV_PI / 5.0;
-        std::vector<double> lit_phases;
-        double aim_phase = std::numeric_limits<double>::quiet_NaN();
-        // 未取模的图像相位（度，0~360）：用于和 EKF 的相位画在同一条曲线上对比。
-        double aim_phase_full = std::numeric_limits<double>::quiet_NaN();
-        if (rune.has_value() && rune->solved) {
-            const cv::Point2f center = rune->r_center;
-            for (const cv::Point2f& blade : detector->litBladeCenters()) {
-                const double angle = std::atan2(blade.y - center.y, blade.x - center.x);
-                double phase = std::fmod(angle, kSlot);
-                if (phase < 0.0) phase += kSlot;
-                lit_phases.push_back(phase);
-            }
-            const cv::Point2f aim = rune->target().center;
-            const double aim_angle = std::atan2(aim.y - center.y, aim.x - center.x);
-            aim_phase = std::fmod(aim_angle, kSlot);
-            if (aim_phase < 0.0) aim_phase += kSlot;
-            aim_phase_full = std::fmod(aim_angle * 180.0 / CV_PI, 360.0);
-            if (aim_phase_full < 0.0) aim_phase_full += 360.0;
-        }
-        // 一轮记账 / 类别命中（class0 → class1/2）/ 命中保持：全部在
-        // RuneRoundGuard 里（自带头文件说明；可喂序列帧单测）。
-        // 槽位/轮次状态机（rune_activation）已删除：实测与仿真 activated 掩码
-        // 44~86% 不一致，且它的开火闸门一直是关的——sp_vision 也没有这一层。
-        {
-            auto_aim::energy::RuneRoundGuard::Frame round_frame;
-            round_frame.solved = rune.has_value() && rune->solved;
-            round_frame.aim_phase = aim_phase;
-            round_frame.blade_class = detector->targetClass();
-            round_frame.scored_hit = scored_hit_this_frame;
-            // 确认换片（估计器的"观测接管"）：命中后保持的正确解禁信号。
-            // 加上槽位格点的几何换片判据（"点亮的那片换到别的槽位了"）：
-            // 命中后放行的速度不再完全取决于估计器什么时候接管观测（实测 0.4~0.8 s）。
-            round_frame.blade_switched = target.bladeSwitched() || slot_snapshot.switch_confirmed;
-            // "已激活片作证"：命中后机关里至少有一片已激活，它应当被读成 class 1/2、
-            // 且位置与锁定片明显不同（同一片只会有一次检测/一个类别）。看不到它，
-            // 说明"锁定片读成 class 0"很可能是把已激活片误读了 → 不许解禁开火。
-            if (round_frame.solved) {
-                const cv::Point2f picked = rune->target().center;
-                const double orbit_px = std::max(1.0, cv::norm(picked - rune->r_center));
-                for (const auto& candidate : detector->lastCandidates()) {
-                    if (candidate.class_id == 0) continue;
-                    if (cv::norm(candidate.center - picked) > 0.35 * orbit_px) {
-                        ++round_frame.active_witness;
-                    }
-                }
-            }
-            if (round_frame.solved) round_frame.blade_center = rune->target().center;
-            round_guard.update(round_frame, now);
-        }
-        const auto round_snapshot = round_guard.snapshot();
-        scored_hit_this_frame = false;
-        fired_this_frame = false;
-        aim_err_yaw_deg = -1.0;
-        aim_err_pitch_deg = -1.0;
         const bool window_open = round_guard.windowOpen(command.fly_time);
 
         if (!video_mode && command.control) {

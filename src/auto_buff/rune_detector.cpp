@@ -7,12 +7,16 @@
 #include <limits>
 #include <utility>
 
+#include "common/standard_clock.hpp"
+
 namespace auto_aim::energy
 {
     RuneDetector::RuneDetector(const RuneDetectorConfig& config)
         : config_(config), model_(config.model), refiner_(config.refiner),
           plate_refiner_(config.plate_refiner), blade_state_(config.blade_state)
     {
+        lifecycle_.configure(config_.status_track_hold_s,
+                             config_.status_lost_timeout_s);
         // 启动横幅：把"这次到底用了哪套模型/阈值"打出来 —— 现场排查最常见的
         // 误判就是配置与模型不匹配（类别数、点序、输入尺寸、阈值），
         // 所以这几个量必须在日志开头就有据可查。
@@ -34,15 +38,13 @@ namespace auto_aim::energy
                   << " model=" << config.model.model_path << std::endl;
     }
 
-    void RuneDetector::handleLost()
+    void RuneDetector::handleLost(double timestamp)
     {
-        ++lost_;
-        if (lost_ >= config_.max_lost_frames) {
-            status_ = RuneTrackStatus::Lost;
+        lifecycle_.noteRejected(timestamp);
+        last_eval_time_ = timestamp;
+        if (lifecycle_.currentStatus() == RuneTrackStatus::Lost) {
             last_powerrune_ = std::nullopt;
-            return;
         }
-        status_ = RuneTrackStatus::TemporaryLost;
     }
 
     cv::Point2f RuneDetector::estimateRuneCenter(std::vector<FanBlade>& blades,
@@ -487,7 +489,7 @@ namespace auto_aim::energy
                 results.swap(inactive);
             }
             if (results.empty()) {
-                handleLost();
+                handleLost(timestamp);
                 return std::nullopt;
             }
         }
@@ -666,7 +668,7 @@ namespace auto_aim::energy
                                       << best_cost * 180.0 / CV_PI << "deg gate="
                                       << gate * 180.0 / CV_PI << "deg" << std::endl;
                         }
-                        handleLost();
+                        handleLost(timestamp);
                         return std::nullopt;
                     } else {
                         // 单片观测，但它离预测位置很远（≥ 一个槽位量级）。
@@ -718,7 +720,7 @@ namespace auto_aim::energy
                                           << "deg gate " << gate * 180.0 / CV_PI << "deg"
                                           << std::endl;
                             }
-                            handleLost();
+                            handleLost(timestamp);
                             return std::nullopt;
                         }
                     }
@@ -764,7 +766,7 @@ namespace auto_aim::energy
                         switch_votes_ = 0;
                         lock_miss_ = 0;
                     } else {
-                        handleLost();
+                        handleLost(timestamp);
                         return std::nullopt;
                     }
                 } else {
@@ -1002,12 +1004,12 @@ namespace auto_aim::energy
         }
 
         if (!rune.has_value()) {
-            handleLost();
+            handleLost(timestamp);
             return std::nullopt;
         }
 
-        status_ = RuneTrackStatus::Track;
-        lost_ = 0;
+        lifecycle_.noteAccepted(timestamp);
+        last_eval_time_ = timestamp;
         last_powerrune_ = rune;
         // 自适应画布缩放用的尺度：本帧由靶面尺寸反推的轨道半径。用 EMA 平滑，
         // 单帧的靶面抖动（角点噪声）不该让缩放系数来回跳。
@@ -1061,16 +1063,22 @@ namespace auto_aim::energy
 
     std::optional<PowerRune> RuneDetector::detect(const cv::Mat& bgr_image, double timestamp)
     {
+        const double effective_timestamp =
+            timestamp > 0.0 ? timestamp : StandardClock::nowSeconds();
         updateCanvasScale(bgr_image);
-        std::optional<PowerRune> rune = buildRune(model_.detect(bgr_image), bgr_image, timestamp);
+        std::optional<PowerRune> rune =
+            buildRune(model_.detect(bgr_image), bgr_image, effective_timestamp);
         lost_frames_ = rune.has_value() ? 0 : lost_frames_ + 1;
         return rune;
     }
 
     std::optional<PowerRune> RuneDetector::detectBest(const cv::Mat& bgr_image, double timestamp)
     {
+        const double effective_timestamp =
+            timestamp > 0.0 ? timestamp : StandardClock::nowSeconds();
         updateCanvasScale(bgr_image);
-        std::optional<PowerRune> rune = buildRune(model_.detectBest(bgr_image), bgr_image, timestamp);
+        std::optional<PowerRune> rune =
+            buildRune(model_.detectBest(bgr_image), bgr_image, effective_timestamp);
         lost_frames_ = rune.has_value() ? 0 : lost_frames_ + 1;
         return rune;
     }

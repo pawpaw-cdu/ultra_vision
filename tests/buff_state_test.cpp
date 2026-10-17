@@ -15,6 +15,7 @@
 #include "auto_buff/rune_aim_fallback.hpp"
 #include "auto_buff/rune_orbit_fit.hpp"
 #include "auto_buff/rune_timebase.hpp"
+#include "auto_buff/rune_track_lifecycle.hpp"
 
 namespace
 {
@@ -52,6 +53,31 @@ namespace
               "timebase: a plausible exposure timestamp is preferred");
         check(selectFrameTimestampUs(local, local + 1'000'000) == local,
               "timebase: an implausibly offset source clock falls back to local time");
+    }
+
+    void testTrackLifecycleHysteresis()
+    {
+        RuneTrackLifecycle lifecycle(0.15, 0.8);
+        lifecycle.noteAccepted(10.0);
+        check(lifecycle.currentStatus() == RuneTrackStatus::Track,
+              "track lifecycle: accepted observation enters TRACK");
+
+        lifecycle.noteRejected(10.05);
+        check(lifecycle.currentStatus() == RuneTrackStatus::Track,
+              "track lifecycle: one rejected association does not leave TRACK");
+
+        lifecycle.noteRejected(10.20);
+        check(lifecycle.currentStatus() == RuneTrackStatus::TemporaryLost,
+              "track lifecycle: sustained rejection enters TEMP_LOST after hold time");
+
+        lifecycle.noteRejected(10.81);
+        check(lifecycle.currentStatus() == RuneTrackStatus::Lost,
+              "track lifecycle: prolonged rejection eventually enters LOST");
+
+        lifecycle.noteAccepted(11.0);
+        check(lifecycle.currentStatus() == RuneTrackStatus::Track &&
+                  lifecycle.rejectedFrames() == 0,
+              "track lifecycle: a new accepted observation resets the lifecycle");
     }
 
     // ---- 回合记账 / 开火窗口 -------------------------------------------------
@@ -589,6 +615,7 @@ namespace
 int main()
 {
     testFrameTimestampSelection();
+    testTrackLifecycleHysteresis();
     testRoundWindow();
     testBladeJumpRestartsRound();
     testClassHitNeedsInactiveFirst();
