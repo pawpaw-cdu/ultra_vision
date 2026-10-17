@@ -596,8 +596,36 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                     target_selector.select(detector->litBladeCenters());
                 if (selection.valid) {
                     int offset = 0;
-                    if (slot_lattice.slotOffsetForCandidate(selection.center, offset)) {
+                    if (slot_snapshot.slot_id >= 0 &&
+                        slot_lattice.slotOffsetForCandidate(selection.center, offset)) {
+                        const int slot = (slot_snapshot.slot_id + offset) % 5;
+                        if (offset != 0 &&
+                            !slot_snapshot.activated[static_cast<std::size_t>(slot)]) {
+                            retarget_offset = offset;
+                        }
+                    }
+                }
+                // The image target selector can still return the already-hit
+                // blade. Validate every bright candidate against the slot map and
+                // prefer a non-current, unactivated slot.
+                if (retarget_offset == 0 && aimed_slot_activated &&
+                    slot_snapshot.slot_id >= 0) {
+                    for (const cv::Point2f& candidate : detector->litBladeCenters()) {
+                        int offset = 0;
+                        if (!slot_lattice.slotOffsetForCandidate(candidate, offset) ||
+                            offset == 0) {
+                            continue;
+                        }
+                        const int slot = (slot_snapshot.slot_id + offset) % 5;
+                        if (slot_snapshot.activated[static_cast<std::size_t>(slot)]) continue;
                         retarget_offset = offset;
+                        if (std::getenv("ULTRA_VISION_RUNE_DEBUG")) {
+                            std::cerr << "[rune pick] current slot "
+                                      << slot_snapshot.slot_id
+                                      << " already hit; using visible slot " << slot
+                                      << " (+" << offset << ")" << std::endl;
+                        }
+                        break;
                     }
                 }
                 // 网络没有给出新片时，按五槽记账选一个尚未激活的槽位作为几何
@@ -628,7 +656,9 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                 }
             }
             const bool holding = round_snapshot.hold;
-            aim_input.center_only = (!observation_fresh || holding) && retarget_offset == 0;
+            aim_input.center_only =
+                (!observation_fresh || holding || aimed_slot_activated) &&
+                retarget_offset == 0;
             aim_input.slot_offset = retarget_offset;
             // 与帧级闸门同源（见上面的 blade_engageable）：类别说"可打"**并且**
             // 我们自己的槽位记账没有把这一槽标成已激活，才允许这帧开火。
