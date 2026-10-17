@@ -149,6 +149,14 @@ namespace auto_aim::energy
         // 336 帧 class0 / 0 帧 class1），所以这一路在实拍上永远无用。
         // 打开后行为回到旧版，供 A/B。
         bool rescue_missing_inactive = false;
+        // Soft candidate factors (A/B): replace the hard geometry/class gates with
+        // a robust weighted cost over phase, class, network confidence, pattern
+        // evidence and lock continuity. Default off until validated in simulation.
+        bool soft_candidate_selection = false;
+        double soft_class_penalty = 0.40;
+        double soft_pattern_weight = 0.15;
+        double soft_confidence_weight = 0.10;
+        double soft_lock_weight = 0.25;
         // "这一片可以打"的**锁存时间**（秒）：类别的/几何的可打证据只要出现过，
         // 就在这段时间内保持可打，不必**本帧**再看到一次。
         //

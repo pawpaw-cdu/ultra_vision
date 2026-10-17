@@ -5,6 +5,7 @@
 #include <Eigen/Dense>
 #include <iostream>
 #include <limits>
+#include <string>
 #include <utility>
 
 #include "common/standard_clock.hpp"
@@ -15,6 +16,9 @@ namespace auto_aim::energy
         : config_(config), model_(config.model), refiner_(config.refiner),
           plate_refiner_(config.plate_refiner), blade_state_(config.blade_state)
     {
+        if (const char* soft = std::getenv("ULTRA_VISION_RUNE_SOFT_CANDIDATE")) {
+            config_.soft_candidate_selection = std::string(soft) != "0";
+        }
         lifecycle_.configure(config_.status_track_hold_s,
                              config_.status_lost_timeout_s);
         // 启动横幅：把"这次到底用了哪套模型/阈值"打出来 —— 现场排查最常见的
@@ -33,6 +37,7 @@ namespace auto_aim::energy
                   << " kpt_conf=" << config.model.keypoint_confidence_threshold
                   << " min_kpt=" << config.model.min_valid_keypoints
                   << " require_inactive_class=" << (config.require_inactive_class ? 1 : 0)
+                  << " soft_candidate=" << (config.soft_candidate_selection ? 1 : 0)
                   << " pad_adaptive=" << (config.canvas_adaptive ? 1 : 0)
                   << " pad_target_orbit_px=" << config.canvas_target_orbit_px
                   << " model=" << config.model.model_path << std::endl;
@@ -353,7 +358,8 @@ namespace auto_aim::energy
         // 这里做等价的事：先用**运动模型预测的相位**在全部候选里找"连续的那片"，
         // 找到就只保留它，类别随后不再参与。
         std::optional<std::size_t> continuous_index;
-        if (config_.phase_assoc.enabled && assoc_valid_ && timestamp > 0.0) {
+        if (!config_.soft_candidate_selection &&
+            config_.phase_assoc.enabled && assoc_valid_ && timestamp > 0.0) {
             const double dt = timestamp - assoc_time_;
             if (dt > 1e-4 && dt <= config_.phase_assoc.max_gap_s) {
                 const double predicted = assoc_phase_ + assoc_rate_ * dt;
@@ -386,7 +392,59 @@ namespace auto_aim::energy
                           << std::endl;
             }
         }
-        if (pose_layout && config_.require_inactive_class) {
+        if (pose_layout && config_.soft_candidate_selection && !results.empty()) {
+            const double dt = assoc_valid_ && timestamp > 0.0
+                ? timestamp - assoc_time_ : -1.0;
+            const bool phase_predictable =
+                config_.phase_assoc.enabled && assoc_valid_ && dt > 1e-4 &&
+                dt <= config_.phase_assoc.max_gap_s;
+            const double predicted_phase =
+                phase_predictable ? assoc_phase_ + assoc_rate_ * dt : 0.0;
+
+            std::size_t chosen = 0;
+            double best_score = std::numeric_limits<double>::max();
+            for (std::size_t index = 0; index < results.size(); ++index) {
+                const double phase = candidate_phase(results[index]);
+                double phase_cost = 0.0;
+                if (phase_predictable && std::isfinite(phase)) {
+                    const double residual = std::abs(limitRad(phase - predicted_phase));
+                    const double scale = std::max(0.05, config_.phase_assoc.tolerance_rad);
+                    phase_cost = std::log1p((residual / scale) * (residual / scale));
+                } else if (!std::isfinite(phase)) {
+                    phase_cost = 1.0;
+                }
+                const double class_cost =
+                    results[index].class_id == 0 ? 0.0 : config_.soft_class_penalty;
+                const double confidence_reward =
+                    config_.soft_confidence_weight * results[index].prob;
+                const double pattern_reward =
+                    config_.soft_pattern_weight *
+                    std::max(0.0, last_candidates_[index].pattern_pvd);
+                double lock_cost = 0.0;
+                if (has_lock_) {
+                    lock_cost = config_.soft_lock_weight *
+                        std::min(1.0, cv::norm(results[index].center - locked_center_) /
+                                          std::max(1.0, config_.lock_break_px));
+                }
+                const double score =
+                    phase_cost + class_cost + lock_cost - confidence_reward - pattern_reward;
+                if (score < best_score) {
+                    best_score = score;
+                    chosen = index;
+                }
+            }
+            if (std::getenv("ULTRA_VISION_RUNE_DEBUG")) {
+                std::cerr << "[rune pick] soft factors: best=" << chosen
+                          << " cost=" << best_score
+                          << " phase_predictable=" << (phase_predictable ? 1 : 0) << std::endl;
+            }
+            std::vector<RuneModel::Object> keep;
+            keep.push_back(results[chosen]);
+            results.swap(keep);
+            picked_by_geometry_ = true;
+        }
+        if (!config_.soft_candidate_selection &&
+            pose_layout && config_.require_inactive_class) {
             std::vector<RuneModel::Object> inactive;
             inactive.reserve(results.size());
             for (const RuneModel::Object& candidate : results) {

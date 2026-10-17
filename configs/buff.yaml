@@ -207,6 +207,14 @@ rune:
     # 而实拍上新模型从不输出 class 1/2（buff_three 336 帧 class0 / 0 帧 class1），
     # 这一路在实拍上永远用不到。见 docs §50。
     rescue_missing_inactive: false
+    # 软约束候选选择（A/B）：不再"类别不对/几何不连续就整帧丢掉"，而是把
+    # 相位残差、网络类别、置信度、靶面图案和锁定连续性作为可交易的鲁棒代价。
+    # 默认关闭，先在仿真里对照开启后的目标切换和计分命中率。
+    soft_candidate_selection: false
+    soft_class_penalty: 0.40
+    soft_pattern_weight: 0.15
+    soft_confidence_weight: 0.10
+    soft_lock_weight: 0.25
     # "这一片可以打"的锁存时间（秒）：类别的/几何的可打证据出现过就保持这么久，
     # 不必本帧再看到一次。4 片已激活时网络对最后那片的检出率只有 ~19%，而开火
     # 请求是 0.7 s 节流的脉冲，不锁存就几乎对不上：实测最后一片窗口里"本帧可打"
