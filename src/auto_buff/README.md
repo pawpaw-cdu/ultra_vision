@@ -104,6 +104,7 @@
 | 何时换叶/开火 | `rune_aimer.cpp` | `switch_angle_deg`、`fire_gap_time`、云台到位判据 |
 | 本轮是否有效 | `rune_round_guard.cpp` | 点亮窗口 + 类别命中（class0→class1/2）+ 命中保持 |
 | 瞄的是第几片 / 哪几片已打 | `rune_slot_lattice.cpp` | 单扇叶锚定 + 每帧重新对齐（丢帧不重锚）+ 投影槽位最近邻归属 + 投票阈值 + 回合复位 |
+| 命中后选择下一片 | `rune_blade_selector.cpp` | 排除命中片 + 远离命中位置 + class0/亮片软打分 + 连续帧确认 |
 | 计划槽位能否开火 | `rune_fire_gate.cpp` | 计划物理槽 + 激活掩码 + 该槽 class0/class1 证据 + 短暂锁存 |
 | 丢目标时云台怎么办 | `rune_aim_fallback.cpp` | 最后已知符心（1.5 s 内）优先，兜底回标定位姿 |
 | 是否卡开火 | `RuneFireGate` + `rune_round_guard.cpp` + `rune_aim_bridge.cpp` | 独立火控准入、`hold`、云台到位误差 |

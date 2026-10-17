@@ -26,6 +26,7 @@
 #include "control/gimbal_controller.hpp"
 #include "control/aim_signal_filter.hpp"
 #include "auto_buff/rune_aimer.hpp"
+#include "auto_buff/rune_blade_selector.hpp"
 #include "auto_buff/rune_aim_bridge.hpp"
 #include "auto_buff/rune_diag.hpp"
 #include "auto_buff/rune_fire_gate.hpp"
@@ -36,7 +37,6 @@
 #include "auto_buff/rune_slot_factor_graph.hpp"
 #include "auto_buff/rune_slot_lattice.hpp"
 #include "auto_buff/rune_timebase.hpp"
-#include "auto_buff/rune_target_selector.hpp"
 #include "auto_buff/rune_blade_finder.hpp"
 #include "auto_buff/rune_config.hpp"
 #include "auto_buff/rune_detector.hpp"
@@ -198,6 +198,7 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
     // 观测层只提供几何/相位；开火资格由独立状态机按计划槽位判定。
     auto_aim::energy::RuneFireGate fire_gate(
         auto_aim::energy::RuneFireGate::Config{config.detector.engageable_latch_s});
+    auto_aim::energy::RuneBladeSelector blade_selector;
     // 丢目标时的云台策略（停在最后已知符心 / 兜底回标定位姿），见其头文件。
     auto_aim::energy::RuneAimFallback fallback(
         auto_aim::energy::RuneAimFallback::Config{config.park_on_center_max_age_s,
@@ -205,8 +206,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
     static const bool dark_channel_enabled =
         std::getenv("ULTRA_VISION_RUNE_DARK_CHANNEL") != nullptr &&
         std::string(std::getenv("ULTRA_VISION_RUNE_DARK_CHANNEL")) != "0";
-    // 选 target（sp_vision 规则）：亮片数 + 像素距离，不依赖网络类别。
-    auto_aim::energy::RuneTargetSelector target_selector;
     auto_aim::energy::RuneBladeFinder blade_finder;
     // ---- 扇叶槽位格点（1..5 号位的记账）------------------------------------
     // 状态与规则都在 rune_slot_lattice.{hpp,cpp}：单扇叶构建 5 槽、每帧重新
@@ -238,6 +237,7 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                      "(5 slots x 32 activation masks)" << std::endl;
     }
     int fired_slot_id = -1;                  // 命中瞬间开火的那个槽位（喂回格点）
+    cv::Point2f last_fired_center{0.0f, 0.0f};
     auto_aim::energy::rune_diag::RuneTelemetry telemetry_stats;
     // 本地时钟 - 仿真时钟（见遥测解析处），用于把 CSV 的时间轴对齐到仿真。
 
@@ -246,16 +246,12 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         std::getenv("ULTRA_VISION_RUNE_PIXEL_RESIDUAL") == nullptr ||
         std::string(std::getenv("ULTRA_VISION_RUNE_PIXEL_RESIDUAL")) != "0";
     // R 标那条量测要不要用（ULTRA_VISION_RUNE_PIXEL_RMARK=0 关掉）
-    // 命中后转到"新亮片"（sp_vision 的判据）：ULTRA_VISION_RUNE_RETARGET_NEW_BLADE=0 可关
     // 确认换片后重建估计器（三家参考都这么做）：ULTRA_VISION_RUNE_REBUILD_ON_SWITCH=0 可关
     // 实测：开它（每次确认换片都重建）记账漂移更大（前后半移位差 3~4 格 vs 1 格），
     // 端到端相当。默认关，开关保留（ULTRA_VISION_RUNE_REBUILD_ON_SWITCH=1 打开）。
     static const bool rebuild_on_switch =
         std::getenv("ULTRA_VISION_RUNE_REBUILD_ON_SWITCH") != nullptr &&
         std::string(std::getenv("ULTRA_VISION_RUNE_REBUILD_ON_SWITCH")) != "0";
-    static const bool retarget_new_blade =
-        std::getenv("ULTRA_VISION_RUNE_RETARGET_NEW_BLADE") == nullptr ||
-        std::string(std::getenv("ULTRA_VISION_RUNE_RETARGET_NEW_BLADE")) != "0";
     static const bool pixel_use_rmark =
         std::getenv("ULTRA_VISION_RUNE_PIXEL_RMARK") == nullptr ||
         std::string(std::getenv("ULTRA_VISION_RUNE_PIXEL_RMARK")) != "0";
@@ -485,14 +481,14 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             (factor_snapshot.target_observed || unactivated_slots == 1);
         const bool use_factor_retarget =
             factor_target_usable && factor_retarget_offset != 0;
-        const int planned_slot =
+        int planned_slot =
             use_factor_retarget ? factor_target_slot : slot_snapshot.slot_id;
         // 开火资格在观测/估计器更新之后由 RuneFireGate 单独计算。
         static const bool block_hit_slot = [] {
             const char* env = std::getenv("ULTRA_VISION_RUNE_BLOCK_HIT_SLOT");
             return env == nullptr ? true : std::string(env) != "0";
         }();
-        const bool aimed_slot_activated =
+        bool aimed_slot_activated =
             config.fire_block_on_hit_slot && block_hit_slot && planned_slot >= 0 &&
             slot_activation[static_cast<std::size_t>(planned_slot)];
         // 观测到的是**已激活**的那片（class 1/2）时告诉估计器：它相对跟踪槽位偏了
@@ -589,11 +585,56 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             config.aimer.observation_life_s * (rune_is_small ? 2.25 : 1.0);
         const bool observation_fresh =
             last_solved_time > 0.0 && (now - last_solved_time) <= observation_life;
+        // ---- 扇叶选择：命中后搜索“下一片”，与观测片分离 -------------------
+        std::vector<auto_aim::energy::RuneBladeSelector::Candidate> mapped_candidates;
+        const float orbit_px =
+            (rune.has_value() && rune->solved)
+                ? static_cast<float>(cv::norm(rune->target().center - rune->r_center))
+                : 0.0f;
+        if (!predicted.isUnsolvable() && slot_snapshot.slot_id >= 0) {
+            const float lit_tolerance = std::max(3.0f, 0.05f * orbit_px);
+            for (const auto& candidate : detector->lastCandidates()) {
+                int offset = 0;
+                if (!slot_lattice.slotOffsetForCandidate(candidate.center, offset)) continue;
+                auto_aim::energy::RuneBladeSelector::Candidate mapped;
+                mapped.class_id = candidate.class_id;
+                mapped.center = candidate.center;
+                mapped.slot = (slot_snapshot.slot_id + offset) % 5;
+                for (const cv::Point2f& lit : detector->litBladeCenters()) {
+                    if (cv::norm(lit - candidate.center) <= lit_tolerance) {
+                        mapped.lit = true;
+                        break;
+                    }
+                }
+                mapped_candidates.push_back(mapped);
+            }
+        }
+        auto_aim::energy::RuneBladeSelector::Frame selector_frame;
+        selector_frame.solved = !predicted.isUnsolvable();
+        selector_frame.observation_fresh = observation_fresh;
+        selector_frame.hold = round_guard.snapshot().hold;
+        selector_frame.scored_hit = scored_hit_this_frame;
+        selector_frame.observed_slot = slot_snapshot.slot_id;
+        selector_frame.hit_slot = fired_slot_id;
+        selector_frame.hit_center = last_fired_center;
+        selector_frame.orbit_px = orbit_px;
+        selector_frame.activated = slot_activation;
+        selector_frame.candidates = std::move(mapped_candidates);
+        blade_selector.update(selector_frame, now);
+        const auto blade_selection = blade_selector.snapshot();
+        if (blade_selection.retargeting && blade_selection.valid) {
+            planned_slot = blade_selection.planned_slot;
+            aimed_slot_activated =
+                config.fire_block_on_hit_slot && block_hit_slot && planned_slot >= 0 &&
+                slot_activation[static_cast<std::size_t>(planned_slot)];
+        }
+
         // ---- 火控边界：只判断“计划槽位能不能开火” --------------------------
         // 观测层可以因为几何连续性选择 class1/2 的已激活片，这不会影响模型构造。
         // 火控层独立读取**计划槽位**上的类别证据和激活掩码；两者不能互相代替。
-        int planned_slot_class = -1;
-        if (!predicted.isUnsolvable() && slot_snapshot.slot_id >= 0 && planned_slot >= 0) {
+        int planned_slot_class = blade_selection.target_class;
+        if (planned_slot_class < 0 && !predicted.isUnsolvable() &&
+            slot_snapshot.slot_id >= 0 && planned_slot >= 0) {
             for (const auto& candidate : detector->lastCandidates()) {
                 int offset = 0;
                 if (!slot_lattice.slotOffsetForCandidate(candidate.center, offset)) continue;
@@ -614,7 +655,7 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         fire_frame.planned_slot = planned_slot;
         fire_frame.planned_slot_class = planned_slot_class;
         if (config.fire_block_on_hit_slot && block_hit_slot) {
-        fire_frame.activated = slot_activation;
+            fire_frame.activated = slot_activation;
         }
         fire_gate.update(fire_frame, now);
         const auto fire_snapshot = fire_gate.snapshot();
@@ -686,78 +727,13 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             aim_input.frame_time = timestamp;
             aim_input.latency = smoothed_lead_latency_s;
             aim_input.valid = !predicted.isUnsolvable();
-            // 命中后保持期间**瞄符心**而不是继续盯着刚打过的片：
-            //   * 那片已经激活，打它不计分（实测 66% 的命中如此）；
-            //   * 符心是静止点，等新靶亮起时"符心 → 新靶"的摆动最多半个回
-            //     转半径，而"旧靶 → 对面新靶"可能差一整片（小符 6 m 处约 13°）。
-            // 命中保持期内按 sp_vision 的判据转到**新亮起的那片**：在候选里找
-            // "按我们的记账还没打过"的那片（优先 class 0），用它的槽位偏移瞄准。
-            int retarget_offset = use_factor_retarget ? factor_retarget_offset : 0;
-            const bool retarget_needed = round_snapshot.hold || aimed_slot_activated;
-            if (retarget_new_blade && retarget_needed && retarget_offset == 0) {
-                // sp_vision：命中后要打的是"新亮起的那片"，由选择器给出（几何判据）。
-                const auto selection =
-                    target_selector.select(detector->litBladeCenters());
-                if (selection.valid) {
-                    int offset = 0;
-                    if (slot_snapshot.slot_id >= 0 &&
-                        slot_lattice.slotOffsetForCandidate(selection.center, offset)) {
-                        const int slot = (slot_snapshot.slot_id + offset) % 5;
-                        if (offset != 0 &&
-                            !slot_activation[static_cast<std::size_t>(slot)]) {
-                            retarget_offset = offset;
-                        }
-                    }
-                }
-                // The image target selector can still return the already-hit
-                // blade. Validate every bright candidate against the slot map and
-                // prefer a non-current, unactivated slot.
-                if (retarget_offset == 0 && aimed_slot_activated &&
-                    slot_snapshot.slot_id >= 0) {
-                    for (const cv::Point2f& candidate : detector->litBladeCenters()) {
-                        int offset = 0;
-                        if (!slot_lattice.slotOffsetForCandidate(candidate, offset) ||
-                            offset == 0) {
-                            continue;
-                        }
-                        const int slot = (slot_snapshot.slot_id + offset) % 5;
-                        if (slot_activation[static_cast<std::size_t>(slot)]) continue;
-                        retarget_offset = offset;
-                        if (std::getenv("ULTRA_VISION_RUNE_DEBUG")) {
-                            std::cerr << "[rune pick] current slot "
-                                      << slot_snapshot.slot_id
-                                      << " already hit; using visible slot " << slot
-                                      << " (+" << offset << ")" << std::endl;
-                        }
-                        break;
-                    }
-                }
-                // 网络没有给出新片时，按五槽记账选一个尚未激活的槽位作为几何
-                // 兜底。只在候选唯一时采用，避免在 3~4 个可选槽之间随机跳。
-                if (retarget_offset == 0 && aimed_slot_activated &&
-                    slot_snapshot.slot_id >= 0) {
-                    int candidate_slot = -1;
-                    int candidate_offset = 0;
-                    int candidate_count = 0;
-                    for (int step = 1; step < 5; ++step) {
-                        const int slot = (slot_snapshot.slot_id + step) % 5;
-                        if (slot_activation[static_cast<std::size_t>(slot)]) {
-                            continue;
-                        }
-                        candidate_slot = slot;
-                        candidate_offset = step;
-                        ++candidate_count;
-                    }
-                    if (candidate_count == 1) {
-                        retarget_offset = candidate_offset;
-                        if (std::getenv("ULTRA_VISION_RUNE_DEBUG")) {
-                            std::cerr << "[rune pick] slot " << slot_snapshot.slot_id
-                                      << " already hit; retarget geometric slot "
-                                      << candidate_slot << " (+" << candidate_offset
-                                      << ")" << std::endl;
-                        }
-                    }
-                }
+            // 扇叶选择已经在观测/模型更新后完成。这里只把“计划物理槽”
+            // 转成相对观测槽的瞄准偏移；不再混入亮度/类别/几何的兜底选择。
+            int retarget_offset = 0;
+            if (slot_snapshot.slot_id >= 0 && planned_slot >= 0 &&
+                planned_slot != slot_snapshot.slot_id) {
+                retarget_offset =
+                    ((planned_slot - slot_snapshot.slot_id) % 5 + 5) % 5;
             }
             const bool holding = round_snapshot.hold;
             commanded_slot_offset = retarget_offset;
@@ -892,6 +868,14 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                         slot_snapshot.slot_id >= 0
                             ? (slot_snapshot.slot_id + commanded_slot_offset) % 5
                             : -1;
+                    if (slot_snapshot.slot_centers_valid &&
+                        commanded_slot_offset >= 0 && commanded_slot_offset < 5) {
+                        last_fired_center =
+                            slot_snapshot.slot_centers[
+                                static_cast<std::size_t>(commanded_slot_offset)];
+                    } else if (rune.has_value()) {
+                        last_fired_center = rune->target().center;
+                    }
                     // 记录"真的发了这一发"，供离线归因（CSV 列 fired）。
                     fired_this_frame = true;
                 } else if (command.shoot && fire_enabled && !window_open) {
@@ -1021,6 +1005,10 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             sources.fire_slot_class = fire_snapshot.planned_slot_class;
             sources.fire_slot_activated = fire_snapshot.slot_activated;
             sources.fire_latched = fire_snapshot.latched;
+            sources.blade_searching = blade_selection.searching;
+            sources.blade_selected_slot = blade_selection.planned_slot;
+            sources.blade_selected_class = blade_selection.target_class;
+            sources.blade_selected_confirmed = blade_selection.confirmed;
             sources.aim_pixel = aim_pixel;
             sources.aim_world = aim_world;
             sources.aim_roll_deg = aim_roll_deg;

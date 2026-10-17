@@ -19,6 +19,7 @@
 #include "auto_buff/rune_timebase.hpp"
 #include "auto_buff/rune_track_lifecycle.hpp"
 #include "auto_buff/rune_fire_gate.hpp"
+#include "auto_buff/rune_blade_selector.hpp"
 
 namespace
 {
@@ -642,6 +643,74 @@ namespace
               "fire gate: the activation mask vetoes firing even with class-0 evidence");
     }
 
+    void testBladeSelectorSearchesNextBladeAfterHit()
+    {
+        RuneBladeSelector selector;
+        RuneBladeSelector::Frame frame;
+        frame.solved = true;
+        frame.observation_fresh = true;
+        frame.scored_hit = true;
+        frame.observed_slot = 0;
+        frame.hit_slot = 0;
+        frame.hit_center = {0.0f, 0.0f};
+        frame.orbit_px = 60.0f;
+        frame.activated[0] = true;
+        frame.candidates = {
+            {1, {8.0f, 0.0f}, 0, false},     // already hit: must be excluded
+            {0, {72.0f, 0.0f}, 1, true},     // newly highlighted blade
+            {1, {-72.0f, 0.0f}, 4, false},   // active-looking neighbour
+        };
+
+        selector.update(frame, 1.0);
+        check(selector.snapshot().searching && !selector.snapshot().valid,
+              "blade selector: a new slot needs temporal confirmation");
+
+        frame.scored_hit = false;
+        frame.hold = true;
+        selector.update(frame, 1.033);
+        const auto selected = selector.snapshot();
+        check(selected.valid && selected.confirmed && selected.planned_slot == 1,
+              "blade selector: class-0 foreign-slot candidate becomes the next target");
+        check(selected.retarget_offset == 1,
+              "blade selector: output is expressed relative to the observed slot");
+
+        frame.hold = false;
+        frame.activated[1] = true;
+        selector.update(frame, 1.066);
+        check(selector.snapshot().searching || !selector.snapshot().valid,
+              "blade selector: activation of the selected slot restarts the search");
+    }
+
+    void testBladeSelectorRejectsNearAndActivatedCandidates()
+    {
+        RuneBladeSelector selector;
+        RuneBladeSelector::Frame frame;
+        frame.solved = true;
+        frame.observation_fresh = true;
+        frame.scored_hit = true;
+        frame.observed_slot = 0;
+        frame.hit_slot = 0;
+        frame.hit_center = {0.0f, 0.0f};
+        frame.orbit_px = 60.0f;
+        frame.activated[0] = true;
+        frame.activated[2] = true;
+        frame.candidates = {
+            {0, {20.0f, 0.0f}, 1, true},    // too close to the hit blade
+            {0, {80.0f, 0.0f}, 2, true},    // already activated
+        };
+        selector.update(frame, 2.0);
+        selector.update(frame, 2.033);
+        check(!selector.snapshot().valid,
+              "blade selector: near-hit and activated candidates cannot be selected");
+
+        frame.scored_hit = false;
+        frame.activated = {true, true, true, true, false};
+        frame.candidates.clear();
+        selector.update(frame, 2.066);
+        check(selector.snapshot().valid && selector.snapshot().planned_slot == 4,
+              "blade selector: a unique remaining slot is a geometric fallback");
+    }
+
     // ---- 丢目标时的云台策略 ---------------------------------------------------
     void testFallbackParkAndRecenter()
     {
@@ -793,6 +862,8 @@ int main()
     testSlotFactorActivationDecayAndReset();
     testSlotFactorAnchorMapping();
     testFireGateIsIndependentFromObservation();
+    testBladeSelectorSearchesNextBladeAfterHit();
+    testBladeSelectorRejectsNearAndActivatedCandidates();
     testFallbackParkAndRecenter();
     testOrbitFit();
     if (failures == 0) {

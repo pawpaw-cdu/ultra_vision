@@ -46,6 +46,10 @@ namespace auto_aim::energy::rune_diag
         int fire_slot_class = -1;
         int fire_slot_activated = 0;
         int fire_latched = 0;
+        int blade_searching = 0;
+        int blade_selected_slot = -1;
+        int blade_selected_class = -1;
+        int blade_selected_confirmed = 0;
 
         bool state_valid = false;
         double state_yaw = 0.0;      // state[0]
@@ -234,6 +238,10 @@ namespace auto_aim::energy::rune_diag
         int fire_slot_class = -1;
         bool fire_slot_activated = false;
         bool fire_latched = false;
+        bool blade_searching = false;
+        int blade_selected_slot = -1;
+        int blade_selected_class = -1;
+        bool blade_selected_confirmed = false;
         std::string slot_scores;           // 5 个槽位方向的"靶面存在度"（暗片通道）
         int slot_present_mask = 0;
         int slot_found_count = 0;          // 实测到的靶面数（暗片通道）

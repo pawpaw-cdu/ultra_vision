@@ -394,6 +394,10 @@ namespace auto_aim::energy::rune_diag
         row.fire_slot_class = sources.fire_slot_class;
         row.fire_slot_activated = sources.fire_slot_activated ? 1 : 0;
         row.fire_latched = sources.fire_latched ? 1 : 0;
+        row.blade_searching = sources.blade_searching ? 1 : 0;
+        row.blade_selected_slot = sources.blade_selected_slot;
+        row.blade_selected_class = sources.blade_selected_class;
+        row.blade_selected_confirmed = sources.blade_selected_confirmed ? 1 : 0;
         row.aim_err_yaw_deg = sources.aim_err_yaw_deg;
         row.aim_err_pitch_deg = sources.aim_err_pitch_deg;
         row.diff_ok = sources.diff.ok;
@@ -437,7 +441,8 @@ namespace auto_aim::energy::rune_diag
                     "slot_factor_mask,slot_factor_assigned,slot_factor_target_observed,"
                     "slot_factor_margin,roi_active,roi_fallback,roi_x,roi_y,roi_w,roi_h,"
                     "model_letterbox_scale,gimbal_frozen,fire_slot,fire_slot_class,"
-                    "fire_slot_activated,fire_latched\n";
+                    "fire_slot_activated,fire_latched,blade_searching,blade_selected_slot,"
+                    "blade_selected_class,blade_selected_confirmed\n";
         return true;
     }
 
@@ -519,7 +524,9 @@ namespace auto_aim::energy::rune_diag
                  << row.roi_fallback << ',' << row.roi_x << ',' << row.roi_y << ','
                  << row.roi_w << ',' << row.roi_h << ',' << row.model_letterbox_scale << ','
                  << row.gimbal_frozen << ',' << row.fire_slot << ',' << row.fire_slot_class
-                 << ',' << row.fire_slot_activated << ',' << row.fire_latched << '\n';
+                 << ',' << row.fire_slot_activated << ',' << row.fire_latched << ','
+                 << row.blade_searching << ',' << row.blade_selected_slot << ','
+                 << row.blade_selected_class << ',' << row.blade_selected_confirmed << '\n';
     }
 
 
