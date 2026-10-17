@@ -19,28 +19,39 @@ namespace auto_aim::energy
         if (const char* soft = std::getenv("ULTRA_VISION_RUNE_SOFT_CANDIDATE")) {
             config_.soft_candidate_selection = std::string(soft) != "0";
         }
+        if (const char* adaptive = std::getenv("ULTRA_VISION_RUNE_ADAPTIVE_SCALE")) {
+            config_.canvas_adaptive = std::string(adaptive) != "0";
+        }
+        if (const char* recenter = std::getenv("ULTRA_VISION_RUNE_ROI_CENTER")) {
+            config_.canvas_recenter = std::string(recenter) != "0";
+        }
+        if (const char* fallback = std::getenv("ULTRA_VISION_RUNE_ROI_FALLBACK")) {
+            config_.canvas_recenter_fallback = std::string(fallback) != "0";
+        }
         lifecycle_.configure(config_.status_track_hold_s,
                              config_.status_lost_timeout_s);
         // 启动横幅：把"这次到底用了哪套模型/阈值"打出来 —— 现场排查最常见的
         // 误判就是配置与模型不匹配（类别数、点序、输入尺寸、阈值），
         // 所以这几个量必须在日志开头就有据可查。
-        std::cout << "[rune config] output_layout=" << config.model.output_layout
-                  << " classes=" << config.model.num_classes
-                  << " keypoints=" << config.model.num_keypoints
-                  << (config.model.keypoints_have_confidence ? "(with conf)" : "")
-                  << " input=" << config.model.input_size << "x"
-                  << (config.model.input_height > 0 ? config.model.input_height
-                                                    : config.model.input_size)
-                  << " pad_scale=" << config.model.input_pad_scale
-                  << " input_scale=" << config.model.input_scale
-                  << " score_thr=" << config.model.confidence_threshold
-                  << " kpt_conf=" << config.model.keypoint_confidence_threshold
-                  << " min_kpt=" << config.model.min_valid_keypoints
-                  << " require_inactive_class=" << (config.require_inactive_class ? 1 : 0)
-                  << " soft_candidate=" << (config.soft_candidate_selection ? 1 : 0)
-                  << " pad_adaptive=" << (config.canvas_adaptive ? 1 : 0)
-                  << " pad_target_orbit_px=" << config.canvas_target_orbit_px
-                  << " model=" << config.model.model_path << std::endl;
+        std::cout << "[rune config] output_layout=" << config_.model.output_layout
+                  << " classes=" << config_.model.num_classes
+                  << " keypoints=" << config_.model.num_keypoints
+                  << (config_.model.keypoints_have_confidence ? "(with conf)" : "")
+                  << " input=" << config_.model.input_size << "x"
+                  << (config_.model.input_height > 0 ? config_.model.input_height
+                                                    : config_.model.input_size)
+                  << " pad_scale=" << config_.model.input_pad_scale
+                  << " input_scale=" << config_.model.input_scale
+                  << " score_thr=" << config_.model.confidence_threshold
+                  << " kpt_conf=" << config_.model.keypoint_confidence_threshold
+                  << " min_kpt=" << config_.model.min_valid_keypoints
+                  << " require_inactive_class=" << (config_.require_inactive_class ? 1 : 0)
+                  << " soft_candidate=" << (config_.soft_candidate_selection ? 1 : 0)
+                  << " pad_adaptive=" << (config_.canvas_adaptive ? 1 : 0)
+                  << " pad_recenter=" << (config_.canvas_recenter ? 1 : 0)
+                  << " roi_fallback=" << (config_.canvas_recenter_fallback ? 1 : 0)
+                  << " pad_target_orbit_px=" << config_.canvas_target_orbit_px
+                  << " model=" << config_.model.model_path << std::endl;
     }
 
     void RuneDetector::handleLost(double timestamp)
@@ -1131,13 +1142,50 @@ namespace auto_aim::energy
         model_.setCanvasScale(canvas_scale_);
     }
 
+    void RuneDetector::prepareModelInput(const cv::Mat& bgr_image)
+    {
+        updateCanvasScale(bgr_image);
+        const bool have_recenter =
+            config_.canvas_recenter && last_powerrune_.has_value() &&
+            canvas_scale_ <= config_.canvas_recenter_max_scale &&
+            lost_frames_ < std::max(1, config_.canvas_sweep_after_lost);
+        if (have_recenter) {
+            model_.setCanvasCenter(last_powerrune_->r_center, true);
+        } else {
+            model_.setCanvasCenter({0.0f, 0.0f}, false);
+        }
+    }
+
+    std::vector<RuneModel::Object> RuneDetector::detectModelObjects(
+        const cv::Mat& bgr_image, bool best_only)
+    {
+        prepareModelInput(bgr_image);
+        std::vector<RuneModel::Object> objects =
+            best_only ? model_.detectBest(bgr_image) : model_.detect(bgr_image);
+        last_roi_active_ = model_.lastRoiActive();
+        last_roi_crop_ = model_.lastRoiCrop();
+        last_roi_fallback_ = false;
+
+        // ROI 裁剪把视野缩小了。如果这一帧一个候选都没有，立即用整幅图重跑
+        // 一次，避免"裁偏一次 → 丢失 → 再裁偏"的正反馈。只有真正启用 ROI
+        // 时才会多付这一次推理。
+        if (objects.empty() && last_roi_active_ && config_.canvas_recenter_fallback) {
+            last_roi_fallback_ = true;
+            model_.setCanvasCenter({0.0f, 0.0f}, false);
+            objects = best_only ? model_.detectBest(bgr_image) : model_.detect(bgr_image);
+            last_roi_active_ = model_.lastRoiActive();
+            last_roi_crop_ = model_.lastRoiCrop();
+        }
+        return objects;
+    }
+
     std::optional<PowerRune> RuneDetector::detect(const cv::Mat& bgr_image, double timestamp)
     {
         const double effective_timestamp =
             timestamp > 0.0 ? timestamp : StandardClock::nowSeconds();
-        updateCanvasScale(bgr_image);
+        std::vector<RuneModel::Object> objects = detectModelObjects(bgr_image, false);
         std::optional<PowerRune> rune =
-            buildRune(model_.detect(bgr_image), bgr_image, effective_timestamp);
+            buildRune(std::move(objects), bgr_image, effective_timestamp);
         lost_frames_ = rune.has_value() ? 0 : lost_frames_ + 1;
         return rune;
     }
@@ -1146,9 +1194,9 @@ namespace auto_aim::energy
     {
         const double effective_timestamp =
             timestamp > 0.0 ? timestamp : StandardClock::nowSeconds();
-        updateCanvasScale(bgr_image);
+        std::vector<RuneModel::Object> objects = detectModelObjects(bgr_image, true);
         std::optional<PowerRune> rune =
-            buildRune(model_.detectBest(bgr_image), bgr_image, effective_timestamp);
+            buildRune(std::move(objects), bgr_image, effective_timestamp);
         lost_frames_ = rune.has_value() ? 0 : lost_frames_ + 1;
         return rune;
     }

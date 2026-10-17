@@ -91,6 +91,13 @@ namespace auto_aim::energy::rune_diag
         int slot_factor_assigned = 0;
         int slot_factor_target_observed = 0;
         double slot_factor_margin = 0.0;
+        int roi_active = 0;
+        int roi_fallback = 0;
+        int roi_x = 0;
+        int roi_y = 0;
+        int roi_w = 0;
+        int roi_h = 0;
+        double model_letterbox_scale = 0.0;
         // 回转椭圆拟合（测距用）与靶面压扁程度：长尾误差的归因量（见 §13.3）。
         int orbit_ok = 0;
         double orbit_semi_major_px = 0.0;

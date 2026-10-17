@@ -98,6 +98,12 @@ namespace auto_aim::energy
         config.detector.canvas_scale_max = model["input_pad_scale_max"].as<double>(2.6);
         config.detector.canvas_sweep_after_lost =
             model["input_pad_sweep_after_lost"].as<int>(6);
+        config.detector.canvas_recenter =
+            model["input_pad_recenter"].as<bool>(false);
+        config.detector.canvas_recenter_max_scale =
+            model["input_pad_recenter_max_scale"].as<double>(0.90);
+        config.detector.canvas_recenter_fallback =
+            model["input_pad_recenter_fallback"].as<bool>(true);
         if (const YAML::Node sweep = model["input_pad_sweep"]) {
             std::vector<double> scales;
             for (const auto& value : sweep) scales.push_back(value.as<double>());

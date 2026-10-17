@@ -51,6 +51,15 @@ namespace auto_aim::energy
         // 还没拿到尺度（或连续丢帧超过它）时，按这个阶梯轮流试，直到重新捕获。
         int canvas_sweep_after_lost = 6;
         std::vector<double> canvas_sweep_scales{1.0, 1.5, 0.7, 2.1, 0.5, 1.8};
+        // 数字变焦时把裁剪中心从画面中心改成上一帧预测的符心。只有
+        // input_pad_scale < 1（实际发生裁剪）时生效；灰边扩画布路径不变。
+        bool canvas_recenter = false;
+        // 只有裁剪比例明显小于 1 时才值得移动裁剪中心。接近全幅的裁剪
+        // 一旦为了贴边而平移，很容易切掉机关；0.9 表示最多裁掉 10%。
+        double canvas_recenter_max_scale = 0.90;
+        // ROI 内没有候选时，同帧回退整幅重跑一次。默认开，但只在 ROI 真正
+        // 裁剪时触发；连续评估推理耗时可用环境变量关闭。
+        bool canvas_recenter_fallback = true;
         // 我们自己的颜色：0=红（掩膜看 R−B）1=蓝（看 B−R）。
         int our_color = 0;
         // 相位关联选片（见下面 PhaseAssocConfig 的说明）。
@@ -288,9 +297,16 @@ namespace auto_aim::energy
         // 两片，激活状态机需要看到全部才谈得上二次窗口。
         const std::vector<cv::Point2f>& litBladeCenters() const { return lit_centers_; }
         double latencyMs() const { return model_.latencyMs(); }
+        bool roiActive() const { return last_roi_active_; }
+        cv::Rect lastRoiCrop() const { return last_roi_crop_; }
+        bool roiFallback() const { return last_roi_fallback_; }
+        double modelLetterboxScale() const { return model_.lastLetterboxScale(); }
         const RuneModel& model() const { return model_; }
 
     private:
+        void prepareModelInput(const cv::Mat& bgr_image);
+        std::vector<RuneModel::Object> detectModelObjects(const cv::Mat& bgr_image,
+                                                          bool best_only);
         // multi_blade_hub：由多片扇叶的"圆心→靶心"射线求交得到的圆心（可选，
         // 见 buildRune）。比单片的 R 标点稳，优先使用。
         cv::Point2f estimateRuneCenter(std::vector<FanBlade>& blades, const cv::Mat& bgr_image,
@@ -315,6 +331,9 @@ namespace auto_aim::energy
         double canvas_scale_ = 1.0;
         int canvas_sweep_index_ = 0;
         int lost_frames_ = 0;
+        bool last_roi_active_ = false;
+        cv::Rect last_roi_crop_{};
+        bool last_roi_fallback_ = false;
         cv::Point2f last_blade_rmark_{0.0f, 0.0f};
         cv::Point2f last_blade_center_{0.0f, 0.0f};
         // 相位关联状态（不依赖 EKF）：上一次关联到的相位/时刻 + 自估角速度。

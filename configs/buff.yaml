@@ -95,6 +95,12 @@ rune:
     input_pad_scale_max: 2.6
     input_pad_sweep_after_lost: 6
     input_pad_sweep: [1.0, 1.5, 0.7, 2.1, 0.5, 1.8]
+    # ROI A/B：数字变焦时以预测符心裁剪，而不是永远裁画面中心。
+    # 默认关；环境变量 ULTRA_VISION_RUNE_ROI_CENTER=1 可临时打开。
+    # ROI 内没有任何候选时同帧回退整幅；ULTRA_VISION_RUNE_ROI_FALLBACK=0 可关。
+    input_pad_recenter: false
+    input_pad_recenter_max_scale: 0.90
+    input_pad_recenter_fallback: true
     num_threads: 4
 
   detector:

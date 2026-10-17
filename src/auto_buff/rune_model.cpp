@@ -27,6 +27,11 @@ namespace auto_aim::energy
         ov::CompiledModel compiled;
         ov::InferRequest request;
         bool input_is_uint8 = false;
+        cv::Point2f canvas_center{0.0f, 0.0f};
+        bool canvas_center_valid = false;
+        bool last_roi_active = false;
+        cv::Rect last_roi_crop{};
+        double last_letterbox_scale = 1.0;
     };
 
     RuneModel::RuneModel(const RuneModelConfig& config) : impl_(std::make_unique<Impl>())
@@ -89,11 +94,23 @@ namespace auto_aim::energy
         impl_->config.input_pad_scale = scale;
     }
 
+    void RuneModel::setCanvasCenter(const cv::Point2f& center, bool valid)
+    {
+        impl_->canvas_center = center;
+        impl_->canvas_center_valid = valid;
+    }
+
+    bool RuneModel::lastRoiActive() const { return impl_->last_roi_active; }
+    cv::Rect RuneModel::lastRoiCrop() const { return impl_->last_roi_crop; }
+    double RuneModel::lastLetterboxScale() const { return impl_->last_letterbox_scale; }
+
     std::vector<RuneModel::Object> RuneModel::detect(const cv::Mat& image)
     {
         const RuneModelConfig& config = impl_->config;
         std::vector<Object> objects;
         if (image.empty()) return objects;
+        impl_->last_roi_active = false;
+        impl_->last_roi_crop = {};
 
         const int input_size = config.input_size;
         const int input_height = config.input_height > 0 ? config.input_height : input_size;
@@ -123,17 +140,30 @@ namespace auto_aim::energy
                 std::max(2, static_cast<int>(std::lround(image.cols * canvas_scale)));
             const int crop_height =
                 std::max(2, static_cast<int>(std::lround(image.rows * canvas_scale)));
-            const int crop_x = (image.cols - crop_width) / 2;
-            const int crop_y = (image.rows - crop_height) / 2;
+            const double center_x = impl_->canvas_center_valid
+                                        ? impl_->canvas_center.x
+                                        : (image.cols - 1) * 0.5;
+            const double center_y = impl_->canvas_center_valid
+                                        ? impl_->canvas_center.y
+                                        : (image.rows - 1) * 0.5;
+            const int crop_x = std::clamp(
+                static_cast<int>(std::lround(center_x - crop_width * 0.5)),
+                0, std::max(0, image.cols - crop_width));
+            const int crop_y = std::clamp(
+                static_cast<int>(std::lround(center_y - crop_height * 0.5)),
+                0, std::max(0, image.rows - crop_height));
             canvas = image(cv::Rect(crop_x, crop_y, crop_width, crop_height)).clone();
             canvas_offset_x = -static_cast<double>(crop_x);
             canvas_offset_y = -static_cast<double>(crop_y);
+            impl_->last_roi_active = impl_->canvas_center_valid;
+            impl_->last_roi_crop = cv::Rect(crop_x, crop_y, crop_width, crop_height);
         } else {
             canvas = image;
         }
 
         const double scale = std::min(static_cast<double>(input_size) / canvas.cols,
                                       static_cast<double>(input_height) / canvas.rows);
+        impl_->last_letterbox_scale = scale;
         const int scaled_width = std::max(1, static_cast<int>(std::lround(canvas.cols * scale)));
         const int scaled_height = std::max(1, static_cast<int>(std::lround(canvas.rows * scale)));
         // fit_to_window_letterbox: centre the padded frame, which is what the

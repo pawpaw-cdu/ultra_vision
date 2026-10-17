@@ -93,11 +93,18 @@ namespace auto_aim::energy
         /// 检测器用上一帧量到的轨道半径把它算出来，好让机关在 640 宽的输入里
         /// 始终保持训练尺度（见 rune_detector 的 updateCanvasScale）。
         void setCanvasScale(double scale);
+        /// @brief 数字变焦时的裁剪中心（原图像素）。
+        ///        只有 canvas scale < 1（实际发生裁剪）时生效；>1 的灰边画布
+        ///        仍以整幅图为中心。未设置时会退回原来的中心裁剪。
+        void setCanvasCenter(const cv::Point2f& center, bool valid = true);
 
         double latencyMs() const { return latency_ms_; }
         // 本帧所有 anchor 里最高的类别分（不管是否过阈值）：用来区分"网络没看见"
         // 和"看见了但被阈值筛掉"——这是判断该不该动阈值的关键数据。
         float lastBestScore() const { return last_best_score_; }
+        bool lastRoiActive() const;
+        cv::Rect lastRoiCrop() const;
+        double lastLetterboxScale() const;
 
 
     private:
