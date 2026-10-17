@@ -97,18 +97,19 @@
 
 | 决策 | 在哪 | 依据 |
 |---|---|---|
-| 用哪些候选 | `rune_detector.cpp` | `score_threshold`、`min_plate_radius_px`、`require_inactive_class` |
+| 用哪些候选构造模型 | `rune_detector.cpp` | 置信度、靶面几何、相位连续、亮度和锁定滞回；**类别不决定是否建模** |
 | 锁哪一片 | 同上 | 亮点判据 + `lock_break_px` / `lock_max_miss` 滞回 |
 | 圆心/相位 | `rune_solver.cpp` | PnP 双解选择 + `phase_rad` 几何相位 |
 | 状态是否可用 | `rune_target.cpp` | EKF 野值门 + 发散保护（小符 |ω|≈π/3） |
 | 何时换叶/开火 | `rune_aimer.cpp` | `switch_angle_deg`、`fire_gap_time`、云台到位判据 |
 | 本轮是否有效 | `rune_round_guard.cpp` | 点亮窗口 + 类别命中（class0→class1/2）+ 命中保持 |
 | 瞄的是第几片 / 哪几片已打 | `rune_slot_lattice.cpp` | 单扇叶锚定 + 每帧重新对齐（丢帧不重锚）+ 投影槽位最近邻归属 + 投票阈值 + 回合复位 |
+| 计划槽位能否开火 | `rune_fire_gate.cpp` | 计划物理槽 + 激活掩码 + 该槽 class0/class1 证据 + 短暂锁存 |
 | 丢目标时云台怎么办 | `rune_aim_fallback.cpp` | 最后已知符心（1.5 s 内）优先，兜底回标定位姿 |
-| 是否卡开火 | `rune_round_guard.cpp` + `rune_aim_bridge.cpp` | 类别闸门、`hold`、云台到位误差（控制线程判定） |
+| 是否卡开火 | `RuneFireGate` + `rune_round_guard.cpp` + `rune_aim_bridge.cpp` | 独立火控准入、`hold`、云台到位误差 |
 
-> 注意：这条链上"打哪一片/能不能打"的判断分散在上述多处，是当前最主要的可维护性
-> 与可解释性风险（见 `docs/energy_rune_architecture.md` §5 A3）。
+> 观测/建模与开火准入已经分开：class1/2 的已激活片可以参与五槽模型和估计器更新，
+> 但只有 `RuneFireGate` 判定计划槽位可打时才会发出 FIRE。
 
 ## 6. 配置（`configs/buff.yaml`）
 
@@ -116,7 +117,7 @@
 |---|---|---|
 | `camera` | 内参、畸变、标定分辨率、自动缩放 | 与仿真 640×480 / FOV45° 对齐 |
 | `model` | 路径、输入尺寸、布局、类别数、关键点数、阈值、`input_scale`、`input_pad_scale` | `input_scale=0.00392`（0~1）；`plate_point_order` 标定物点顺序 |
-| `detector` | 选靶与锁定参数、`multi_candidate`、`require_inactive_class`、圆心搜索兜底 | 亮点判据窗口就在这一段的代码里 |
+| `detector` | 类无关的观测选片与锁定参数、`multi_candidate`、圆心搜索兜底 | 火控准入不在这里 |
 | `geometry` | 回转半径、靶面半宽、深度校正、距离闸门、相机→云台外参 | 物理量，实车需重测 |
 | `aimer` | 提前时间、弹速、云台角包线、换叶阈值、开火节流 | `fire_gap_time` 当前 0.7 s |
 | `activation` | 窗口、总目标数、`gate_fire` | 规则层 |
@@ -173,14 +174,12 @@ cmake --build build_rune -j
   `input_pad_adaptive: true` 可以自动把它钉住（实测与手调的各自最优等价），
   但**默认关**：默认 `input_pad_scale: 1.6` 按实拍定，跑仿真时用
   `--pad 1.3` 或把 target 设 52。详见 git 历史里的 `docs/energy_rune_issue_audit.md` §47。
-- **新模型对"已激活"外观是盲的**：实拍里从"打完一片"那一刻起，网络对已激活片的
-  类别分长期 ≤0.01（不是被阈值筛掉），只对未激活目标片出框。所以已激活片的几何
-  只能靠槽位格点/相位外推补，不能指望"网络给 ROI + 经典判状态"。见 §48。
-- **没有 class0 观测时不再"救回"已激活片**（`rescue_missing_inactive: false`）：
-  三家参考实现（sp_vision 按亮片数+位置连续性选靶、rm_vision_core 在 inactive 为空
-  时本帧不给目标、RP-26Rune 要求至少一片未激活才做整符配准）都不允许已激活片成为
-  瞄准目标。改前多片已激活时观测跳变 0.9/0.3 次每秒、改后 0.3/0.1；仿真小符有效
-  命中 17 → 21、大符 9 → 12，实拍 buff_three 跟踪率 81% 不变。见 §49/§50。
+- **已激活外观的类别召回不稳定**：部分实拍段里网络对已激活片几乎不给框，仿真固定
+  相机下则能稳定给出 class1。因此激活片可以作为几何观测，但类别不能单独承担
+  建模门或火控门。
+- **已激活片可以参与观测和建模，但不能获得开火许可**。观测层不再使用 class0
+  硬过滤；`RuneFireGate` 只看计划槽位的激活掩码和类别证据。固定相机实验里，
+  软观测把激活窗口内的新模型构造率从 25~31% 提升到 90.4%。
 - **只剩一片未激活时打不出去**（现场"差临门一脚"）已修（§51）：①几何连续优先于
   类别过滤（参考实现都不让类别决定目标）；②开火可打性锁存 `engageable_latch_s: 0.8`
   （4 片已激活时网络对最后一片的检出率只有 ~19%，而开火请求是 0.7 s 节流的脉冲）；

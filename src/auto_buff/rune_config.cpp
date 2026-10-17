@@ -182,8 +182,6 @@ namespace auto_aim::energy
             config.detector.plate_refiner.max_angle_diff_deg =
                 plate["max_angle_diff_deg"].as<double>(25.0);
         }
-        config.detector.require_inactive_class =
-            detector["require_inactive_class"].as<bool>(true);
         // 扇叶状态分类（经典特征，华南虎/SCUT 的面积区间思路；见 rune_blade_state.hpp）。
         // 阈值必须按实拍标注帧标定 —— 编译同一份 rune_blade_state.cpp 的路径量。
         if (const YAML::Node state = detector["blade_state"]) {
@@ -196,14 +194,8 @@ namespace auto_aim::energy
             blade_state.arm_samples = state["arm_samples"].as<int>(9);
             blade_state.arm_lit_fraction = state["arm_lit_fraction"].as<double>(0.5);
         }
-        config.detector.inactive_class_margin =
-            detector["inactive_class_margin"].as<double>(1.3);
-        config.detector.rescue_missing_inactive =
-            detector["rescue_missing_inactive"].as<bool>(false);
         config.detector.soft_candidate_selection =
             detector["soft_candidate_selection"].as<bool>(false);
-        config.detector.soft_class_penalty =
-            detector["soft_class_penalty"].as<double>(0.40);
         config.detector.soft_pattern_weight =
             detector["soft_pattern_weight"].as<double>(0.15);
         config.detector.soft_confidence_weight =

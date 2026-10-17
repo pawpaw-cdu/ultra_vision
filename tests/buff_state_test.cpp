@@ -18,6 +18,7 @@
 #include "auto_buff/rune_plate_pattern.hpp"
 #include "auto_buff/rune_timebase.hpp"
 #include "auto_buff/rune_track_lifecycle.hpp"
+#include "auto_buff/rune_fire_gate.hpp"
 
 namespace
 {
@@ -608,6 +609,39 @@ namespace
               "slot factor: candidate offsets are mapped back to physical slot ids");
     }
 
+    void testFireGateIsIndependentFromObservation()
+    {
+        RuneFireGate::Config config;
+        config.engageable_latch_s = 0.2;
+        RuneFireGate gate(config);
+
+        RuneFireGate::Frame frame;
+        frame.solved = true;
+        frame.observation_fresh = true;
+        frame.planned_slot = 2;
+        frame.planned_slot_class = 1;
+        gate.update(frame, 1.0);
+        check(!gate.engageable(),
+              "fire gate: a class-1 observation builds geometry but cannot authorise a shot");
+
+        frame.planned_slot_class = 0;
+        gate.update(frame, 1.1);
+        check(gate.engageable(), "fire gate: class-0 evidence authorises the planned slot");
+
+        frame.planned_slot_class = -1;
+        gate.update(frame, 1.2);
+        check(gate.engageable(), "fire gate: recent class-0 evidence survives a short miss");
+
+        gate.update(frame, 1.31);
+        check(!gate.engageable(), "fire gate: stale class-0 evidence expires");
+
+        frame.planned_slot_class = 0;
+        frame.activated[2] = true;
+        gate.update(frame, 1.4);
+        check(!gate.engageable(),
+              "fire gate: the activation mask vetoes firing even with class-0 evidence");
+    }
+
     // ---- 丢目标时的云台策略 ---------------------------------------------------
     void testFallbackParkAndRecenter()
     {
@@ -758,6 +792,7 @@ int main()
     testSlotFactorSwitchesAwayFromActivatedTarget();
     testSlotFactorActivationDecayAndReset();
     testSlotFactorAnchorMapping();
+    testFireGateIsIndependentFromObservation();
     testFallbackParkAndRecenter();
     testOrbitFit();
     if (failures == 0) {

@@ -17,6 +17,7 @@ set(AUTO_BUFF_SOURCES
     rune_input.cpp
     rune_slot_lattice.cpp
     rune_slot_factor_graph.cpp
+    rune_fire_gate.cpp
     rune_round_guard.cpp
     rune_aim_fallback.cpp
     rune_target_selector.cpp

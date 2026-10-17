@@ -133,50 +133,17 @@ namespace auto_aim::energy
         std::string plate_point_order = "0,1,4,3";
         // plate_point_order 解析结果（见 RuneDetectorConfig::plate_point_order）。
         std::vector<int> plate_point_indices{0, 1, 4, 3};
-        // 只把"未激活(class 0)"的扇叶当目标（深大参考实现的语义）。关掉后
-        // 任何类别的候选都能被选中/开火——仿真里网络对自绘图案的分类不可靠时
-        // 用它可以兜底，但实车务必打开（否则会一直打已经打过的靶）。
-        bool require_inactive_class = true;
-        // 类别优先 + 亮点裕度：非 class0 候选的亮点分要超过最佳 class0 候选这么多倍，
-        // 才认为"网络把点亮片判错了类"并采信它（离线实测 23% 帧存在误判）。
-        double inactive_class_margin = 1.3;
-        // 没有 class0（未激活）观测时，是否允许"救回"一帧：改去追一个 class!=0 的
-        // 候选（旧行为，靠亮点裕度判）。
-        //
-        // **默认关**，因为三家参考实现都不这么做：
-        //   * sp_vision（tasks/auto_buff/buff_type.cpp 的 PowerRune）：亮片数不变时
-        //     目标 = 离上一帧目标最近的那片，完全不看类别；新亮一片时 = 离旧亮片
-        //     最远的那片；
-        //   * rm_vision_core（rune_detector_calc.cpp）：`filterInactiveFan` 在
-        //     inactive 为空时直接返回 false（本帧不给目标）；active 集合只当
-        //     **几何参考**给槽位打分，从不当作瞄准目标；
-        //   * RP-26Rune（PowerRunePlane.cpp）：`construct_rune_correspondence` 要求
-        //     "至少有一个可用的未激活扇叶"，否则整帧不做配准。
-        // 实测（2026-09-24）：多片已激活时，网络会在相邻亮片之间逐帧换框，
-        // 这一路"救回"就是把瞄准点拖到已激活片上的直接原因（30 s 里 >40° 的
-        // 观测跳变 26 次）；而实拍上新模型**从不输出 class 1/2**（buff_three:
-        // 336 帧 class0 / 0 帧 class1），所以这一路在实拍上永远无用。
-        // 打开后行为回到旧版，供 A/B。
-        bool rescue_missing_inactive = false;
-        // Soft candidate factors (A/B): replace the hard geometry/class gates with
-        // a robust weighted cost over phase, class, network confidence, pattern
-        // evidence and lock continuity. Default off until validated in simulation.
+        // Observation selection is deliberately class-agnostic: class 0/1/2 all
+        // build the same five-slot geometry. Fire eligibility is handled by
+        // RuneFireGate in the runner, never by rejecting an observation here.
+        // Soft candidate factors (A/B) combine phase, confidence, pattern and
+        // lock continuity. They intentionally contain no class term.
         bool soft_candidate_selection = false;
-        double soft_class_penalty = 0.40;
         double soft_pattern_weight = 0.15;
         double soft_confidence_weight = 0.10;
         double soft_lock_weight = 0.25;
-        // "这一片可以打"的**锁存时间**（秒）：类别的/几何的可打证据只要出现过，
-        // 就在这段时间内保持可打，不必**本帧**再看到一次。
-        //
-        // 为什么需要：4 片已激活时，网络对剩下那片的检出率掉到 ~19%（模型对
-        // "已激活外观"本来就弱，§48），而开火请求是 0.7 s 节流的脉冲 ——
-        // 两者几乎对不上。实测最后一片的窗口里（hold=0、2.5 s 弹道窗口内），
-        // "本帧有 class0 或几何观测"只占 6~10% 的帧，2.5 s 里只打出 1~2 发，
-        // 本轮随后超时失败（现场"最后一片怎么都打不出去"）。
-        // 估计器在这段时间是**外推**的（小符转速恒定 60°/s），瞄点仍然在预测的
-        // 扇叶上（实测瞄准点落在扇叶上而非符心的帧占 96~99%），所以放行是安全的。
-        // 保护仍然在：命中后保持（hold）、弹道窗口、以及"没有解算结果就瞄符心"。
+        // Fire-side latch: how long positive inactive evidence for one physical
+        // slot remains usable while that blade is temporarily missed.
         double engageable_latch_s = 0.8;
     };
 

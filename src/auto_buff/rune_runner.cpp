@@ -28,6 +28,7 @@
 #include "auto_buff/rune_aimer.hpp"
 #include "auto_buff/rune_aim_bridge.hpp"
 #include "auto_buff/rune_diag.hpp"
+#include "auto_buff/rune_fire_gate.hpp"
 #include "auto_buff/rune_input.hpp"
 #include "auto_buff/rune_runner.hpp"
 #include "auto_buff/rune_aim_fallback.hpp"
@@ -194,8 +195,9 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             config.post_hit_hold_max_s, config.post_hit_require_active_witness});
     // 上一次成功解算出观测的本地时间（用于"观测寿命"判定，见 RuneAimer）。
     double last_solved_time = -1.0;
-    // "这片可以打"的锁存截止时刻（见 RuneDetectorConfig::engageable_latch_s）。
-    double target_engageable_until = 0.0;
+    // 观测层只提供几何/相位；开火资格由独立状态机按计划槽位判定。
+    auto_aim::energy::RuneFireGate fire_gate(
+        auto_aim::energy::RuneFireGate::Config{config.detector.engageable_latch_s});
     // 丢目标时的云台策略（停在最后已知符心 / 兜底回标定位姿），见其头文件。
     auto_aim::energy::RuneAimFallback fallback(
         auto_aim::energy::RuneAimFallback::Config{config.park_on_center_max_age_s,
@@ -485,23 +487,7 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             factor_target_usable && factor_retarget_offset != 0;
         const int planned_slot =
             use_factor_retarget ? factor_target_slot : slot_snapshot.slot_id;
-        // ---- 开火闸门的两个"可打"条件（帧级，本帧唯一口径）-------------------
-        // (1) 类别：五点模型里只有 class 0（未激活）才是本轮目标；
-        // (2) 槽位记账：我们**自己记的**"这一槽已经打过"同样不许开火。
-        // 第 (2) 条以前一直关着（记账靠网络 class 1/2，新模型下这条路是死的，§48）；
-        // 现在记账改成几何来源（换片 ⇒ 被换下的那片已激活，见 rune_slot_lattice），
-        // 才重新有资格进闸门。A/B：ULTRA_VISION_RUNE_BLOCK_HIT_SLOT=0/1。
-        const bool class_aware = config.detector.model.output_layout == "v8_pose_5kpt";
-        // 按几何连续性选出来的目标不受类别闸门约束：只剩一片未激活时网络经常把
-        // 已激活片标成 class0、把目标标成 class1，用类别卡会把火挡死（实测
-        // "最后一片怎么都打不出去"）。这种情况下的保护交给"命中后保持"与槽位记账。
-        if (rune.has_value() && rune->solved &&
-            (detector->targetClass() == 0 || detector->targetPickedByGeometry())) {
-            target_engageable_until = now + config.detector.engageable_latch_s;
-        }
-        const bool class_engageable =
-            !class_aware || !config.detector.require_inactive_class ||
-            target_engageable_until > now;
+        // 开火资格在观测/估计器更新之后由 RuneFireGate 单独计算。
         static const bool block_hit_slot = [] {
             const char* env = std::getenv("ULTRA_VISION_RUNE_BLOCK_HIT_SLOT");
             return env == nullptr ? true : std::string(env) != "0";
@@ -603,6 +589,36 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             config.aimer.observation_life_s * (rune_is_small ? 2.25 : 1.0);
         const bool observation_fresh =
             last_solved_time > 0.0 && (now - last_solved_time) <= observation_life;
+        // ---- 火控边界：只判断“计划槽位能不能开火” --------------------------
+        // 观测层可以因为几何连续性选择 class1/2 的已激活片，这不会影响模型构造。
+        // 火控层独立读取**计划槽位**上的类别证据和激活掩码；两者不能互相代替。
+        int planned_slot_class = -1;
+        if (!predicted.isUnsolvable() && slot_snapshot.slot_id >= 0 && planned_slot >= 0) {
+            for (const auto& candidate : detector->lastCandidates()) {
+                int offset = 0;
+                if (!slot_lattice.slotOffsetForCandidate(candidate.center, offset)) continue;
+                const int candidate_slot = (slot_snapshot.slot_id + offset) % 5;
+                if (candidate_slot != planned_slot) continue;
+                if (candidate.class_id == 0) {
+                    planned_slot_class = 0;
+                    break;
+                }
+                if (planned_slot_class < 0) {
+                    planned_slot_class = candidate.class_id;
+                }
+            }
+        }
+        auto_aim::energy::RuneFireGate::Frame fire_frame;
+        fire_frame.solved = !predicted.isUnsolvable();
+        fire_frame.observation_fresh = observation_fresh;
+        fire_frame.planned_slot = planned_slot;
+        fire_frame.planned_slot_class = planned_slot_class;
+        if (config.fire_block_on_hit_slot && block_hit_slot) {
+        fire_frame.activated = slot_activation;
+        }
+        fire_gate.update(fire_frame, now);
+        const auto fire_snapshot = fire_gate.snapshot();
+        const bool fire_engageable = fire_gate.engageable();
         // 提前量用的"帧到瞄准延迟"：优先用曝光时刻做主时钟；瞬时值抖动大，做 EMA。
         if (config.aimer.frame_time_from_exposure) {
             const double instant = std::max(0.0, now - timestamp);
@@ -753,9 +769,7 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             // 我们自己的槽位记账没有把这一槽标成已激活，才允许这帧开火。
             // 需要重新瞄一片（retarget_offset != 0）时，瞄的是**另一片**：被记账
             // 挡掉的是"跟踪槽位"而不是真正要打的那片，这时只按类别判。
-            aim_input.engageable =
-                class_engageable &&
-                (retarget_offset != 0 || !aimed_slot_activated);
+            aim_input.engageable = fire_engageable;
             aim_input.hold = holding;
             aim_bridge.publish(aim_input);
             command = aim_bridge.lastCommand();
@@ -850,9 +864,8 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                 const bool aim_ready =
                     aim_snapshot.valid && std::abs(aim_snapshot.yaw_error) <= fire_thresh &&
                     std::abs(aim_snapshot.pitch_error) <= fire_thresh;
-                // 可打性在发布状态之前就算好了（见上面的 class_engageable /
-                // aimed_slot_activated）——"帧级闸门"和"控制线程闸门"必须同一口径。
-                const bool blade_engageable = class_engageable && !aimed_slot_activated;
+                // 火控闸门只来自 RuneFireGate；“帧级”和“控制线程”共用同一结果。
+                const bool blade_engageable = fire_engageable;
                 if (rune_diag::debugEnabled()) {
                     // 开火被哪个闸门挡住，是调"每轮命中节奏"的关键信息。
                     rune_diag::printFireGateDebug({command.shoot, command.blade_switched,
@@ -867,7 +880,8 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                     bore_sight.enabled
                         ? (command.shoot && fire_enabled && !gimbal_frozen)
                         : (aim_in_control
-                               ? (fire_request && fire_enabled && !gimbal_frozen)
+                               ? (fire_request && fire_enabled && !gimbal_frozen &&
+                                  blade_engageable)
                                : (command.shoot && fire_enabled && !gimbal_frozen &&
                                   !command.blade_switched &&
                                   aim_ready && (!round_snapshot.hold) && blade_engageable));
@@ -917,8 +931,7 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                         park_input.frame_time = timestamp;
                         park_input.latency = smoothed_lead_latency_s;
                         park_input.center_only = (now - last_solved_time) > observation_life;
-                        park_input.engageable =
-                            !config.detector.require_inactive_class || detector->targetClass() == 0;
+                        park_input.engageable = fire_engageable;
                     }
                     aim_bridge.publish(park_input);
                 } else {
@@ -1003,8 +1016,11 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             sources.fired = fired_this_frame;
             sources.gate_hold = round_snapshot.hold;
             sources.gate_window_open = window_open;
-            // 与帧级闸门同口径（blade_engageable 在开火分支里才定义）
-            sources.gate_engageable = class_engageable && !aimed_slot_activated;
+            sources.gate_engageable = fire_engageable;
+            sources.fire_slot = fire_snapshot.planned_slot;
+            sources.fire_slot_class = fire_snapshot.planned_slot_class;
+            sources.fire_slot_activated = fire_snapshot.slot_activated;
+            sources.fire_latched = fire_snapshot.latched;
             sources.aim_pixel = aim_pixel;
             sources.aim_world = aim_world;
             sources.aim_roll_deg = aim_roll_deg;

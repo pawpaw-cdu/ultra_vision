@@ -45,7 +45,6 @@ namespace auto_aim::energy
                   << " score_thr=" << config_.model.confidence_threshold
                   << " kpt_conf=" << config_.model.keypoint_confidence_threshold
                   << " min_kpt=" << config_.model.min_valid_keypoints
-                  << " require_inactive_class=" << (config_.require_inactive_class ? 1 : 0)
                   << " soft_candidate=" << (config_.soft_candidate_selection ? 1 : 0)
                   << " pad_adaptive=" << (config_.canvas_adaptive ? 1 : 0)
                   << " pad_recenter=" << (config_.canvas_recenter ? 1 : 0)
@@ -399,7 +398,7 @@ namespace auto_aim::energy
             picked_by_geometry_ = true;
             if (std::getenv("ULTRA_VISION_RUNE_DEBUG")) {
                 std::cerr << "[rune pick] geometry-continuous candidate kept (class "
-                          << results.front().class_id << "), class filter skipped"
+                          << results.front().class_id << "), observation is class-agnostic"
                           << std::endl;
             }
         }
@@ -424,8 +423,6 @@ namespace auto_aim::energy
                 } else if (!std::isfinite(phase)) {
                     phase_cost = 1.0;
                 }
-                const double class_cost =
-                    results[index].class_id == 0 ? 0.0 : config_.soft_class_penalty;
                 const double confidence_reward =
                     config_.soft_confidence_weight * results[index].prob;
                 const double pattern_reward =
@@ -438,7 +435,7 @@ namespace auto_aim::energy
                                           std::max(1.0, config_.lock_break_px));
                 }
                 const double score =
-                    phase_cost + class_cost + lock_cost - confidence_reward - pattern_reward;
+                    phase_cost + lock_cost - confidence_reward - pattern_reward;
                 if (score < best_score) {
                     best_score = score;
                     chosen = index;
@@ -454,119 +451,9 @@ namespace auto_aim::energy
             results.swap(keep);
             picked_by_geometry_ = true;
         }
-        if (!config_.soft_candidate_selection &&
-            pose_layout && config_.require_inactive_class) {
-            std::vector<RuneModel::Object> inactive;
-            inactive.reserve(results.size());
-            for (const RuneModel::Object& candidate : results) {
-                if (candidate.class_id == 0) inactive.push_back(candidate);
-            }
-            // 锁定的那片一旦变成"已激活"，说明刚打中它：立刻解锁定。
-            if (has_lock_) {
-                for (const RuneModel::Object& candidate : results) {
-                    if (candidate.class_id == 0) continue;
-                    if (cv::norm(candidate.center - locked_center_) <= config_.lock_break_px) {
-                        has_lock_ = false;
-                        lock_miss_ = 0;
-                        break;
-                    }
-                }
-            }
-            // 亮点判据（与 prefer_bright_blade 同一套：小窗峰值 − 大窗均值）
-            // bright 图**一次**算好：原来这条 lambda 每调用一次都重做一遍整幅
-            // cv::split + 两次 cv::max（640×480×3 ≈ 0.9 MB/次，一帧 5~10 个候选），
-            // 是帧循环里"非推理开销 ~25 ms"的嫌疑之一（见 docs §11）。
-            cv::Mat channels[3];
-            cv::split(bgr_image, channels);
-            const cv::Mat bright_image = cv::max(cv::max(channels[0], channels[1]), channels[2]);
-            const auto contrast = [&](const RuneModel::Object& candidate) {
-                const cv::Point2f center = candidate.center;
-                const float half = 0.5f * static_cast<float>(config_.blade_roi_ratio) *
-                                   std::max(candidate.rect.width, candidate.rect.height);
-                const int x = static_cast<int>(center.x);
-                const int y = static_cast<int>(center.y);
-                cv::Rect small_roi(x - 2, y - 2, 5, 5);
-                cv::Rect large_roi(x - static_cast<int>(half), y - static_cast<int>(half),
-                                   std::max(2, static_cast<int>(2 * half)),
-                                   std::max(2, static_cast<int>(2 * half)));
-                small_roi &= cv::Rect(0, 0, bgr_image.cols, bgr_image.rows);
-                large_roi &= cv::Rect(0, 0, bgr_image.cols, bgr_image.rows);
-                if (small_roi.width <= 0 || large_roi.width <= 0) return 0.0;
-                double minimum = 0.0;
-                double peak = 0.0;
-                cv::minMaxLoc(bright_image(small_roi), &minimum, &peak);
-                return peak - cv::mean(bright_image(large_roi))[0];
-            };
-            double best_inactive = -1.0;
-            for (const RuneModel::Object& candidate : inactive) {
-                best_inactive = std::max(best_inactive, contrast(candidate));
-            }
-            double best_other = -1.0;
-            const RuneModel::Object* brightest_other = nullptr;
-            for (const RuneModel::Object& candidate : results) {
-                if (candidate.class_id == 0) continue;
-                const double score = contrast(candidate);
-                if (score > best_other) {
-                    best_other = score;
-                    brightest_other = &candidate;
-                }
-            }
-            if (config_.rescue_missing_inactive && brightest_other != nullptr &&
-                best_other > 0.0 &&
-                best_other > config_.inactive_class_margin * std::max(0.0, best_inactive)) {
-                // 类别证据**不能单独**把跟踪从几何上连续的那片拉走：已激活片变多
-                // 以后（尤其待激活片夹在两片已激活片之间时）网络的 class 0/1 会在
-                // 相邻片之间翻烧饼，只看亮度+类别就会逐帧换靶 —— 现场表现就是
-                // 云台左右甩、槽位记账被污染。
-                // 闸门：只有当这个非 class0 候选**比 class0 候选更靠近运动模型的
-                // 预测位置**时，才认"点亮片被误分类"。
-                bool continuity_ok = true;
-                if (assoc_valid_ && timestamp > 0.0) {
-                    const double dt = timestamp - assoc_time_;
-                    if (dt > 1e-4 && dt <= config_.phase_assoc.max_gap_s) {
-                        const double predicted = assoc_phase_ + assoc_rate_ * dt;
-                        const double other_phase = candidate_phase(*brightest_other);
-                        double other_residual = std::numeric_limits<double>::max();
-                        if (std::isfinite(other_phase)) {
-                            other_residual = std::abs(limitRad(other_phase - predicted));
-                        }
-                        double inactive_residual = std::numeric_limits<double>::max();
-                        for (const RuneModel::Object& candidate : inactive) {
-                            const double phase = candidate_phase(candidate);
-                            if (!std::isfinite(phase)) continue;
-                            inactive_residual =
-                                std::min(inactive_residual,
-                                         std::abs(limitRad(phase - predicted)));
-                        }
-                        // 非 class0 候选必须明显更贴近预测（>0.15 rad ≈ 8.6°）才算数。
-                        continuity_ok = other_residual < inactive_residual - 0.15;
-                    }
-                }
-                if (continuity_ok) {
-                    // 点亮片被误分类：只保留这**一个**候选，避免同时把别的亮片也放进来
-                    std::vector<RuneModel::Object> picked;
-                    picked.push_back(*brightest_other);
-                    results.swap(picked);
-                    if (std::getenv("ULTRA_VISION_RUNE_DEBUG")) {
-                        std::cerr << "[rune pick] class!=0 candidate accepted by brightness margin ("
-                                  << best_other << " vs " << best_inactive
-                                  << ", geometry-continuous)" << std::endl;
-                    }
-                } else {
-                    results.swap(inactive);
-                    if (std::getenv("ULTRA_VISION_RUNE_DEBUG")) {
-                        std::cerr << "[rune pick] class!=0 candidate rejected by continuity gate ("
-                                  << best_other << " vs " << best_inactive << ")" << std::endl;
-                    }
-                }
-            } else {
-                results.swap(inactive);
-            }
-            if (results.empty()) {
-                handleLost(timestamp);
-                return std::nullopt;
-            }
-        }
+        // Observation/model construction is class-agnostic. Activated blades are
+        // valuable geometry measurements and must still build the five-slot model.
+        // Whether the planned slot may be fired on is decided later by RuneFireGate.
 
         if (std::getenv("ULTRA_VISION_RUNE_DEBUG")) {
             std::cerr << "[rune detect] candidates=" << results.size();

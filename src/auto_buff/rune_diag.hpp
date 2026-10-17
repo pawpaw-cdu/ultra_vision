@@ -42,6 +42,10 @@ namespace auto_aim::energy::rune_diag
         bool gate_hold = false;
         bool gate_window_open = false;
         bool gate_engageable = false;
+        int fire_slot = -1;
+        int fire_slot_class = -1;
+        int fire_slot_activated = 0;
+        int fire_latched = 0;
 
         bool state_valid = false;
         double state_yaw = 0.0;      // state[0]
@@ -226,6 +230,10 @@ namespace auto_aim::energy::rune_diag
         bool gate_hold = false;            // 命中后保持中
         bool gate_window_open = false;     // 弹道窗口还开着
         bool gate_engageable = false;      // 类别/槽位判定"这片可以打"
+        int fire_slot = -1;
+        int fire_slot_class = -1;
+        bool fire_slot_activated = false;
+        bool fire_latched = false;
         std::string slot_scores;           // 5 个槽位方向的"靶面存在度"（暗片通道）
         int slot_present_mask = 0;
         int slot_found_count = 0;          // 实测到的靶面数（暗片通道）
