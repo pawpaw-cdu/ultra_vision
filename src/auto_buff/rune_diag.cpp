@@ -309,6 +309,13 @@ namespace auto_aim::energy::rune_diag
         row.slot_activated = sources.slot_activated;
         row.slot_votes = sources.slot_votes;
         row.slot_centers = sources.slot_centers;
+        row.slot_factor_enabled = sources.slot_factor_enabled ? 1 : 0;
+        row.slot_factor_valid = sources.slot_factor_valid ? 1 : 0;
+        row.slot_factor_target = sources.slot_factor_target;
+        row.slot_factor_activated = sources.slot_factor_activated;
+        row.slot_factor_assigned = sources.slot_factor_assigned;
+        row.slot_factor_target_observed = sources.slot_factor_target_observed ? 1 : 0;
+        row.slot_factor_margin = sources.slot_factor_margin;
         row.orbit_ok = sources.orbit_valid ? 1 : 0;
         row.orbit_samples = sources.orbit_samples;
         row.orbit_ratio = sources.orbit_ratio;
@@ -412,7 +419,10 @@ namespace auto_aim::energy::rune_diag
                     "assoc_reject,assoc_residual_deg,lit_px,lit_py,picked_px,picked_py,fired,"
                     "aim_err_yaw_deg,aim_err_pitch_deg,diff_ok,diff_px,diff_py,diff_area,"
                     "diff_to_lit_px,cands,state_orbit_px,state_lit_area,state_roi_px,"
-                    "gate_hold,gate_window_open,gate_engageable\n";
+                    "gate_hold,gate_window_open,gate_engageable,"
+                    "slot_factor_enabled,slot_factor_valid,slot_factor_target,"
+                    "slot_factor_mask,slot_factor_assigned,slot_factor_target_observed,"
+                    "slot_factor_margin\n";
         return true;
     }
 
@@ -482,7 +492,15 @@ namespace auto_aim::energy::rune_diag
                  << row.diff_py << ',' << row.diff_area << ',' << row.diff_to_lit_px << ','
                  << row.candidates << ',' << row.state_orbit_px << ',' << row.state_lit_area
                  << ',' << row.state_roi_px << ',' << row.gate_hold << ','
-                 << row.gate_window_open << ',' << row.gate_engageable << '\n';
+                 << row.gate_window_open << ',' << row.gate_engageable << ','
+                 << row.slot_factor_enabled << ',' << row.slot_factor_valid << ','
+                 << row.slot_factor_target << ',' << (row.slot_factor_activated[0] ? 1 : 0)
+                 << (row.slot_factor_activated[1] ? 1 : 0)
+                 << (row.slot_factor_activated[2] ? 1 : 0)
+                 << (row.slot_factor_activated[3] ? 1 : 0)
+                 << (row.slot_factor_activated[4] ? 1 : 0) << ','
+                 << row.slot_factor_assigned << ',' << row.slot_factor_target_observed << ','
+                 << row.slot_factor_margin << '\n';
     }
 
 

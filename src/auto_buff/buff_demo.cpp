@@ -15,6 +15,7 @@
 //   ULTRA_VISION_RUNE_CSV            逐帧诊断 CSV 输出路径
 //   ULTRA_VISION_RUNE_GT_CSV         仿真真值遥测原文输出路径
 //   ULTRA_VISION_RUNE_AIM_IN_CONTROL 0 = 关掉"瞄准解算在控制线程"（默认开）
+//   ULTRA_VISION_RUNE_SLOT_FACTOR   1 = 启用目标槽位 + 激活掩码的离散因子图 A/B
 //   ULTRA_VISION_RUNE_BORESIGHT      "yaw_deg,pitch_deg" 静态试射模式
 //   ULTRA_VISION_RUNE_DIFF           1 = 打开帧差探针（诊断列 diff_*）
 //   ULTRA_VISION_RUNE_NO_DIAG        1 = 关掉诊断层（不写 CSV/不落帧）

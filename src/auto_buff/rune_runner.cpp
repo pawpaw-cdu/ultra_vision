@@ -32,6 +32,7 @@
 #include "auto_buff/rune_runner.hpp"
 #include "auto_buff/rune_aim_fallback.hpp"
 #include "auto_buff/rune_round_guard.hpp"
+#include "auto_buff/rune_slot_factor_graph.hpp"
 #include "auto_buff/rune_slot_lattice.hpp"
 #include "auto_buff/rune_timebase.hpp"
 #include "auto_buff/rune_target_selector.hpp"
@@ -199,6 +200,17 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
     lattice_config.rotate_booking_on_switch = config.slot_rotate_booking_on_switch;
     auto_aim::energy::RuneSlotLattice slot_lattice(
         lattice_config, std::getenv("ULTRA_VISION_RUNE_DEBUG") != nullptr);
+    // P0 A/B: joint MAP over (target slot, activation mask). Default off; the
+    // existing lattice remains the fallback and source of activation evidence.
+    static const bool slot_factor_enabled =
+        std::getenv("ULTRA_VISION_RUNE_SLOT_FACTOR") != nullptr &&
+        std::string(std::getenv("ULTRA_VISION_RUNE_SLOT_FACTOR")) != "0";
+    auto_aim::energy::RuneSlotFactorGraph slot_factor_graph(
+        auto_aim::energy::RuneSlotFactorGraph::Config{});
+    if (slot_factor_enabled) {
+        std::cout << "Energy rune: slot factor graph enabled "
+                     "(5 slots x 32 activation masks)" << std::endl;
+    }
     int fired_slot_id = -1;                  // 命中瞬间开火的那个槽位（喂回格点）
     auto_aim::energy::rune_diag::RuneTelemetry telemetry_stats;
     // 本地时钟 - 仿真时钟（见遥测解析处），用于把 CSV 的时间轴对齐到仿真。
@@ -396,8 +408,49 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             lattice_frame.phase_rate =
                 target.ekfX().size() > 6 ? target.ekfX()[6] : 0.0;
             slot_lattice.update(lattice_frame, now);
+            if (slot_factor_enabled) {
+                auto_aim::energy::RuneSlotFactorGraph::Frame factor_frame;
+                factor_frame.solved = lattice_frame.solved;
+                factor_frame.anchor_slot = slot_lattice.slotId();
+                factor_frame.slot_centers = lattice_frame.slot_centers;
+                factor_frame.candidates = lattice_frame.candidates;
+                factor_frame.activated_hint = slot_lattice.snapshot().activated;
+                factor_frame.round_active = lattice_frame.round_active;
+                slot_factor_graph.update(factor_frame, now);
+            }
         }
         const auto slot_snapshot = slot_lattice.snapshot();
+        const auto factor_snapshot = slot_factor_graph.snapshot();
+        const bool use_slot_factor =
+            slot_factor_enabled && factor_snapshot.valid && factor_snapshot.updated &&
+            slot_snapshot.slot_id >= 0;
+        const auto& slot_activation =
+            use_slot_factor ? factor_snapshot.activated : slot_snapshot.activated;
+        int unactivated_slots = 0;
+        int only_unactivated_slot = -1;
+        if (slot_snapshot.slot_id >= 0) {
+            for (int slot = 0; slot < 5; ++slot) {
+                if (slot_activation[static_cast<std::size_t>(slot)]) continue;
+                ++unactivated_slots;
+                only_unactivated_slot = slot;
+            }
+        }
+        const int factor_target_slot =
+            use_slot_factor && unactivated_slots == 1
+                ? only_unactivated_slot
+                : (use_slot_factor ? factor_snapshot.target_slot
+                                   : slot_snapshot.slot_id);
+        const int factor_retarget_offset =
+            use_slot_factor
+                ? ((factor_target_slot - slot_snapshot.slot_id) % 5 + 5) % 5
+                : 0;
+        const bool factor_target_usable =
+            use_slot_factor &&
+            (factor_snapshot.target_observed || unactivated_slots == 1);
+        const bool use_factor_retarget =
+            factor_target_usable && factor_retarget_offset != 0;
+        const int planned_slot =
+            use_factor_retarget ? factor_target_slot : slot_snapshot.slot_id;
         // ---- 开火闸门的两个"可打"条件（帧级，本帧唯一口径）-------------------
         // (1) 类别：五点模型里只有 class 0（未激活）才是本轮目标；
         // (2) 槽位记账：我们**自己记的**"这一槽已经打过"同样不许开火。
@@ -420,8 +473,8 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             return env == nullptr ? true : std::string(env) != "0";
         }();
         const bool aimed_slot_activated =
-            config.fire_block_on_hit_slot && block_hit_slot && slot_snapshot.slot_id >= 0 &&
-            slot_snapshot.activated[static_cast<std::size_t>(slot_snapshot.slot_id)];
+            config.fire_block_on_hit_slot && block_hit_slot && planned_slot >= 0 &&
+            slot_activation[static_cast<std::size_t>(planned_slot)];
         // 观测到的是**已激活**的那片（class 1/2）时告诉估计器：它相对跟踪槽位偏了
         // 几个槽位，请按这个偏移折算（相位 -offset×72°、靶心预测 +offset×72°）。
         const int observed_class = detector->targetClass();
@@ -574,6 +627,7 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         // 瞄准解算：aim_in_control=true 时由控制线程按 100 Hz 用"当前时刻"重算
         // （sp_vision 的 commandgener 结构），这里只发布状态、并取回它算出的指令。
         auto_aim::energy::RuneCommand command;
+        int commanded_slot_offset = 0;
         if (aim_in_control) {
             auto_aim::energy::RuneAimBridge::Input aim_input(
                 config.mode, config.max_coast_frames, config.max_distance_jump_ratio,
@@ -588,9 +642,9 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             //     转半径，而"旧靶 → 对面新靶"可能差一整片（小符 6 m 处约 13°）。
             // 命中保持期内按 sp_vision 的判据转到**新亮起的那片**：在候选里找
             // "按我们的记账还没打过"的那片（优先 class 0），用它的槽位偏移瞄准。
-            int retarget_offset = 0;
+            int retarget_offset = use_factor_retarget ? factor_retarget_offset : 0;
             const bool retarget_needed = round_snapshot.hold || aimed_slot_activated;
-            if (retarget_new_blade && retarget_needed) {
+            if (retarget_new_blade && retarget_needed && retarget_offset == 0) {
                 // sp_vision：命中后要打的是"新亮起的那片"，由选择器给出（几何判据）。
                 const auto selection =
                     target_selector.select(detector->litBladeCenters());
@@ -600,7 +654,7 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                         slot_lattice.slotOffsetForCandidate(selection.center, offset)) {
                         const int slot = (slot_snapshot.slot_id + offset) % 5;
                         if (offset != 0 &&
-                            !slot_snapshot.activated[static_cast<std::size_t>(slot)]) {
+                            !slot_activation[static_cast<std::size_t>(slot)]) {
                             retarget_offset = offset;
                         }
                     }
@@ -617,7 +671,7 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                             continue;
                         }
                         const int slot = (slot_snapshot.slot_id + offset) % 5;
-                        if (slot_snapshot.activated[static_cast<std::size_t>(slot)]) continue;
+                        if (slot_activation[static_cast<std::size_t>(slot)]) continue;
                         retarget_offset = offset;
                         if (std::getenv("ULTRA_VISION_RUNE_DEBUG")) {
                             std::cerr << "[rune pick] current slot "
@@ -637,7 +691,7 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                     int candidate_count = 0;
                     for (int step = 1; step < 5; ++step) {
                         const int slot = (slot_snapshot.slot_id + step) % 5;
-                        if (slot_snapshot.activated[static_cast<std::size_t>(slot)]) {
+                        if (slot_activation[static_cast<std::size_t>(slot)]) {
                             continue;
                         }
                         candidate_slot = slot;
@@ -656,6 +710,7 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                 }
             }
             const bool holding = round_snapshot.hold;
+            commanded_slot_offset = retarget_offset;
             aim_input.center_only =
                 (!observation_fresh || holding || aimed_slot_activated) &&
                 retarget_offset == 0;
@@ -784,7 +839,10 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                 if (fire_ok) {
                     input.sendFire();
                     ++shots_fired;
-                    fired_slot_id = slot_snapshot.slot_id;
+                    fired_slot_id =
+                        slot_snapshot.slot_id >= 0
+                            ? (slot_snapshot.slot_id + commanded_slot_offset) % 5
+                            : -1;
                     // 记录"真的发了这一发"，供离线归因（CSV 列 fired）。
                     fired_this_frame = true;
                 } else if (command.shoot && fire_enabled && !window_open) {
@@ -919,6 +977,13 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             sources.slot_activated = slot_snapshot.activated;
             sources.slot_votes = slot_snapshot.votes;
             sources.slot_centers = slot_snapshot.slot_centers;
+            sources.slot_factor_enabled = slot_factor_enabled;
+            sources.slot_factor_valid = use_slot_factor;
+            sources.slot_factor_target = planned_slot;
+            sources.slot_factor_activated = factor_snapshot.activated;
+            sources.slot_factor_assigned = factor_snapshot.assigned_count;
+            sources.slot_factor_target_observed = factor_snapshot.target_observed;
+            sources.slot_factor_margin = factor_snapshot.margin;
             const auto orbit = solver.lastOrbitFit();
             sources.orbit_valid = orbit.valid;
             sources.orbit_semi_major_px = orbit.semi_major_px;
