@@ -25,6 +25,7 @@ add_executable(buff_state_test
     ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_round_guard.cpp
     ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_slot_lattice.cpp
     ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_target_selector.cpp
+    ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_plate_pattern.cpp
 )
 target_include_directories(buff_state_test PRIVATE
     ${CMAKE_SOURCE_DIR}/src

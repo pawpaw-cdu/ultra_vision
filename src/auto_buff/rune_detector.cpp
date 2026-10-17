@@ -240,6 +240,7 @@ namespace auto_aim::energy
         frame_orbit_px_ = -1.0;
         lit_center_ = {0.0f, 0.0f};
         target_class_ = -1;
+        target_pattern_pvd_ = -1.0;
         picked_by_geometry_ = false;
         candidate_count_ = static_cast<int>(results.size());
         best_brightness_ = 0.0;
@@ -258,6 +259,10 @@ namespace auto_aim::energy
                 info.has_rmark = true;
                 info.has_plate = true;
             }
+            const auto pattern = scoreRunePlatePattern(
+                bgr_image, candidate.center,
+                std::max(candidate.rect.width, candidate.rect.height));
+            info.pattern_pvd = pattern.valid ? pattern.pvd : -1.0;
             last_candidates_.push_back(info);
         }
         for (const RuneModel::Object& candidate : results) {
@@ -498,7 +503,8 @@ namespace auto_aim::energy
             std::cerr << "[rune detect] candidates=" << results.size();
             for (const RuneModel::Object& candidate : results) {
                 std::cerr << " | cls" << candidate.class_id << " p=" << candidate.prob
-                          << " c=(" << candidate.center.x << "," << candidate.center.y << ")";
+                          << " c=(" << candidate.center.x << "," << candidate.center.y << ")"
+                          << " pvd=" << last_candidates_[&candidate - results.data()].pattern_pvd;
                 for (const cv::Point2f& point : candidate.keypoints) {
                     std::cerr << " (" << point.x << "," << point.y << ")";
                 }
@@ -780,6 +786,11 @@ namespace auto_aim::energy
             picked_brightness_ = scores[chosen];
 
             const cv::Point2f chosen_center = plateCenter(results[chosen]);
+            const auto chosen_pattern = scoreRunePlatePattern(
+                bgr_image, chosen_center,
+                std::max(results[chosen].rect.width, results[chosen].rect.height));
+            target_pattern_pvd_ = chosen_pattern.valid ? chosen_pattern.pvd : -1.0;
+            refine_stats_.pattern_pvd = target_pattern_pvd_;
             locked_center_ = chosen_center;
             has_lock_ = true;
             target_class_ = results[chosen].class_id;
@@ -1011,6 +1022,7 @@ namespace auto_aim::energy
         lifecycle_.noteAccepted(timestamp);
         last_eval_time_ = timestamp;
         last_powerrune_ = rune;
+        refine_stats_.pattern_pvd = target_pattern_pvd_;
         // 自适应画布缩放用的尺度：本帧由靶面尺寸反推的轨道半径。用 EMA 平滑，
         // 单帧的靶面抖动（角点噪声）不该让缩放系数来回跳。
         if (frame_orbit_px_ > 5.0) {

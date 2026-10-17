@@ -10,6 +10,7 @@ set(AUTO_BUFF_SOURCES
     rune_model.cpp
     rune_refiner.cpp
     rune_plate_refiner.cpp
+    rune_plate_pattern.cpp
     rune_blade_state.cpp
     rune_diff_probe.cpp
     rune_diag.cpp

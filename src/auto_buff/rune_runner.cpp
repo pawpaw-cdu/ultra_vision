@@ -589,7 +589,8 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             // 命中保持期内按 sp_vision 的判据转到**新亮起的那片**：在候选里找
             // "按我们的记账还没打过"的那片（优先 class 0），用它的槽位偏移瞄准。
             int retarget_offset = 0;
-            if (retarget_new_blade && round_snapshot.hold) {
+            const bool retarget_needed = round_snapshot.hold || aimed_slot_activated;
+            if (retarget_new_blade && retarget_needed) {
                 // sp_vision：命中后要打的是"新亮起的那片"，由选择器给出（几何判据）。
                 const auto selection =
                     target_selector.select(detector->litBladeCenters());
@@ -597,6 +598,32 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                     int offset = 0;
                     if (slot_lattice.slotOffsetForCandidate(selection.center, offset)) {
                         retarget_offset = offset;
+                    }
+                }
+                // 网络没有给出新片时，按五槽记账选一个尚未激活的槽位作为几何
+                // 兜底。只在候选唯一时采用，避免在 3~4 个可选槽之间随机跳。
+                if (retarget_offset == 0 && aimed_slot_activated &&
+                    slot_snapshot.slot_id >= 0) {
+                    int candidate_slot = -1;
+                    int candidate_offset = 0;
+                    int candidate_count = 0;
+                    for (int step = 1; step < 5; ++step) {
+                        const int slot = (slot_snapshot.slot_id + step) % 5;
+                        if (slot_snapshot.activated[static_cast<std::size_t>(slot)]) {
+                            continue;
+                        }
+                        candidate_slot = slot;
+                        candidate_offset = step;
+                        ++candidate_count;
+                    }
+                    if (candidate_count == 1) {
+                        retarget_offset = candidate_offset;
+                        if (std::getenv("ULTRA_VISION_RUNE_DEBUG")) {
+                            std::cerr << "[rune pick] slot " << slot_snapshot.slot_id
+                                      << " already hit; retarget geometric slot "
+                                      << candidate_slot << " (+" << candidate_offset
+                                      << ")" << std::endl;
+                        }
                     }
                 }
             }

@@ -17,6 +17,7 @@
 #include "auto_buff/rune_model.hpp"
 #include "auto_buff/rune_refiner.hpp"
 #include "auto_buff/rune_plate_refiner.hpp"
+#include "auto_buff/rune_plate_pattern.hpp"
 #include "auto_buff/rune_blade_state.hpp"
 #include "auto_buff/rune_track_lifecycle.hpp"
 #include "auto_buff/rune_types.hpp"
@@ -191,6 +192,7 @@ namespace auto_aim::energy
             cv::Point2f rmark{0.0f, 0.0f};
             bool has_rmark = false;
             bool has_plate = false;
+            double pattern_pvd = -1.0;
         };
         const std::vector<CandidateInfo>& lastCandidates() const { return last_candidates_; }
 
@@ -225,6 +227,7 @@ namespace auto_aim::energy
             double state_orbit_px = -1.0;
             double state_lit_area = -1.0;
             int state_roi_px = 0;
+            double pattern_pvd = -1.0;
         };
         const RefineStats& refineStats() const { return refine_stats_; }
 
@@ -264,6 +267,7 @@ namespace auto_aim::energy
         // 本帧**选中**那片扇叶的亮点分（与 bestBladeBrightness 比较即可判断
         // "是不是锁到了暗片"：仿真里打中非点亮扇叶会直接判本轮失败）。
         double pickedBladeBrightness() const { return picked_brightness_; }
+        double targetPatternPvd() const { return target_pattern_pvd_; }
         // 本帧**最亮**候选（按亮点判据，即"点亮的那片"）的靶心位置。
         // 与 lastBladeCenter()（实际锁定的那片）对比就能判断"是不是锁到暗片"。
         cv::Point2f lastLitBladeCenter() const { return lit_center_; }
@@ -332,6 +336,7 @@ namespace auto_aim::energy
         std::vector<CandidateInfo> last_candidates_;
         double best_brightness_ = 0.0;
         double picked_brightness_ = 0.0;
+        double target_pattern_pvd_ = -1.0;
         cv::Point2f lit_center_{0.0f, 0.0f};
         // 锁定状态：上一帧选中的靶心位置 + 换靶投票
         bool has_lock_ = false;

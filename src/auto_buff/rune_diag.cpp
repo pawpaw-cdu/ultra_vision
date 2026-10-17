@@ -363,6 +363,7 @@ namespace auto_aim::energy::rune_diag
         row.target_valid = target.isUnsolvable() ? 0 : 1;
         row.blade_switch_obs = target.bladeSwitched() ? 1 : 0;
         row.picked_bright = detector.pickedBladeBrightness();
+        row.target_pattern_pvd = detector.targetPatternPvd();
         row.assoc_reject = detector.phaseAssocRejected() ? 1 : 0;
         row.assoc_residual_deg = detector.phaseAssocResidualRad() >= 0.0
                                      ? detector.phaseAssocResidualRad() * 180.0 / CV_PI
@@ -407,6 +408,7 @@ namespace auto_aim::energy::rune_diag
                     "state_code,state_lit_ratio,state_arm_ratio,classic_lit_area,classic_lit_ratio,plate_refined,plate_size_ratio,armor_solidity,armor_area_ratio,armor_circularity,"
                     "refine_arm_solidity,refine_arm_aspect,refine_gap_px,k2_px,k2_py,hub_src,"
                     "hub_plate_dist_px,target_valid,blade_switch_obs,picked_bright,"
+                    "target_pattern_pvd,"
                     "assoc_reject,assoc_residual_deg,lit_px,lit_py,picked_px,picked_py,fired,"
                     "aim_err_yaw_deg,aim_err_pitch_deg,diff_ok,diff_px,diff_py,diff_area,"
                     "diff_to_lit_px,cands,state_orbit_px,state_lit_area,state_roi_px,"
@@ -472,6 +474,7 @@ namespace auto_aim::energy::rune_diag
                  << row.refine_arm_aspect << ',' << row.refine_gap_px << ',' << row.k2_px.x << ','
                  << row.k2_px.y << ',' << row.hub_src << ',' << row.hub_plate_dist_px << ','
                  << row.target_valid << ',' << row.blade_switch_obs << ',' << row.picked_bright
+                 << ',' << row.target_pattern_pvd
                  << ',' << row.assoc_reject << ',' << row.assoc_residual_deg << ','
                  << row.lit_px.x << ',' << row.lit_px.y << ',' << row.picked_px.x << ','
                  << row.picked_px.y << ',' << row.fired << ',' << row.aim_err_yaw_deg << ','

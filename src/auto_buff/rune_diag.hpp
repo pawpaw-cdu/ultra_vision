@@ -130,6 +130,7 @@ namespace auto_aim::energy::rune_diag
         int target_valid = 0;
         int blade_switch_obs = 0;
         double picked_bright = 0.0;
+        double target_pattern_pvd = -1.0;
         int assoc_reject = 0;
         double assoc_residual_deg = -1.0;
         cv::Point2f lit_px{0.0f, 0.0f};
