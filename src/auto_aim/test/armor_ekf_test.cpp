@@ -201,6 +201,62 @@ int main()
                               (offset_center_y + offset_config.armor_y_offsets[2])) < 1e-9,
                      "EKF must project calibrated y offsets onto other armor plates");
 
+    // A batch can contain repeated detections of the same physical plate. The
+    // fixed-size update buffer accepts at most four unique plate IDs, so
+    // duplicates must collapse to one observation instead of aliasing rows.
+    {
+        auto_aim::ArmorEKF batch_ekf;
+        auto_aim::ArmorEKF single_ekf;
+        batch_ekf.setConfig(config);
+        single_ekf.setConfig(config);
+        auto_aim::Vec<3> initial_center;
+        initial_center(0, 0) = center_x;
+        initial_center(2, 0) = center_z;
+        batch_ekf.initAt(initial_center, 0.0);
+        single_ekf.initAt(initial_center, 0.0);
+
+        const auto repeated = makeObservation(
+            center_x, center_z, 0.0, 0.0, 0.0, plate_id, radius);
+        const std::vector<auto_aim::YpdObservation> duplicates(4, repeated);
+        const double batch_weight = batch_ekf.updateYpdBatch(duplicates);
+        const double single_weight = single_ekf.updateYpd(repeated);
+        const auto batch_state = batch_ekf.getState();
+        const auto single_state = single_ekf.getState();
+
+        bool states_match = true;
+        for (int row = 0; row < auto_aim::ArmorEKF::kStateDim; ++row) {
+            states_match &= std::abs(batch_state(row, 0) - single_state(row, 0)) < 1e-12;
+        }
+        passed &= expect(states_match,
+                         "duplicate plate observations must be applied exactly once");
+        passed &= expect(std::abs(batch_weight - single_weight) < 1e-12,
+                         "duplicate plate observations must preserve the NIS weight");
+    }
+
+    // Exercise the full 4 plates x 4 rows = 16-row fixed-capacity path.
+    {
+        auto_aim::ArmorEKF quad_ekf;
+        quad_ekf.setConfig(config);
+        auto_aim::Vec<3> initial_center;
+        initial_center(0, 0) = center_x;
+        initial_center(2, 0) = center_z;
+        quad_ekf.initAt(initial_center, 0.0);
+
+        std::vector<auto_aim::YpdObservation> quad;
+        for (int plate = 0; plate < 4; ++plate) {
+            quad.push_back(makeObservation(
+                center_x, center_z, 0.0, 0.0, 0.0, plate, radius));
+        }
+        const double weight = quad_ekf.updateYpdBatch(quad);
+        const auto state = quad_ekf.getState();
+        bool finite = weight > 0.0;
+        for (int row = 0; row < auto_aim::ArmorEKF::kStateDim; ++row) {
+            finite &= std::isfinite(state(row, 0));
+        }
+        passed &= expect(finite,
+                         "four unique plate observations must fit the fixed EKF workspace");
+    }
+
     const auto initial = makeObservation(
         center_x, center_z, 0.0, true_omega, 0.0, plate_id, radius);
     ekf.updateYpd(initial);

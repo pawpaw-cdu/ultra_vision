@@ -19,12 +19,12 @@ endif()
 
 # Use TCP simulator input by default on macOS, where the bundled Galaxy SDK is unavailable.
 # On Linux the hardware camera path remains the default.
-set(_auto_aim_sim_default ON)
+set(_auto_aim_sim_default OFF)
 if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
   set(_auto_aim_sim_default ON)
 endif()
 option(ULTRA_VISION_AUTO_AIM_SIMULATOR
-       "Use the TCP simulator receiver instead of the Galaxy camera"
+       "Use the TCP simulator receiver instead of a hardware camera"
        ${_auto_aim_sim_default})
 unset(_auto_aim_sim_default)
 
@@ -132,11 +132,19 @@ if(ULTRA_VISION_BUILD_RUNE)
   endif()
 endif()
 
-if(ULTRA_VISION_BUILD_AUTO_AIM AND NOT ULTRA_VISION_AUTO_AIM_SIMULATOR)
+# A Hik camera build must not require the Galaxy SDK. When both SDKs are
+# available the explicitly selected Hik backend wins; otherwise hardware mode
+# falls back to Galaxy.
+set(DAHENG_INC_DIR "")
+set(DAHENG_LIB_DIR "")
+set(GX_IAPI_LIBRARY "")
+if(ULTRA_VISION_BUILD_AUTO_AIM AND NOT ULTRA_VISION_AUTO_AIM_SIMULATOR
+   AND NOT HIK_LIB)
   if(NOT EXISTS "${ULTRA_VISION_DAHENG_SDK_ROOT}/include/GxIAPI.h")
     message(FATAL_ERROR
       "Galaxy SDK not found at ${ULTRA_VISION_DAHENG_SDK_ROOT}/include. "
-      "Set -DULTRA_VISION_DAHENG_SDK_ROOT=... or enable simulator mode with "
+      "Set -DULTRA_VISION_DAHENG_SDK_ROOT=..., enable the Hik camera backend "
+      "with -DULTRA_VISION_USE_HIK_CAMERA=ON, or enable simulator mode with "
       "-DULTRA_VISION_AUTO_AIM_SIMULATOR=ON.")
   endif()
 
@@ -253,6 +261,8 @@ endif()
 if(ULTRA_VISION_BUILD_AUTO_AIM)
   if(ULTRA_VISION_AUTO_AIM_SIMULATOR)
     message(STATUS "auto_aim input: TCP simulator")
+  elseif(HIK_LIB)
+    message(STATUS "auto_aim input: Hik camera")
   else()
     message(STATUS "auto_aim input: Galaxy camera")
   endif()

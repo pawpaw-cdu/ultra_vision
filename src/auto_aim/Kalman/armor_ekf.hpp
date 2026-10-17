@@ -332,12 +332,10 @@ public:
             return 1.0;
         }
 
-        std::vector<YpdObservation> accepted;
-        std::vector<Vec<4>> residuals;
-        std::vector<Matrix<4, kStateDim>> jacobians;
-        accepted.reserve(observations.size());
-        residuals.reserve(observations.size());
-        jacobians.reserve(observations.size());
+        std::array<YpdObservation, 4> accepted{};
+        std::array<Vec<4>, 4> residuals{};
+        std::array<bool, 4> plate_seen{};
+        int accepted_count = 0;
 
         double min_weight = 1.0;
         for (const auto& observation : observations) {
@@ -347,6 +345,7 @@ public:
                 observation.distance <= 1e-4) {
                 continue;
             }
+            if (plate_seen[static_cast<std::size_t>(observation.plate_id)]) continue;
 
             const YpdObservation predicted = predictYpd(observation.plate_id);
             const Vec<4> residual = ypdResidual(observation, predicted);
@@ -372,18 +371,23 @@ public:
             if (nis > nis_threshold) continue;
 
             min_weight = std::min(min_weight, std::exp(-0.5 * nis));
-            accepted.push_back(observation);
-            residuals.push_back(residual);
-            jacobians.push_back(jacobian);
+            accepted[static_cast<std::size_t>(accepted_count)] = observation;
+            residuals[static_cast<std::size_t>(accepted_count)] = residual;
+            ++accepted_count;
+            plate_seen[static_cast<std::size_t>(observation.plate_id)] = true;
         }
 
-        if (accepted.empty()) return 0.0;
+        if (accepted_count == 0) return 0.0;
 
-        const int measurement_dim = 4 * static_cast<int>(accepted.size());
-        std::vector<double> noise_diagonal(measurement_dim, 0.0);
+        // plate_id is validated against 0..3 above, so accepted observations can
+        // contribute at most 4 * 4 = 16 measurement rows.
+        constexpr int kMaxMeasurementDim = 16;
+        const int measurement_dim = 4 * accepted_count;
+        std::array<double, kMaxMeasurementDim> noise_diagonal{};
 
         for (std::size_t observation_index = 0;
-             observation_index < accepted.size(); ++observation_index) {
+             observation_index < static_cast<std::size_t>(accepted_count);
+             ++observation_index) {
             const int row_offset = 4 * static_cast<int>(observation_index);
             const YpdObservation& observation = accepted[observation_index];
             noise_diagonal[row_offset + 0] = std::max(observation.yaw_noise, 1e-8);
@@ -401,16 +405,16 @@ public:
         const int iterations = std::max(1, cfg_.iekf_iterations);
         const Vec<kStateDim> x_prior = x_;
         const Matrix<kStateDim, kStateDim> P_prior = P_;
-        std::vector<std::vector<double>> H(
-            measurement_dim, std::vector<double>(kStateDim, 0.0));
-        std::vector<double> residual(measurement_dim, 0.0);
-        std::vector<std::vector<double>> gain(kStateDim, std::vector<double>(measurement_dim, 0.0));
+        Matrix<kMaxMeasurementDim, kStateDim> H;
+        Vec<kMaxMeasurementDim> residual;
+        Matrix<kStateDim, kMaxMeasurementDim> gain;
         bool update_ok = false;
 
         for (int iteration = 0; iteration < iterations; ++iteration) {
             // 在当前状态 x_k（成员 x_）处重新算 H(x_k) 与残差。
             for (std::size_t observation_index = 0;
-                 observation_index < accepted.size(); ++observation_index) {
+                 observation_index < static_cast<std::size_t>(accepted_count);
+                 ++observation_index) {
                 const int row_offset = 4 * static_cast<int>(observation_index);
                 const YpdObservation& observation = accepted[observation_index];
                 const YpdObservation predicted = predictYpd(observation.plate_id);
@@ -425,42 +429,39 @@ public:
                     }
                 }
                 for (int row = 0; row < 4; ++row) {
-                    H[row_offset + row] = std::vector<double>(kStateDim, 0.0);
                     for (int column = 0; column < kStateDim; ++column) {
-                        H[row_offset + row][column] = jacobian(row, column);
+                        H(row_offset + row, column) = jacobian(row, column);
                     }
-                    residual[row_offset + row] = innovation_residual(row, 0);
+                    residual(row_offset + row, 0) = innovation_residual(row, 0);
                 }
             }
 
-            std::vector<std::vector<double>> innovation(
-                measurement_dim, std::vector<double>(measurement_dim, 0.0));
+            Matrix<kMaxMeasurementDim, kMaxMeasurementDim> innovation;
             for (int row = 0; row < measurement_dim; ++row) {
                 for (int column = 0; column < measurement_dim; ++column) {
                     double value = 0.0;
                     for (int state_row = 0; state_row < kStateDim; ++state_row) {
                         for (int state_column = 0; state_column < kStateDim; ++state_column) {
-                            value += H[row][state_row] * P_prior(state_row, state_column) *
-                                H[column][state_column];
+                            value += H(row, state_row) * P_prior(state_row, state_column) *
+                                H(column, state_column);
                         }
                     }
-                    innovation[row][column] = value;
+                    innovation(row, column) = value;
                 }
-                innovation[row][row] += noise_diagonal[row];
+                innovation(row, row) += noise_diagonal[row];
             }
 
-            std::vector<std::vector<double>> innovation_inverse;
-            if (!invertDynamic(innovation, innovation_inverse)) return 0.0;
+            Matrix<kMaxMeasurementDim, kMaxMeasurementDim> innovation_inverse;
+            if (!invertDynamic(innovation, innovation_inverse, measurement_dim)) return 0.0;
 
-            std::vector<std::vector<double>> state_measurement_covariance(
-                kStateDim, std::vector<double>(measurement_dim, 0.0));
+            Matrix<kStateDim, kMaxMeasurementDim> state_measurement_covariance;
             for (int state_row = 0; state_row < kStateDim; ++state_row) {
                 for (int measurement = 0; measurement < measurement_dim; ++measurement) {
                     double value = 0.0;
                     for (int state_column = 0; state_column < kStateDim; ++state_column) {
-                        value += P_prior(state_row, state_column) * H[measurement][state_column];
+                        value += P_prior(state_row, state_column) * H(measurement, state_column);
                     }
-                    state_measurement_covariance[state_row][measurement] = value;
+                    state_measurement_covariance(state_row, measurement) = value;
                 }
             }
 
@@ -471,10 +472,10 @@ public:
                     for (int input_measurement = 0; input_measurement < measurement_dim;
                          ++input_measurement) {
                         value +=
-                            state_measurement_covariance[state_row][input_measurement] *
-                            innovation_inverse[input_measurement][output_measurement];
+                            state_measurement_covariance(state_row, input_measurement) *
+                            innovation_inverse(input_measurement, output_measurement);
                     }
-                    gain[state_row][output_measurement] = value;
+                    gain(state_row, output_measurement) = value;
                 }
             }
 
@@ -482,7 +483,7 @@ public:
             for (int state_row = 0; state_row < kStateDim; ++state_row) {
                 double value = x_prior(state_row, 0);
                 for (int measurement = 0; measurement < measurement_dim; ++measurement) {
-                    value += gain[state_row][measurement] * residual[measurement];
+                    value += gain(state_row, measurement) * residual(measurement, 0);
                 }
                 x_(state_row, 0) = value;
             }
@@ -490,27 +491,27 @@ public:
         }
         if (!update_ok) return 0.0;
 
-        std::vector<std::vector<double>> transform(
-            kStateDim, std::vector<double>(kStateDim, 0.0));
+        Matrix<kStateDim, kStateDim> transform;
         for (int row = 0; row < kStateDim; ++row) {
-            transform[row][row] = 1.0;
+            transform(row, row) = 1.0;
             for (int column = 0; column < kStateDim; ++column) {
                 for (int measurement = 0; measurement < measurement_dim; ++measurement) {
-                    transform[row][column] -= gain[row][measurement] * H[measurement][column];
+                    transform(row, column) -=
+                        gain(row, measurement) * H(measurement, column);
                 }
             }
         }
 
-        std::vector<std::vector<double>> covariance(kStateDim, std::vector<double>(kStateDim, 0.0));
+        Matrix<kStateDim, kStateDim> covariance;
         for (int row = 0; row < kStateDim; ++row) {
             for (int column = 0; column < kStateDim; ++column) {
                 double value = 0.0;
                 for (int i = 0; i < kStateDim; ++i) {
                     for (int j = 0; j < kStateDim; ++j) {
-                        value += transform[row][i] * P_(i, j) * transform[column][j];
+                        value += transform(row, i) * P_(i, j) * transform(column, j);
                     }
                 }
-                covariance[row][column] = value;
+                covariance(row, column) = value;
             }
         }
 
@@ -518,16 +519,16 @@ public:
             for (int column = 0; column < kStateDim; ++column) {
                 double value = 0.0;
                 for (int measurement = 0; measurement < measurement_dim; ++measurement) {
-                    value += gain[row][measurement] * noise_diagonal[measurement] *
-                        gain[column][measurement];
+                    value += gain(row, measurement) * noise_diagonal[measurement] *
+                        gain(column, measurement);
                 }
-                covariance[row][column] += value;
+                covariance(row, column) += value;
             }
         }
 
         for (int row = 0; row < kStateDim; ++row) {
             for (int column = 0; column < kStateDim; ++column) {
-                P_(row, column) = covariance[row][column];
+                P_(row, column) = covariance(row, column);
             }
             if (P_(row, row) < cfg_.P_min) P_(row, row) = cfg_.P_min;
         }
@@ -543,13 +544,16 @@ public:
             // 板面几何/配对错了，滤波器只会学到一个错的状态。
             double sum = 0.0;
             int count = 0;
-            for (const auto& residual : residuals) {
+            for (int observation_index = 0;
+                 observation_index < accepted_count; ++observation_index) {
+                const auto& residual =
+                    residuals[static_cast<std::size_t>(observation_index)];
                 for (int row = 0; row < 8; ++row) {
                     sum += residual(row, 0) * residual(row, 0);
                     ++count;
                 }
             }
-            std::cerr << "[uv] plates=" << accepted.size()
+            std::cerr << "[uv] plates=" << accepted_count
                       << " residual_rms=" << std::sqrt(sum / std::max(1, count))
                       << " px weight=" << min_weight << std::endl;
         }
@@ -1201,41 +1205,42 @@ private:
         return jacobian;
     }
 
+    template <int N>
     static bool invertDynamic(
-        std::vector<std::vector<double>> matrix,
-        std::vector<std::vector<double>>& inverse) {
-        const int size = static_cast<int>(matrix.size());
-        if (size == 0) return false;
-        inverse.assign(size, std::vector<double>(size, 0.0));
-        for (int i = 0; i < size; ++i) inverse[i][i] = 1.0;
+        Matrix<N, N> matrix,
+        Matrix<N, N>& inverse,
+        int size) {
+        if (size <= 0 || size > N) return false;
+        inverse = Matrix<N, N>();
+        for (int i = 0; i < size; ++i) inverse(i, i) = 1.0;
 
         for (int column = 0; column < size; ++column) {
             int pivot = column;
             for (int row = column + 1; row < size; ++row) {
-                if (std::abs(matrix[row][column]) > std::abs(matrix[pivot][column])) {
+                if (std::abs(matrix(row, column)) > std::abs(matrix(pivot, column))) {
                     pivot = row;
                 }
             }
-            if (std::abs(matrix[pivot][column]) < 1e-12) return false;
+            if (std::abs(matrix(pivot, column)) < 1e-12) return false;
 
             if (pivot != column) {
-                std::swap(matrix[pivot], matrix[column]);
-                std::swap(inverse[pivot], inverse[column]);
+                std::swap(matrix.data[pivot], matrix.data[column]);
+                std::swap(inverse.data[pivot], inverse.data[column]);
             }
 
-            const double diagonal = matrix[column][column];
+            const double diagonal = matrix(column, column);
             for (int col = 0; col < size; ++col) {
-                matrix[column][col] /= diagonal;
-                inverse[column][col] /= diagonal;
+                matrix(column, col) /= diagonal;
+                inverse(column, col) /= diagonal;
             }
 
             for (int row = 0; row < size; ++row) {
                 if (row == column) continue;
-                const double factor = matrix[row][column];
+                const double factor = matrix(row, column);
                 if (std::abs(factor) < 1e-15) continue;
                 for (int col = 0; col < size; ++col) {
-                    matrix[row][col] -= factor * matrix[column][col];
-                    inverse[row][col] -= factor * inverse[column][col];
+                    matrix(row, col) -= factor * matrix(column, col);
+                    inverse(row, col) -= factor * inverse(column, col);
                 }
             }
         }

@@ -36,7 +36,6 @@ set(AUTO_AIM_REAL_ENTRY
     ${CMAKE_SOURCE_DIR}/io/gimbal/protocol.cpp
     ${CMAKE_SOURCE_DIR}/io/serial/crc16.cpp
     ${CMAKE_SOURCE_DIR}/io/serial/serial_port.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../io/camera/GalaxyCamera.cpp
 )
 set(AUTO_AIM_SIM_ENTRY node_sim.cpp app/sim_runner.cpp)
 
@@ -73,33 +72,46 @@ endif()
 
 # 一个入口一个可执行文件：auto_aim_sim（TCP 仿真帧源） / auto_aim_real（相机 + 串口）。
 # 两者共用同一份 auto_aim_core，只有入口文件与 IO 依赖不同 —— 现场选启动哪个即可。
-add_executable(auto_aim_sim ${AUTO_AIM_CORE_SOURCES} ${AUTO_AIM_SIM_ENTRY})
+add_executable(auto_aim_sim ${AUTO_AIM_SIM_ENTRY})
 target_link_libraries(auto_aim_sim PRIVATE auto_aim_core sim_receiver)
 
-# 真机入口需要大恒 Galaxy SDK（相机驱动）；没装就跳过，只出仿真可执行文件。
-if(GX_IAPI_LIBRARY AND EXISTS "${DAHENG_INC_DIR}/GxIAPI.h")
-  add_executable(auto_aim_real ${AUTO_AIM_CORE_SOURCES} ${AUTO_AIM_REAL_ENTRY})
-  target_link_libraries(auto_aim_real PRIVATE auto_aim_core ${GX_IAPI_LIBRARY})
-  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    set_target_properties(auto_aim_real PROPERTIES BUILD_RPATH "${DAHENG_LIB_DIR}")
-  endif()
+# 真机入口只依赖一个可用的相机后端：海康优先，缺失时回退大恒。
+if(HIK_LIB AND HIK_INC_DIR)
+  set(AUTO_AIM_REAL_CAMERA_SOURCE
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../io/camera/HikCamera.cpp)
+  set(AUTO_AIM_REAL_CAMERA_INCLUDE ${HIK_INC_DIR})
+  set(AUTO_AIM_REAL_CAMERA_LIBRARY ${HIK_LIB})
+  set(AUTO_AIM_REAL_CAMERA_LIB_DIR ${HIK_LIB_DIR})
+  set(AUTO_AIM_REAL_CAMERA_DEFINITION ULTRA_VISION_USE_HIK_CAMERA=1)
+elseif(GX_IAPI_LIBRARY AND EXISTS "${DAHENG_INC_DIR}/GxIAPI.h")
+  set(AUTO_AIM_REAL_CAMERA_SOURCE
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../io/camera/GalaxyCamera.cpp)
+  set(AUTO_AIM_REAL_CAMERA_INCLUDE ${DAHENG_INC_DIR})
+  set(AUTO_AIM_REAL_CAMERA_LIBRARY ${GX_IAPI_LIBRARY})
+  set(AUTO_AIM_REAL_CAMERA_LIB_DIR ${DAHENG_LIB_DIR})
+  set(AUTO_AIM_REAL_CAMERA_DEFINITION "")
 else()
-  message(STATUS "auto_aim_real 跳过：未找到大恒 Galaxy SDK（GxIAPI.h）")
+  set(AUTO_AIM_REAL_CAMERA_SOURCE "")
 endif()
 
-# ---- 可选的每目标配置（公共部分已挂在 auto_aim_core 上）--------------------
-set(AUTO_AIM_REAL_TARGET auto_aim_real)
-
-  # ---- 可选：海康相机（MVS SDK）--------------------------------------------
-  # SDK 的**探测**在根 CMakeLists（Hik SDK 属于 io 层依赖），这里只负责把它编进真机入口。
-  if(ULTRA_VISION_USE_HIK_CAMERA AND HIK_LIB)
-    target_sources(${AUTO_AIM_REAL_TARGET} PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../io/camera/HikCamera.cpp)
-    target_include_directories(${AUTO_AIM_REAL_TARGET} PRIVATE ${HIK_INC_DIR})
-    target_link_libraries(${AUTO_AIM_REAL_TARGET} PRIVATE ${HIK_LIB})
-    target_compile_definitions(${AUTO_AIM_REAL_TARGET} PRIVATE ULTRA_VISION_USE_HIK_CAMERA=1)
-    set_target_properties(${AUTO_AIM_REAL_TARGET} PROPERTIES BUILD_RPATH "${HIK_LIB_DIR}")
+if(AUTO_AIM_REAL_CAMERA_SOURCE)
+  add_executable(auto_aim_real
+      ${AUTO_AIM_REAL_ENTRY}
+      ${AUTO_AIM_REAL_CAMERA_SOURCE})
+  target_link_libraries(auto_aim_real PRIVATE
+      auto_aim_core
+      ${AUTO_AIM_REAL_CAMERA_LIBRARY})
+  target_include_directories(auto_aim_real PRIVATE ${AUTO_AIM_REAL_CAMERA_INCLUDE})
+  if(AUTO_AIM_REAL_CAMERA_DEFINITION)
+    target_compile_definitions(auto_aim_real PRIVATE ${AUTO_AIM_REAL_CAMERA_DEFINITION})
   endif()
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set_target_properties(auto_aim_real PROPERTIES
+        BUILD_RPATH "${AUTO_AIM_REAL_CAMERA_LIB_DIR}")
+  endif()
+else()
+  message(STATUS "auto_aim_real 跳过：未找到可用的海康或大恒相机 SDK")
+endif()
 
 # ---- 局部拟合器（运行组件；只要找到 Ceres 就编译，与是否构建测试无关）----------
 # 定位：EKF 弱点的补强（正面 Yaw/Omega + 旋转中心），异步低频、可注入、默认不接管主链路。

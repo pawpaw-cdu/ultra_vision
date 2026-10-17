@@ -33,6 +33,7 @@
 #include "auto_buff/rune_aim_fallback.hpp"
 #include "auto_buff/rune_round_guard.hpp"
 #include "auto_buff/rune_slot_lattice.hpp"
+#include "auto_buff/rune_timebase.hpp"
 #include "auto_buff/rune_target_selector.hpp"
 #include "auto_buff/rune_blade_finder.hpp"
 #include "auto_buff/rune_config.hpp"
@@ -291,12 +292,8 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
 
         // 时间基准：优先用仿真给的曝光时刻（与本地同一 epoch，见 StandardClock），
         // 两者相差过大说明时钟不可比，退回本地到达时刻。
-        uint64_t frame_time_us = frame_local_timestamp_us;
-        if (frame_source_timestamp_us > 0) {
-            const long long skew = static_cast<long long>(frame_source_timestamp_us) -
-                                   static_cast<long long>(frame_local_timestamp_us);
-            if (std::llabs(skew) < 1000000LL) frame_time_us = frame_source_timestamp_us;
-        }
+        const uint64_t frame_time_us = selectFrameTimestampUs(
+            frame_local_timestamp_us, frame_source_timestamp_us);
         const double timestamp = auto_aim::StandardClock::secondsFromUs(frame_time_us);
 
         solver.updateImageSize(frame.cols, frame.rows);
@@ -313,14 +310,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
 
         // 用轨迹生成器的历史快照取"这一帧曝光时刻"的云台姿态，而不是我们
         // 自己记的下发值：异步下发 + 帧延迟下，两者能差好几度。
-        if (!video_mode) {
-            const auto pose = gimbal_controller.snapshotAt(frame_local_timestamp_us);
-            if (pose.valid) {
-                commanded_yaw = pose.yaw;
-                commanded_pitch = pose.pitch;
-            }
-        }
-
         // The estimate is expressed relative to the pose the rune was
         // calibrated in; feed the current absolute gimbal angles.
         solver.setCameraPose(commanded_yaw, commanded_pitch);

@@ -13,6 +13,7 @@ namespace
     struct SentCommand {
         double yaw = 0.0;
         double pitch = 0.0;
+        std::chrono::steady_clock::time_point sent_at;
     };
 
     bool expect(bool condition, const char* message)
@@ -38,7 +39,7 @@ int main()
         config,
         [&commands, &commands_mutex](double yaw, double pitch) {
             std::lock_guard<std::mutex> lock(commands_mutex);
-            commands.push_back({yaw, pitch});
+            commands.push_back({yaw, pitch, std::chrono::steady_clock::now()});
             return true;
         },
         command_rate);
@@ -71,35 +72,39 @@ int main()
     passed &= expect(copied_commands.size() >= 50,
                      "the command scheduler must send at the configured high rate");
 
-    double max_yaw_step = 0.0;
-    double max_pitch_step = 0.0;
+    bool command_steps_limited = true;
     for (size_t i = 1; i < copied_commands.size(); ++i) {
-        max_yaw_step = std::max(
-            max_yaw_step,
-            std::abs(auto_aim::GimbalAimer::normalizeAngle(
-                copied_commands[i].yaw - copied_commands[i - 1].yaw)));
-        max_pitch_step = std::max(
-            max_pitch_step,
-            std::abs(copied_commands[i].pitch - copied_commands[i - 1].pitch));
+        const double yaw_step = std::abs(auto_aim::GimbalAimer::normalizeAngle(
+            copied_commands[i].yaw - copied_commands[i - 1].yaw));
+        const double pitch_step = std::abs(
+            copied_commands[i].pitch - copied_commands[i - 1].pitch);
+        const double elapsed = std::chrono::duration<double>(
+            copied_commands[i].sent_at - copied_commands[i - 1].sent_at).count();
+        // Callback timestamps are sampled just after the controller computes
+        // its dt. Allow one scheduler period of timestamp skew, then scale the
+        // bound by the actual elapsed time so CPU contention cannot create a
+        // false failure while a genuine position jump still is rejected.
+        const double bounded_elapsed = std::max(0.0, elapsed) + 1.0 / command_rate;
+        command_steps_limited &=
+            yaw_step <= config.max_yaw_velocity * bounded_elapsed + 1e-9 &&
+            pitch_step <= config.max_pitch_velocity * bounded_elapsed + 1e-9;
     }
 
-    // A 100 Hz scheduler may be delayed by the OS. Allow two periods here;
-    // the invariant being checked is that it never emits a vision-frame-sized
-    // jump, not that the scheduler is real-time.
-    constexpr double two_periods = 2.0 / command_rate;
-    passed &= expect(max_yaw_step <= config.max_yaw_velocity * two_periods + 1e-9,
+    passed &= expect(command_steps_limited,
                      "streamed yaw commands must remain velocity limited");
-    passed &= expect(max_pitch_step <= config.max_pitch_velocity * two_periods + 1e-9,
-                     "streamed pitch commands must remain velocity limited");
 
     target.yaw = -0.70;
     target.pitch = -0.20;
     controller.setTargetAngles(target);
+    const auto before_switch = snapshot;
     const double yaw_before_switch = snapshot.yaw;
     std::this_thread::sleep_for(std::chrono::milliseconds(15));
     const auto switched = controller.snapshot();
+    const double switch_elapsed = std::max(
+        0.0, (switched.timestamp_us - before_switch.timestamp_us) / 1e6) +
+        1.0 / command_rate;
     passed &= expect(std::abs(switched.yaw - yaw_before_switch) <=
-                         config.max_yaw_velocity * 0.03 + 1e-9,
+                         config.max_yaw_velocity * switch_elapsed + 1e-9,
                      "a target switch must not create a streamed position jump");
 
     target.pitch = 2.0;
