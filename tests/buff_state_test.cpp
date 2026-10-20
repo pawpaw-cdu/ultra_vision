@@ -251,10 +251,8 @@ namespace
 
     /// 带"投影槽位中心"的帧：换片里程计要靠几何偏移来推动，这正是流水线里的形态。
     RuneSlotLattice::Frame slotFrame(double roll, int cls, int observed_slot,
-                                     bool blade_switched, double radius_px = 60.0,
-                                     double observed_phase_offset = 0.0)
+                                     double radius_px = 60.0)
     {
-        (void)blade_switched;
         RuneSlotLattice::Frame frame;
         frame.solved = true;
         frame.roll = roll;
@@ -268,48 +266,35 @@ namespace
         }
         frame.slot_centers_valid = true;
         frame.target_center = frame.slot_centers[static_cast<std::size_t>((observed_slot % 5 + 5) % 5)];
-        frame.blade_switched = blade_switched;
-        // 绝对相位（深大式换片判据的观测）：默认与状态一致（无换片）。
-        frame.observed_phase_valid = true;
-        frame.observed_phase = roll + observed_phase_offset;
-        frame.phase_rate = 0.0;
         return frame;
     }
 
     void testLatticeAnchoring()
     {
-        // 换片里程计（绝对 ID）现在是非默认的可选项，测它要显式打开。
-        RuneSlotLattice::Config id_config;
-        id_config.switch_by_phase = true;
-        RuneSlotLattice lattice(id_config);
+        RuneSlotLattice lattice;
         // 没有 class 0 的观测不锚定（class 1/2 是"已经打过的片"）
-        lattice.update(slotFrame(1.0, 1, 0, false), 1.0);
+        lattice.update(slotFrame(1.0, 1, 0), 1.0);
         check(lattice.slotId() == -1, "lattice: does not anchor on an activated blade");
 
-        lattice.update(slotFrame(1.0, 0, 0, false), 1.1);
+        lattice.update(slotFrame(1.0, 0, 0), 1.1);
         check(lattice.slotId() == 0, "lattice: anchors on a class-0 blade (blade 0)");
 
         // 符在转：状态相位每帧只走几度 ⇒ 片号不动（旋转不是换片）
         double roll = 1.0;
         for (int i = 0; i < 10; ++i) {
             roll += 3.0 * kPi / 180.0;
-            lattice.update(slotFrame(roll, 0, 0, false), 1.2 + 0.033 * i);
+            lattice.update(slotFrame(roll, 0, 0), 1.2 + 0.033 * i);
         }
         check(lattice.slotId() == 0, "lattice: continuous rotation does not advance the blade id");
 
-        // 换片：**绝对相位**比运动模型预测偏 72°（深大判据），连续 2 帧确认
-        roll += 0.05;
-        lattice.update(slotFrame(roll, 0, 0, false, 60.0, 0.0), 2.00);
-        lattice.update(slotFrame(roll + 0.05, 0, 0, false, 60.0, kSlot), 2.033);
-        check(lattice.slotId() == 0, "lattice: one deviating frame is not enough");
-        lattice.update(slotFrame(roll + 0.10, 0, 0, false, 60.0, kSlot), 2.066);
-        check(lattice.slotId() == 1, "lattice: a confirmed +72 deg phase jump advances the id");
+        // 换片时 EKF 相位整跳 +72°。
+        roll += kSlot;
+        lattice.update(slotFrame(roll, 0, 0), 2.00);
+        check(lattice.slotId() == 1, "lattice: a +72 deg state jump advances the id");
 
-        // 观测回到预测（无偏差）后，下一次换片才能再次推进
-        lattice.update(slotFrame(roll + 0.15, 0, 0, false, 60.0, 0.0), 2.1);
-        check(lattice.slotId() == 1, "lattice: returning to the prediction keeps the id");
-        lattice.update(slotFrame(roll + 0.20, 0, 0, false, 60.0, -2.0 * kSlot), 2.13);
-        lattice.update(slotFrame(roll + 0.25, 0, 0, false, 60.0, -2.0 * kSlot), 2.16);
+        // 再次整跳 -144°：物理片号后退两格。
+        roll -= 2.0 * kSlot;
+        lattice.update(slotFrame(roll, 0, 0), 2.13);
         check(lattice.slotId() == 4, "lattice: a -144 deg phase jump moves the id back two");
     }
 
@@ -352,8 +337,6 @@ namespace
     void testLatticeRetiredSlotBooksActivation()
     {
         RuneSlotLattice::Config config;
-        config.switch_by_phase = false;          // 用最简单的"roll 跳变"判换片
-        config.rotate_booking_on_switch = false; // 槽位号是物理片号 ⇒ 不该再旋转
         RuneSlotLattice lattice(config);
 
         // 某一槽位在图像里的绝对位置（12 点方向为 0 号，顺时针 +72°/槽）。
@@ -364,15 +347,14 @@ namespace
         };
 
         // 第 1 帧：锚定在点亮的 0 号片；另有一片已激活（class 1）在 2 号槽位。
-        RuneSlotLattice::Frame frame = slotFrame(0.0, 0, 0, false, 60.0);
+        RuneSlotLattice::Frame frame = slotFrame(0.0, 0, 0, 60.0);
         frame.candidates = {{1, slot_point(2, 60.0)}};
         lattice.update(frame, 1.0);
         lattice.update(frame, 1.033);   // 投票阈值 4 / 每帧 +2 → 连续两帧才置位
         check(lattice.activated()[2], "retired-slot: class-1 evidence books slot 2");
 
         // 第 2 帧：打中了 —— 点亮的那片换到 1 号槽位（状态相位跳 +72°）。
-        RuneSlotLattice::Frame switched = slotFrame(kSlot, 0, 1, false, 60.0);
-        switched.blade_switched = true;
+        RuneSlotLattice::Frame switched = slotFrame(kSlot, 0, 1, 60.0);
         switched.candidates = {{1, slot_point(2, 60.0)}};   // 已激活的那片还在
         lattice.update(switched, 1.066);
 

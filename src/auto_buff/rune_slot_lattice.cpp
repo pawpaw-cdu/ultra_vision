@@ -78,33 +78,7 @@ namespace auto_aim::energy
                                               double target_phase, double slot_step,
                                               int& offset) const
     {
-        if (frame.slot_centers_valid && !config_.use_measured_angles) {
-            // 最近邻：5 个槽位在图像里的预测位置由解算层投影给出，天然含透视压缩。
-            int nearest = -1;
-            double nearest_distance = 0.0;
-            double spacing = 0.0;
-            int counted = 0;
-            for (std::size_t i = 0; i < frame.slot_centers.size(); ++i) {
-                const double distance = cv::norm(frame.slot_centers[i] - candidate);
-                if (nearest < 0 || distance < nearest_distance) {
-                    nearest = static_cast<int>(i);
-                    nearest_distance = distance;
-                }
-                const std::size_t next = (i + 1) % frame.slot_centers.size();
-                spacing += cv::norm(frame.slot_centers[next] - frame.slot_centers[i]);
-                ++counted;
-            }
-            spacing = counted > 0 ? spacing / counted : 0.0;
-            const double gate = config_.assign_max_spacing_ratio * spacing;
-            // 5 个投影中心重合（退化，比如缺少相机标定）时不能用作依据，退回角度法。
-            if (spacing > 1.0) {
-                if (nearest < 0 || nearest_distance > gate) return false;
-                offset = nearest;
-                return true;
-            }
-        }
-
-        // 退化路径（没有投影槽位可用时）：按候选与靶心的图像夹角折算。
+        // 按候选与靶心的图像夹角吸附到规范槽位（对相位噪声更宽容）。
         const cv::Point2f hub = frame.hub;
         const double phase =
             std::atan2(candidate.y - hub.y, candidate.x - hub.x);
@@ -170,7 +144,7 @@ namespace auto_aim::energy
             // 被换下的片在**本帧**图像里的位置：把本帧靶心绕圆心反向转 step×72°。
             // 只认 1~2 片的跳变（更大的跳变按误判处理）。
             const auto note_retired = [&](int step) {
-                if (!config_.book_retired_on_switch || step == 0) return;
+                if (step == 0) return;
                 const int count = std::min(std::abs(step), 2);
                 const double sign = step > 0 ? 1.0 : -1.0;
                 const cv::Point2f vector = frame.target_center - frame.hub;
@@ -183,42 +157,6 @@ namespace auto_aim::energy
                         frame.hub.y + static_cast<float>(vector.x * s + vector.y * c));
                 }
             };
-            // ---- 换片判据（深大）：观测绝对相位 vs 运动模型预测 -----------------
-            // 预测：把上一帧的状态相位按运动模型的角速度外推到本帧；
-            // 观测：本帧解算出的绝对相位（平面内角）。
-            // 偏差 > 阈值且连续 N 帧一致（同一个 72° 整数倍）⇒ 确认换片。
-            if (config_.switch_by_phase && anchored_ && have_last_phase_time_ &&
-                frame.observed_phase_valid) {
-                const double dt = std::max(0.0, now - last_phase_time_);
-                const double predicted = frame.roll + frame.phase_rate * dt;
-                double delta = frame.observed_phase - predicted;
-                while (delta > CV_PI) delta -= 2.0 * CV_PI;
-                while (delta < -CV_PI) delta += 2.0 * CV_PI;
-                const int step = static_cast<int>(std::lround(delta / slot_step));
-                if (std::abs(delta) > config_.phase_switch_threshold_rad && step != 0) {
-                    if (step == pending_step_) {
-                        ++pending_offset_frames_;
-                    } else {
-                        pending_step_ = step;
-                        pending_offset_frames_ = 1;
-                        offset_applied_ = false;
-                    }
-                    if (!offset_applied_ &&
-                        pending_offset_frames_ >= config_.switch_confirm_frames) {
-                        note_retired(step);
-                        blade_index_ = ((blade_index_ + step) % 5 + 5) % 5;
-                        if (config_.rotate_booking_on_switch) rotateBooking(step);
-                        snapshot_.switch_confirmed = true;
-                        offset_applied_ = true;
-                    }
-                } else {
-                    pending_step_ = 0;
-                    pending_offset_frames_ = 0;
-                    offset_applied_ = false;
-                }
-            }
-            last_phase_time_ = now;
-            have_last_phase_time_ = true;
             // 锚点只用 class 0 的片：class0 才代表"未激活、该打的那块装甲板"。
             if (!anchored_ && frame.target_class == 0) {
                 reference_phase_ = frame.roll;
@@ -240,40 +178,14 @@ namespace auto_aim::energy
                 snapshot_.observed_offset = ((offset_signed % 5) + 5) % 5;
                 snapshot_.observed_offset_valid = offset_ok;
 
-                // ---- 换片判据：二选一 ------------------------------------------
-                // (a) 深大 RP-26Rune 式（switch_by_geometry）：用运动模型外推的相位
-                //     比观测 —— 我们的等价量是"几何偏移应为 0"，连续 N 帧非零即确认；
-                // (b) 状态相位跳变（默认）：换片时状态自己会跳 ±72° 的整数倍。
-                if (config_.switch_by_geometry) {
-                    if (offset_ok && offset_signed != 0) {
-                        if (offset_signed != pending_offset_) {
-                            pending_offset_ = offset_signed;
-                            pending_offset_frames_ = 1;
-                            offset_applied_ = false;
-                        } else {
-                            ++pending_offset_frames_;
-                        }
-                        if (!offset_applied_ &&
-                            pending_offset_frames_ >= config_.switch_confirm_frames) {
-                            note_retired(offset_signed);
-                            blade_index_ = ((blade_index_ + offset_signed) % 5 + 5) % 5;
-                            if (config_.rotate_booking_on_switch) rotateBooking(offset_signed);
-                            snapshot_.switch_confirmed = true;
-                            offset_applied_ = true;
-                        }
-                    } else {
-                        pending_offset_ = 0;
-                        pending_offset_frames_ = 0;
-                        offset_applied_ = false;
-                    }
-                } else if (!config_.switch_by_phase && have_last_roll_) {
+                // 换片时状态相位会跳 ±72° 的整数倍；连续旋转不会被误判为换片。
+                if (have_last_roll_) {
                     const double delta = frame.roll - last_roll_;
                     if (std::abs(delta) > 30.0 * CV_PI / 180.0) {
                         const int step = static_cast<int>(std::lround(delta / slot_step));
                         if (step != 0) {
                             note_retired(step);
                             blade_index_ = ((blade_index_ + step) % 5 + 5) % 5;
-                            if (config_.rotate_booking_on_switch) rotateBooking(step);
                             snapshot_.switch_confirmed = true;
                         }
                     }

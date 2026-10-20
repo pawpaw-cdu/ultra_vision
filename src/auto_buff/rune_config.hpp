@@ -71,12 +71,6 @@ namespace auto_aim::energy
         // 槽位"已激活"的投票阈值：每帧证据 +2、每 4 帧衰减 1，攒到这么多票才置位。
         // 单帧的 ±1 槽折算噪声靠它压下去（实测阈值 1 ⇒ 掩码一致率 15.6%、过记到 3 片）。
         int slot_activate_votes = 4;
-        // 换片时把"被换下的那片"直接记成已激活（几何证据；不依赖网络类别，也不
-        // 依赖命中反馈 —— 深大模型在实拍上对已激活片根本不出框，见 §48）。
-        bool slot_book_retired_on_switch = true;
-        // 换片时是否把整张已激活掩码跟着旋转。槽位号 = 物理片号，换片本来就不改变
-        // 它，再旋转一次属于重复补偿（单测 testLatticeRetiredSlotBooksActivation 钉住）。
-        bool slot_rotate_booking_on_switch = false;
         // 命中后保持（hold）的解禁阈值：锁定靶心的图像相位跳变超过它才认为
         // 换到了另一片（参考实现的 target_switch_threshold = 0.30 rad）。
         double post_hit_switch_phase_rad = 0.30;

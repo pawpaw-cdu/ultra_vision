@@ -204,16 +204,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
     auto_aim::energy::RuneSlotLattice::Config lattice_config;
     lattice_config.activate_votes = config.slot_activate_votes;
     lattice_config.reset_silence_s = config.slot_lattice_reset_silence_s;
-    // 换片判据：默认"状态相位跳变"；=1 用深大式"观测偏移 vs 运动模型预测"（需配合
-    // ULTRA_VISION_RUNE_SLOT_OFFSET=0 让估计器跟着观测走，否则会反复推进）。
-    lattice_config.switch_by_geometry =
-        std::getenv("ULTRA_VISION_RUNE_SWITCH_BY_GEOMETRY") != nullptr &&
-        std::string(std::getenv("ULTRA_VISION_RUNE_SWITCH_BY_GEOMETRY")) != "0";
-    // 激活记账的两个新开关（见 rune_slot_lattice.hpp 的说明）：
-    //   * book_retired：换片 ⇒ 被换下的那片已激活（几何证据，新模型下唯一的来源）；
-    //   * rotate_booking：换片时是否旋转整张掩码（按槽位号=物理片号的定义，不该旋转）。
-    lattice_config.book_retired_on_switch = config.slot_book_retired_on_switch;
-    lattice_config.rotate_booking_on_switch = config.slot_rotate_booking_on_switch;
     auto_aim::energy::RuneSlotLattice slot_lattice(
         lattice_config, std::getenv("ULTRA_VISION_RUNE_DEBUG") != nullptr);
     int fired_slot_id = -1;                  // 命中瞬间开火的那个槽位（喂回格点）
@@ -381,13 +371,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                 (rune.has_value() && rune->solved) ||
                 (last_solved_time > 0.0 &&
                  now - last_solved_time < config.slot_lattice_round_end_s);
-            // 换片里程计的驱动信号（估计器确认观测接管）。
-            lattice_frame.blade_switched = target.bladeSwitched();
-            // 绝对相位 + 运动模型角速度（深大式换片判据的输入）
-            lattice_frame.observed_phase_valid = rune->phase_valid;
-            lattice_frame.observed_phase = rune->phase_rad;
-            lattice_frame.phase_rate =
-                target.ekfX().size() > 6 ? target.ekfX()[6] : 0.0;
             slot_lattice.update(lattice_frame, now);
         }
         const auto slot_snapshot = slot_lattice.snapshot();

@@ -42,28 +42,6 @@ namespace auto_aim::energy
             int activate_votes = 4;
             int vote_gain = 2;
             int decay_every_frames = 4;
-            /// 是否用深大那套"观测 vs 运动模型预测"判换片（几何偏移连续 N 帧一致），
-            /// 而不是"状态自己跳"。两者必须与"估计器是否跟着观测走"配套。
-            bool switch_by_geometry = false;
-            /// 槽位归属方式：true = **sp_vision 式**（用测量角 atan2(靶心−R标) 吸附到
-            /// 5 个规范角，余量 36°），false = 用状态投影的槽位中心做最近邻。
-            /// 前者对相位噪声不敏感（36° 余量），是 sp_vision 稳的原因。
-            bool use_measured_angles = true;
-            /// 换片判据：用"观测绝对相位 vs 运动模型预测相位"（深大做法）。
-            /// 按 sp_vision 改后**不需要绝对 ID**，两条判据默认都关（片号恒为 0，
-            /// 槽位一律相对当前 target）。
-            bool switch_by_phase = false;
-            /// 相位偏差阈值（弧度）：超过它才算一次换片候选（0.5 槽位 = 36°）。
-            /// 相位偏差阈值：深大 = 0.30 rad（17°）；我们的相位噪声更大，实测收紧到
-            /// 0.5 槽位（36°）才不误触发。
-            double phase_switch_threshold_rad = 0.5 * 2.0 * 3.14159265358979323846 / 5.0;
-            /// 换片里程计的确认帧数：几何偏移连续这么多帧一致才认为真的换片了。
-            /// （估计器的 blade_switched 对"新片亮起"不成立：相位 mod 72° 折算后
-            /// X 与相邻 Y 完全一样，整轮只触发 6~11 次，里程计几乎不动。）
-            /// 换片确认帧数。实测（30 s ×2）：深大的 5 帧配 0.30 rad 阈值会因我们的
-            /// 相位噪声（PnP 半径方向 ±5~8°、斜视可达 40°）误触发 → 参考系漂 3 格；
-            /// 收紧到 0.5 槽位 + 2 帧反而**漂移为 0**。留作可调（深大原值见注释）。
-            int switch_confirm_frames = 2;   // 深大 switch_confirm_count = 5
             /// 命中锚重锚的确认帧数。
             int reanchor_confirm_frames = 3;
             /// 完全没有亮片这么久 ⇒ 机关复位（清空"已激活"记账，保留编号）。
@@ -73,21 +51,6 @@ namespace auto_aim::energy
             /// （class 1/2 候选的偏移）会被邻居污染，只靠投票+慢衰减回收不了
             /// （实测掩码一致率因此卡在 30~50%）。自己打中的那片另算，见 strong_。
             double evidence_max_age_s = 1.5;
-            /// 最近邻归属的门限：候选与投影槽位中心的距离超过
-            /// `assign_max_spacing_ratio × 相邻槽位间距` 就不归给任何槽位。
-            double assign_max_spacing_ratio = 0.45;
-            /// 换片确认时，把**被换下的那片**（刚才还在瞄的目标）按几何直接记成
-            /// "已激活"：它是唯一不依赖网络类别、也不依赖命中反馈的激活证据。
-            /// 深大模型在实拍上对已激活片根本不出框（§48），没有这一条，
-            /// `activated` 在新模型下永远是空的。
-            bool book_retired_on_switch = true;
-            /// 换片时是否把整张已激活掩码跟着旋转。
-            /// 注意槽位号的定义：`index = (slot_id + offset)`，而 `slot_id` 在换片时
-            /// 已经 += step、`offset`（相对跟踪片的几何偏移）也同步 -= step
-            /// ⇒ 同一**物理片**的槽位号在换片前后是不变的。因此再旋转一次掩码
-            /// 属于重复补偿，会把"我们打过的那片"错记到新靶位上（开火闸门一旦
-            /// 打开就会把新靶一起挡掉）。留成开关供 A/B，默认不旋转。
-            bool rotate_booking_on_switch = false;
         };
 
         /// @brief 一帧的输入。
@@ -110,17 +73,6 @@ namespace auto_aim::energy
             // 本轮是否还有点亮的扇叶（来自 RuneRoundGuard）。真值里每一轮开始时
             // 掩码都归零，所以这里下降沿就是"机关复位"的信号。
             bool round_active = true;
-            /// 估计器确认"换到另一片了"（观测接管）。**只有这个事件才推进物理片编号**，
-            /// 相位取整不行：符一直在转，相位每 1.2 s 就会自增一格（那是旋转计数，
-            /// 不是"换了一片"）——实测这就是记账只有 ~50% 一致的主因。
-            bool blade_switched = false;
-            /// **绝对相位**（深大做法：平面内"圆心→靶心"向量角，世界 up 为基准）。
-            /// 换片在这上面就是 72° 的整倍跳变，可直接观测（实测 14 次/轮，
-            /// 跳变 ±56~132°）。以前我们把它折叠掉，才不得不造里程计。
-            double observed_phase = 0.0;
-            bool observed_phase_valid = false;
-            /// 运动模型的相位角速度（rad/s）：用于"观测 vs 预测"比对的预测步。
-            double phase_rate = 0.0;
         };
 
         /// @brief 记账快照（喂给火控/CSV）。
@@ -183,15 +135,9 @@ namespace auto_aim::energy
         bool anchored_ = false;
         double reference_phase_ = 0.0;   // 锚定时的相位（诊断用）
         int blade_index_ = -1;           // 物理扇叶编号（换片事件驱动，唯一 ID 来源）
-        int pending_offset_ = 0;         // 待确认的换片偏移（连续 2 帧一致才生效）
-        int pending_offset_frames_ = 0;
-        bool offset_applied_ = false;    // 本次偏移是否已经推进过片号（防止反复推进）
         // 命中锚重锚：用"本帧观测到的已激活片图案"去对齐 strong_（我们打中的片），
         // 纠正参考系漂移。连续 reanchor_confirm_frames 帧同一个更正才应用。
         double last_roll_ = 0.0;         // 上一帧的状态相位
-        double last_phase_time_ = 0.0;   // 上一帧时间（预测步用）
-        bool have_last_phase_time_ = false;
-        int pending_step_ = 0;           // 待确认的换片步长（72° 的整数倍）
         bool have_last_roll_ = false;
         int reanchor_shift_ = 0;
         int reanchor_frames_ = 0;

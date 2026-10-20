@@ -286,10 +286,6 @@ namespace auto_aim::energy
         config.slot_lattice_round_end_s =
             aimer["slot_lattice_round_end_s"].as<double>(0.8);
         config.slot_activate_votes = aimer["slot_activate_votes"].as<int>(4);
-        config.slot_book_retired_on_switch =
-            aimer["slot_book_retired_on_switch"].as<bool>(true);
-        config.slot_rotate_booking_on_switch =
-            aimer["slot_rotate_booking_on_switch"].as<bool>(false);
         config.post_hit_switch_phase_rad =
             aimer["post_hit_switch_phase_rad"].as<double>(0.30);
         config.post_hit_hold_max_s = aimer["post_hit_hold_max_s"].as<double>(1.2);
