@@ -309,13 +309,6 @@ namespace auto_aim::energy::rune_diag
         row.slot_activated = sources.slot_activated;
         row.slot_votes = sources.slot_votes;
         row.slot_centers = sources.slot_centers;
-        row.slot_factor_enabled = sources.slot_factor_enabled ? 1 : 0;
-        row.slot_factor_valid = sources.slot_factor_valid ? 1 : 0;
-        row.slot_factor_target = sources.slot_factor_target;
-        row.slot_factor_activated = sources.slot_factor_activated;
-        row.slot_factor_assigned = sources.slot_factor_assigned;
-        row.slot_factor_target_observed = sources.slot_factor_target_observed ? 1 : 0;
-        row.slot_factor_margin = sources.slot_factor_margin;
         row.roi_active = detector.roiActive() ? 1 : 0;
         row.roi_fallback = detector.roiFallback() ? 1 : 0;
         const cv::Rect roi = detector.lastRoiCrop();
@@ -437,9 +430,7 @@ namespace auto_aim::energy::rune_diag
                     "aim_err_yaw_deg,aim_err_pitch_deg,diff_ok,diff_px,diff_py,diff_area,"
                     "diff_to_lit_px,cands,state_orbit_px,state_lit_area,state_roi_px,"
                     "gate_hold,gate_window_open,gate_engageable,"
-                    "slot_factor_enabled,slot_factor_valid,slot_factor_target,"
-                    "slot_factor_mask,slot_factor_assigned,slot_factor_target_observed,"
-                    "slot_factor_margin,roi_active,roi_fallback,roi_x,roi_y,roi_w,roi_h,"
+                    "roi_active,roi_fallback,roi_x,roi_y,roi_w,roi_h,"
                     "model_letterbox_scale,gimbal_frozen,fire_slot,fire_slot_class,"
                     "fire_slot_activated,fire_latched,blade_searching,blade_selected_slot,"
                     "blade_selected_class,blade_selected_confirmed\n";
@@ -513,14 +504,7 @@ namespace auto_aim::energy::rune_diag
                  << row.candidates << ',' << row.state_orbit_px << ',' << row.state_lit_area
                  << ',' << row.state_roi_px << ',' << row.gate_hold << ','
                  << row.gate_window_open << ',' << row.gate_engageable << ','
-                 << row.slot_factor_enabled << ',' << row.slot_factor_valid << ','
-                 << row.slot_factor_target << ',' << (row.slot_factor_activated[0] ? 1 : 0)
-                 << (row.slot_factor_activated[1] ? 1 : 0)
-                 << (row.slot_factor_activated[2] ? 1 : 0)
-                 << (row.slot_factor_activated[3] ? 1 : 0)
-                 << (row.slot_factor_activated[4] ? 1 : 0) << ','
-                 << row.slot_factor_assigned << ',' << row.slot_factor_target_observed << ','
-                 << row.slot_factor_margin << ',' << row.roi_active << ','
+                 << row.roi_active << ','
                  << row.roi_fallback << ',' << row.roi_x << ',' << row.roi_y << ','
                  << row.roi_w << ',' << row.roi_h << ',' << row.model_letterbox_scale << ','
                  << row.gimbal_frozen << ',' << row.fire_slot << ',' << row.fire_slot_class

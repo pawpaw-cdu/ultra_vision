@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "auto_buff/rune_round_guard.hpp"
-#include "auto_buff/rune_slot_factor_graph.hpp"
 #include "auto_buff/rune_slot_lattice.hpp"
 #include "auto_buff/rune_aim_fallback.hpp"
 #include "auto_buff/rune_orbit_fit.hpp"
@@ -510,106 +509,6 @@ namespace
                   " votes=" + votes_debug + ")");
     }
 
-    // ---- 离散因子图：目标槽位 + 激活掩码联合估计 -------------------------
-    RuneSlotFactorGraph::Frame factorFrame(
-        int anchor_slot, std::vector<std::pair<int, cv::Point2f>> candidates,
-        std::array<bool, 5> activated = {})
-    {
-        RuneSlotFactorGraph::Frame frame;
-        frame.solved = true;
-        frame.anchor_slot = anchor_slot;
-        frame.activated_hint = activated;
-        for (int k = 0; k < 5; ++k) {
-            const double angle = -kPi / 2.0 + k * kSlot;
-            frame.slot_centers[static_cast<std::size_t>(k)] =
-                cv::Point2f(static_cast<float>(60.0 * std::cos(angle)),
-                            static_cast<float>(60.0 * std::sin(angle)));
-        }
-        frame.candidates = std::move(candidates);
-        return frame;
-    }
-
-    cv::Point2f factorSlotPoint(int relative_slot)
-    {
-        const double angle = -kPi / 2.0 + relative_slot * kSlot;
-        return cv::Point2f(static_cast<float>(60.0 * std::cos(angle)),
-                           static_cast<float>(60.0 * std::sin(angle)));
-    }
-
-    void testSlotFactorJointAssignment()
-    {
-        RuneSlotFactorGraph graph;
-        // Two boxes on the same physical slot must consume one slot only; a
-        // second candidate two slots away gets its own assignment.
-        graph.update(factorFrame(0, {{1, factorSlotPoint(0)},
-                                     {1, factorSlotPoint(0)},
-                                     {1, factorSlotPoint(2)}}),
-                     1.0);
-        const auto assigned = graph.snapshot();
-        check(assigned.valid && assigned.updated,
-              "slot factor: a solved frame produces an estimate");
-        check(assigned.assigned_count == 2,
-              "slot factor: duplicate detections are matched one-to-one");
-        check(assigned.assigned_class[0] == 1 && assigned.assigned_class[2] == 1 &&
-                  assigned.assigned_class[1] == -1,
-              "slot factor: assigned classes land on physical slots, not duplicate frames");
-    }
-
-    void testSlotFactorSwitchesAwayFromActivatedTarget()
-    {
-        RuneSlotFactorGraph graph;
-        graph.update(factorFrame(0, {{0, factorSlotPoint(0)}}), 1.0);
-        check(graph.snapshot().target_slot == 0,
-              "slot factor: initial inactive observation selects slot 0");
-
-        std::array<bool, 5> hit{};
-        hit[0] = true;
-        graph.update(factorFrame(0, {{1, factorSlotPoint(0)},
-                                     {0, factorSlotPoint(2)}}, hit),
-                     1.033);
-        const auto switched = graph.snapshot();
-        check(switched.target_slot == 2,
-              "slot factor: the activated target is replaced by the observed inactive slot");
-        check(switched.activated[0],
-              "slot factor: lattice activation evidence is retained in the MAP state");
-        check(switched.target_observed,
-              "slot factor: the replacement target is backed by this frame's observation");
-    }
-
-    void testSlotFactorActivationDecayAndReset()
-    {
-        RuneSlotFactorGraph graph;
-        std::array<bool, 5> hit{};
-        hit[0] = true;
-        graph.update(factorFrame(0, {{1, factorSlotPoint(0)},
-                                     {0, factorSlotPoint(2)}}, hit),
-                     2.0);
-        graph.update(factorFrame(0, {{0, factorSlotPoint(2)}}), 2.033);
-        graph.update(factorFrame(0, {{0, factorSlotPoint(2)}}), 2.066);
-        check(!graph.snapshot().activated[0],
-              "slot factor: a stale activation hint decays instead of latching for the round");
-
-        auto ended = factorFrame(0, {});
-        ended.round_active = false;
-        graph.update(ended, 2.1);
-        check(!graph.snapshot().valid,
-              "slot factor: a finished round clears the activation state");
-
-        graph.update(factorFrame(0, {{0, factorSlotPoint(1)}}), 2.2);
-        check(graph.snapshot().valid && graph.snapshot().target_slot == 1 &&
-                  !graph.snapshot().activated[0],
-              "slot factor: the next round starts with an empty mask and a fresh target");
-    }
-
-    void testSlotFactorAnchorMapping()
-    {
-        RuneSlotFactorGraph graph;
-        // slot_centers[1] is physical slot (3+1)%5 = 4.
-        graph.update(factorFrame(3, {{0, factorSlotPoint(1)}}), 3.0);
-        check(graph.snapshot().target_slot == 4,
-              "slot factor: candidate offsets are mapped back to physical slot ids");
-    }
-
     void testFireGateIsIndependentFromObservation()
     {
         RuneFireGate::Config config;
@@ -857,10 +756,6 @@ int main()
     testLatticeRetiredSlotBooksActivation();
     testLatticeSilenceAndFullReset();
     testLatticeRoundResetAndDecay();
-    testSlotFactorJointAssignment();
-    testSlotFactorSwitchesAwayFromActivatedTarget();
-    testSlotFactorActivationDecayAndReset();
-    testSlotFactorAnchorMapping();
     testFireGateIsIndependentFromObservation();
     testBladeSelectorSearchesNextBladeAfterHit();
     testBladeSelectorRejectsNearAndActivatedCandidates();

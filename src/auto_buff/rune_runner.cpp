@@ -34,7 +34,6 @@
 #include "auto_buff/rune_runner.hpp"
 #include "auto_buff/rune_aim_fallback.hpp"
 #include "auto_buff/rune_round_guard.hpp"
-#include "auto_buff/rune_slot_factor_graph.hpp"
 #include "auto_buff/rune_slot_lattice.hpp"
 #include "auto_buff/rune_timebase.hpp"
 #include "auto_buff/rune_blade_finder.hpp"
@@ -225,17 +224,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
     lattice_config.rotate_booking_on_switch = config.slot_rotate_booking_on_switch;
     auto_aim::energy::RuneSlotLattice slot_lattice(
         lattice_config, std::getenv("ULTRA_VISION_RUNE_DEBUG") != nullptr);
-    // P0 A/B: joint MAP over (target slot, activation mask). Default off; the
-    // existing lattice remains the fallback and source of activation evidence.
-    static const bool slot_factor_enabled =
-        std::getenv("ULTRA_VISION_RUNE_SLOT_FACTOR") != nullptr &&
-        std::string(std::getenv("ULTRA_VISION_RUNE_SLOT_FACTOR")) != "0";
-    auto_aim::energy::RuneSlotFactorGraph slot_factor_graph(
-        auto_aim::energy::RuneSlotFactorGraph::Config{});
-    if (slot_factor_enabled) {
-        std::cout << "Energy rune: slot factor graph enabled "
-                     "(5 slots x 32 activation masks)" << std::endl;
-    }
     int fired_slot_id = -1;                  // 命中瞬间开火的那个槽位（喂回格点）
     cv::Point2f last_fired_center{0.0f, 0.0f};
     auto_aim::energy::rune_diag::RuneTelemetry telemetry_stats;
@@ -440,49 +428,10 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             lattice_frame.phase_rate =
                 target.ekfX().size() > 6 ? target.ekfX()[6] : 0.0;
             slot_lattice.update(lattice_frame, now);
-            if (slot_factor_enabled) {
-                auto_aim::energy::RuneSlotFactorGraph::Frame factor_frame;
-                factor_frame.solved = lattice_frame.solved;
-                factor_frame.anchor_slot = slot_lattice.slotId();
-                factor_frame.slot_centers = lattice_frame.slot_centers;
-                factor_frame.candidates = lattice_frame.candidates;
-                factor_frame.activated_hint = slot_lattice.snapshot().activated;
-                factor_frame.round_active = lattice_frame.round_active;
-                slot_factor_graph.update(factor_frame, now);
-            }
         }
         const auto slot_snapshot = slot_lattice.snapshot();
-        const auto factor_snapshot = slot_factor_graph.snapshot();
-        const bool use_slot_factor =
-            slot_factor_enabled && factor_snapshot.valid && factor_snapshot.updated &&
-            slot_snapshot.slot_id >= 0;
-        const auto& slot_activation =
-            use_slot_factor ? factor_snapshot.activated : slot_snapshot.activated;
-        int unactivated_slots = 0;
-        int only_unactivated_slot = -1;
-        if (slot_snapshot.slot_id >= 0) {
-            for (int slot = 0; slot < 5; ++slot) {
-                if (slot_activation[static_cast<std::size_t>(slot)]) continue;
-                ++unactivated_slots;
-                only_unactivated_slot = slot;
-            }
-        }
-        const int factor_target_slot =
-            use_slot_factor && unactivated_slots == 1
-                ? only_unactivated_slot
-                : (use_slot_factor ? factor_snapshot.target_slot
-                                   : slot_snapshot.slot_id);
-        const int factor_retarget_offset =
-            use_slot_factor
-                ? ((factor_target_slot - slot_snapshot.slot_id) % 5 + 5) % 5
-                : 0;
-        const bool factor_target_usable =
-            use_slot_factor &&
-            (factor_snapshot.target_observed || unactivated_slots == 1);
-        const bool use_factor_retarget =
-            factor_target_usable && factor_retarget_offset != 0;
-        int planned_slot =
-            use_factor_retarget ? factor_target_slot : slot_snapshot.slot_id;
+        const auto& slot_activation = slot_snapshot.activated;
+        int planned_slot = slot_snapshot.slot_id;
         // 开火资格在观测/估计器更新之后由 RuneFireGate 单独计算。
         static const bool block_hit_slot = [] {
             const char* env = std::getenv("ULTRA_VISION_RUNE_BLOCK_HIT_SLOT");
@@ -1016,13 +965,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             sources.slot_activated = slot_snapshot.activated;
             sources.slot_votes = slot_snapshot.votes;
             sources.slot_centers = slot_snapshot.slot_centers;
-            sources.slot_factor_enabled = slot_factor_enabled;
-            sources.slot_factor_valid = use_slot_factor;
-            sources.slot_factor_target = planned_slot;
-            sources.slot_factor_activated = factor_snapshot.activated;
-            sources.slot_factor_assigned = factor_snapshot.assigned_count;
-            sources.slot_factor_target_observed = factor_snapshot.target_observed;
-            sources.slot_factor_margin = factor_snapshot.margin;
             sources.gimbal_frozen = gimbal_frozen;
             const auto orbit = solver.lastOrbitFit();
             sources.orbit_valid = orbit.valid;

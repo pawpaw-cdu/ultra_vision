@@ -92,13 +92,6 @@ namespace auto_aim::energy::rune_diag
         std::array<int, 5> slot_votes{};   // 各槽位当前证据票数（投票阈值记账）
         // 5 个槽位在图像里的预测位置（k=0 = 当前瞄准槽位），用于离线核对归属。
         std::array<cv::Point2f, 5> slot_centers{};
-        int slot_factor_enabled = 0;
-        int slot_factor_valid = 0;
-        int slot_factor_target = -1;
-        std::array<bool, 5> slot_factor_activated{};
-        int slot_factor_assigned = 0;
-        int slot_factor_target_observed = 0;
-        double slot_factor_margin = 0.0;
         int roi_active = 0;
         int roi_fallback = 0;
         int roi_x = 0;
@@ -253,13 +246,6 @@ namespace auto_aim::energy::rune_diag
         std::array<bool, 5> slot_activated{};
         std::array<int, 5> slot_votes{};
         std::array<cv::Point2f, 5> slot_centers{};
-        bool slot_factor_enabled = false;
-        bool slot_factor_valid = false;
-        int slot_factor_target = -1;
-        std::array<bool, 5> slot_factor_activated{};
-        int slot_factor_assigned = 0;
-        bool slot_factor_target_observed = false;
-        double slot_factor_margin = 0.0;
         bool gimbal_frozen = false;
         bool orbit_valid = false;
         double orbit_semi_major_px = 0.0;

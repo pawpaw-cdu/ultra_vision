@@ -24,7 +24,6 @@ add_executable(buff_state_test
     ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_orbit_fit.cpp
     ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_round_guard.cpp
     ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_slot_lattice.cpp
-    ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_slot_factor_graph.cpp
     ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_fire_gate.cpp
     ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_blade_selector.cpp
     ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_plate_pattern.cpp
