@@ -98,10 +98,6 @@ namespace auto_aim
                     cfg_.armor_y_offsets[plate_id];
             }
             mean_y /= count;
-
-            // 径向角**与 yaw 无关**，先算一次存下来。它内部要做一次旋转
-            // （armorRadialAngle → 位姿矩阵），原来放在 1440 步的扫描里反复调，
-            // 一次 init 要白算上万次（实测每次重捕 20~40 ms 的大头就是它）。
             std::array<std::optional<double>, 4> radial_angles;
             for (std::size_t i = 0; i < count; ++i) {
                 radial_angles[i] = armorRadialAngle(observations[i].home);
@@ -127,14 +123,6 @@ namespace auto_aim
                 center_z /= center_count;
             }
 
-            // 粗→细两段扫描 yaw。原来是 1440 步（0.25°）定步长暴力扫，
-            // 而 evaluate 对**每一种板号排列**都要跑一遍（4 块板最多 24 种），
-            // 于是每次 tracker 重捕要 20~40 ms（实测 pnp+ekf 段 31 ms，且
-            // CPU 时间≈墙钟，是真在算）—— 偏偏重捕是最该快的时候。
-            // 代价函数对 yaw 是"每 90° 重复 + 单瓣内平滑"的，所以先 4° 粗扫，
-            // 再在粗最优点附近 0.5°、0.0625° 各细扫一圈：122 次评估取到
-            // 同一条极小值（约 12× 少算），精度反而更高（0.0625° vs 0.25°）。
-            // 本次排列自己的最优（细扫要围着它转，而不是围着全局最优转）
             double local_error = std::numeric_limits<double>::max();
             double local_yaw = 0.0;
             const auto scan = [&](double begin, double end, double step) {

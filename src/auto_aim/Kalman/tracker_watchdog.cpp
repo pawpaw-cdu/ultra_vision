@@ -52,11 +52,6 @@ namespace auto_aim
         stats.resets = watchdog_resets_;
         stats.reject_ratio = last_reject_ratio_;
         stats.samples = static_cast<int>(recent_measurements_.size());
-        // "已收敛" = 自上次（重新）初始化以来接受了足够多帧量测 + 状态没越界。
-        // 对齐 sp_vision 的 Target::convergened()（`update_count_ > 3 && !diverged()`）：
-        // 刚入靶/刚重捕的头几帧 ω 不可信，不允许拿它做提前量（见 TargetEstimate::converged）。
-        // 注意**不要**把 `state == TRACKING` 放进判据：TEMPD_LOST 每十几帧出现一次，
-        // 会让这个开关跟着抖，反而把提前量开关抖成 5°/s 级的震荡。
         if (!cfg_.watchdog_enabled) {
             stats.converged = true;
             return stats;

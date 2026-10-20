@@ -32,8 +32,7 @@ namespace auto_aim
         ekf_cfg.armor_y_offsets = cfg_.armor_y_offsets;
         ekf_.setConfig(ekf_cfg);
 
-        // 底盘慢层几何的初值（真机 15° 支架 / 逐板半径 / 板面尺寸），
-        // 之后由局部拟合器慢层或在线慢收敛修改。见 common/chassis_model.hpp。
+        // 底盘慢层几何的初值
         syncGeometryFromConfig();
 
         // 双模型的板模型（并行运行，见 TrackerConfig::plate_model_enabled）
@@ -77,8 +76,6 @@ namespace auto_aim
         bool yaw_trusted = true;
         if (ypd_observation) {
             YpdObservation observation = *ypd_observation;
-            // PnP 平面解 yaw 只在和预测一致时才喂给 EKF（见 pnp_yaw_trust_deg）：
-            // 不一致 → 把它的 yaw 噪声放到无穷大，位置/距离照用，yaw 交给 ω 外推。
             if (cfg_.pnp_yaw_trust_deg > 0.0 && ekf_.isInit()) {
                 const double error = std::abs(ArmorEKF::normalizeAngle(
                     observation.armor_yaw - ekf_.getPlateAngle(plate_id_)));
@@ -184,9 +181,6 @@ namespace auto_aim
             return false;
         }
 
-        // ---- 判据三：帧间隔过长（相机离线 / 时间戳跳变）----
-        // 只对"本来在跟踪"的状态判：LOST 本来就会重新初始化，DETECTING 还没建立状态。
-        // 对齐 sp_vision tracker.cpp：`state != lost && dt > 0.1s → lost`。
         if (cfg_.watchdog_enabled && ekf_.isInit() && state_ != TrackerState::LOST &&
             last_timestamp_ > 0.0) {
             const double gap = timestamp - last_timestamp_;
@@ -223,10 +217,6 @@ namespace auto_aim
         if (!ekf_.isInit()) return false;
 
         if (valid_armors.empty()) {
-            // Motion blur commonly drops a few frames during a small-gyro
-            // maneuver. Keep the constant-velocity estimate through the short
-            // loss window so the next plate can be associated at the correct
-            // phase. The state is reinitialized after the full loss timeout.
             predictStateTo(timestamp);
             lostUpdate();
             return false;
@@ -246,8 +236,6 @@ namespace auto_aim
         std::vector<Candidate> candidates;
         candidates.reserve(valid_armors.size() * 4);
         for (std::size_t i = 0; i < valid_armors.size(); ++i) {
-            // 四块预测板各算一次代价：留最优，并且要求最优**明显优于**次优，
-            // 否则这块观测在两块板之间模棱两可 → 直接不要（见 TrackerConfig 注释）。
             double best_cost = std::numeric_limits<double>::max();
             double second_cost = std::numeric_limits<double>::max();
             int best_plate = -1;
@@ -263,16 +251,9 @@ namespace auto_aim
                 }
             }
             if (best_plate < 0) {
-                // 四个预测板全都"够不着"（超出 max_match_distance / max_angle_error）
-                // —— 这类框不是"模棱两可"，是跟当前预测完全对不上（假框，
-                // 或者预测已经飘了）。和 ambiguous / scale 分开计数才好定位。
                 ++dropped_nomatch_;
                 continue;
             }
-            // ---- 板号锁定：优先沿用上一帧定的那块板 ----
-            // 实测（2026-09-29，图像闭环日志）：识别到的板会在物理板之间跳动，视轴上的
-            // 偏差一帧内跳 ±12~16°（正好是相邻/对角板的视差），闭环追着跳变永远不收敛。
-            // 已关联的那块只要代价不比最优差太多（< lock_margin 倍）就继续保持。
             if (cfg_.plate_lock_margin > 1.0 && plate_id_ >= 0 && plate_id_ < 4 &&
                 plate_id_ != best_plate) {
                 const double locked_cost = matchCost(*valid_armors[i], plate_id_);
@@ -298,9 +279,8 @@ namespace auto_aim
         std::array<bool, 4> plate_used{{false, false, false, false}};
         std::vector<YpdObservation> ypd_observations;
         ypd_observations.reserve(candidates.size());
-        std::vector<std::pair<int, std::size_t>> accepted_pairs;   // 几何慢收敛要用
-        // 被选中的那块板的 PnP yaw 是否可信（见 pnp_yaw_trust_deg）——
-        // 不可信时不能喂差分测速器（差分正是放大量）。
+        std::vector<std::pair<int, std::size_t>> accepted_pairs;   // 几何慢收敛
+        // 被选中的那块板的 PnP yaw 是否可信（见 pnp_yaw_trust_deg）
         bool best_yaw_trusted = true;
         for (const auto& candidate : candidates) {
             if (armor_used[candidate.armor_index] || plate_used[candidate.plate_id]) continue;
@@ -312,20 +292,8 @@ namespace auto_aim
                 continue;
             }
 
-            // PnP 平面解 yaw 的双解保护（见 pnp_yaw_trust_deg 注释）：只有当它和滤波器
-            // 预测的板相位一致（≤ 门限）时才让 EKF 用它的 yaw 分量；否则这一帧只信位置
-            // （bearing/距离），yaw 由 ω 外推 + 拟合器慢层提供。
             YpdObservation accepted = *observation;
             bool yaw_trusted = true;
-            // ---- 测量噪声自适应（照 sp_vision_25 的 Target::update_ypda）----------
-            // 他们的 R_dig = {4e-3, 4e-3,
-            //                 log(|视角|+1)+1,           ← 距离噪声随**视角**增大
-            //                 log(|距离|+1)/200 + 9e-2}  ← 径向角噪声随**距离**增大
-            // 两个要点：
-            //   ① 距离噪声 ≈1 m²（σ≈1m）—— 他们**几乎不信任 PnP 的深度**；我们原来用
-            //      0.01·(1+0.3d²)（4m 处 σ=0.24m），比他们紧 4 倍，而实测我们 PnP 深度
-            //      噪声正是 ±12cm（p10/p90）→ 一直在过度信任最差的那个量。
-            //   ② 用 **log 平滑加权**代替硬门控：擦边板（视角大）的距离自动降权，不丢数据。
             if (cfg_.distance_noise_scale > 0.0 && camera_fx_ > 1.0 && !armor.tvec.empty()) {
                 const double depth = std::max(0.3, std::abs(armor.tvec.at<double>(2)));
                 const double width = (armor.armor_type == auto_aim::large)
@@ -371,13 +339,10 @@ namespace auto_aim
                 effectiveNisThreshold(cfg_.soft_nis_gate, cfg_.ypd_nis_threshold));
             if (last_measurement_weight_ <= 0.0) best_armor_index = -1;
         } else if (valid_armors.size() == 1) {
-            // PnP can theoretically succeed without a usable rotation. Keep one
-            // Cartesian fallback only for that degenerate case.
             plate_id_ = selectPlateId(*valid_armors.front());
             const double cost = matchCost(*valid_armors.front(), plate_id_);
             if (!std::isfinite(cost) && state_ == TrackerState::TRACKING) {
-                // 唯一的观测连预测板都够不着：同样是"模型解释不了观测"，
-                // 计入看门狗窗口（否则这一类不收敛完全不入账）。
+                // 唯一的观测连预测板都够不着：同样是"模型解释不了观测"
                 noteMeasurement(false);
                 has_observation_ = false;
                 lostUpdate();
@@ -395,7 +360,6 @@ namespace auto_aim
         }
 
         if (best_armor_index < 0) {
-            // 有观测但量测被门限拒：计入看门狗窗口（这是"不收敛"的主要信号）
             noteMeasurement(false);
             has_observation_ = false;
             lostUpdate();
@@ -403,22 +367,6 @@ namespace auto_aim
         }
 
         plate_id_ = best_plate_id;
-        // ---- 硬约束：构造用的那块板一定是**离相机最近**的那块 ----------------
-        // 车心必须比它更远（画面上更靠上）。违反 = 模型的径向/相位翻了 180°
-        // （PnP 法向翻号或关联到对面板）→ 把 yaw 翻回来再摆。
-        // ---- 观测慢收敛：底盘几何自己学（**按组**，sp_vision 的 l/h 思路）---------
-        // sp_vision_25 的 Target 状态里显式带两个几何量：
-        //     l = r2 − r1（前后 vs 左右两组的**半径差**）
-        //     h = z2 − z1（两组的**高度差**）
-        // 并且它们在线估计。这非常关键，因为：
-        //   · 我们的模型原来四块板**完全等价** ⇒ "yaw 只在模 90° 有意义"，
-        //     板号/相位因此不可观 —— 换板跳变、90° 等价解的病根都在这里；
-        //   · 一旦前后组与左右组的半径/高度不同，90° 旋转不再等价，
-        //     板号与 yaw 立刻变得可观；
-        //   · "重投影远近不对" = 前后板的真实半径与左右板不同，而我们用一个 R 画四块板。
-        // 做法：在**硬钉之前**量"观测板心 − 模型板心"，按组（{0,2} 与 {1,3}）取平均，
-        // 径向分量低通进该组半径、竖直分量低通进该组高度；**均值**仍锚定在拟合器的 R 上
-        // （只有组间差是可观的）。
         if (cfg_.geometry_learn && ekf_.isInit() && !accepted_pairs.empty() &&
             !(cfg_.geometry_learn_max_omega > 0.0 &&
               cfg_.geometry_learn_max_omega < 3.0 &&
@@ -486,12 +434,6 @@ namespace auto_aim
                 syncGeometryToEkf();
             }
         }
-
-        // 判据必须用**沿视轴的深度**，不能用"到相机的距离"：
-        //   ±90° 那两块侧板到相机的距离本来就 > 车心（√(d²+R²) > d），
-        //   用距离判会在"看到侧板"时误触发 → yaw 每帧被翻 180° → 模型直接崩（实车踩过）。
-        // 只有观测板明确落在**远半侧**（沿视轴比车心还远 ⇒ 径向指反了）才翻，
-        // 且连续两帧确认（防单帧异常）。
         if (cfg_.nearest_plate_constraint && ekf_.isInit() && camera_pose_.valid) {
             const Matrix<3, 3> camera_to_home =
                 tracker_detail::cameraToWorldRotation(camera_pose_);
@@ -517,10 +459,6 @@ namespace auto_aim
         } else {
             nearest_plate_violation_frames_ = 0;
         }
-        // ---- 同帧多板联立解 (车心, yaw) --------------------------------------
-        // 用同帧 ≥2 块可信板的**位置**解 (车心, yaw)，作为一路强观测喂 EKF。
-        // 位置良态（不像 PnP 朝向 ±12° 双解、擦边距离退化），且车心由多块板共同
-        // 决定 —— 换板时不再由"当前被钉那块"单独决定（实车换板跳 0.2~0.3m 的来源）。
         if (cfg_.joint_solve && ekf_.isInit() && accepted_pairs.size() >= 2) {
             std::vector<std::pair<int, Vec<3>>> plates;
             plates.reserve(accepted_pairs.size());
@@ -544,10 +482,6 @@ namespace auto_aim
             }
         }
 
-        // ---- 硬约束：让"模型算出的这块板"精确落在观测上（只平移底盘中心）----
-        // 单板工况下，滤波器对"中心沿板面法向/切向"这两个方向本就不可辨识，靠软量测
-        // 会稳定偏出板心十几厘米（离线实测：径向 140 mm）。把观测当硬约束后，模型必定
-        // 穿过这块板，其余三块随之平移 —— 这正是"以识别到的板为锚"的物理含义。
         if (cfg_.hard_plate_constraint) {
             const Vec<3> observed = toVec(valid_pairs[best_armor_index].home.tvec);
             const Vec<3> predicted = ekf_.armorPosition(plate_id_);
@@ -563,9 +497,6 @@ namespace auto_aim
         updateRotationRate(valid_pairs[best_armor_index].home, timestamp, best_yaw_trusted,
                            plate_id_);
 
-        // ---- 双模型：同步喂板模型（上科大 2026 §9.4.4）-----------------------
-        // 观测 = 可见板的**世界系中心 + 板朝向（径向角）**。只并行运行，不参与输出；
-        // 输出切换（按 |ω| 带滞回）是下一片的事。
         if (cfg_.plate_model_enabled) {
             const Armor& observed = valid_pairs[best_armor_index].home;
             const auto plate_radial = armorRadialAngle(observed);
@@ -582,8 +513,6 @@ namespace auto_aim
                 plate_model_last_timestamp_ = timestamp;
             }
         }
-        // 双模型权重（文档 §9.4.4）：|ω| ≤ enter → 全用板模型；≥ exit → 全用整车；
-        // 中间是 BOTH 档，按 |ω| 线性融合。权重连续，所以不需要额外滞回。
         {
             const double omega_abs = std::abs(ekf_.getOmega());
             if (!cfg_.plate_model_enabled || !plate_ekf_.isInit()) {
@@ -635,10 +564,6 @@ namespace auto_aim
             debug_last_timestamp_ = timestamp;
         }
         const int samples = static_cast<int>(recent_measurements_.size());
-        // soft_nis_gate 打开后，"被拒"只剩关联层的 nomatch —— 那恰恰是高速自旋
-        // 刚开始锁定/换板时的正常现象，用它触发重初始化会把正在收敛的状态反复
-        // 打掉（实测 5 rad/s：只关掉这一条，重置就从 7 次降到 0~2 次）。
-        // 真正的发散交给下面的 stateDiverged()，相机断流交给帧间隔判据。
         if (!cfg_.soft_nis_gate && samples >= cfg_.watchdog_min_samples &&
             last_reject_ratio_ >= cfg_.watchdog_reject_ratio) {
             watchdogTrip("量测长期被拒（不收敛）");

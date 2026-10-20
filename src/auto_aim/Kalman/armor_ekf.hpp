@@ -12,10 +12,10 @@
 
 #include "Kalman/uv_observation.hpp"
 
-#include "Kalman/linalg.hpp"   // Matrix / Vec（从本文件抽出）
+#include "Kalman/linalg.hpp"  
 #include "Kalman/ypd_observation.hpp"
-#include "common/chassis_model.hpp"   // armorPhaseOffset（板相位约定，滤波器/模型同源）
-#include "common/types.hpp"    // LocalFitResult（局部拟合器输出）
+#include "common/chassis_model.hpp"   
+#include "common/types.hpp"    
 
 namespace auto_aim {
 
@@ -29,41 +29,22 @@ public:
     struct Config {
         double R = 0.21;
         double process_acc = 1.0;
-        // 平移自适应的过程噪声（2026-09-26 加的）。过程噪声 `process_acc` 物理上
-        // 是"底盘加速度的不确定度"：靶车静止时它是 0，横移/急停时才有值。
-        // 常数取大了 → 静止/近距时把观测噪声当运动吸进来（实测 1 m 近距工况
-        // FIRING 从 81/115/82 掉到 16/15/17）；取小了 → 平移时速度估计跟不上
-        // 阶跃（横向误差 p10/p90 从 ±10 cm 涨到 -19/+24 cm）。
-        // 所以按下式随**估计速度**自适应放大，静止时回到 process_acc：
-        //   qa = clamp(process_acc · (1 + (|v|/speed_ref)²), process_acc, process_acc_max)
+        // 过程噪声 `process_acc` 物理上是"底盘加速度的不确定度"：
+        // 靶车静止时它是 0，横移/急停时才有值。
         double process_acc_speed_ref = 0.28;   // 米/秒，速度尺度
         double process_acc_max = 40.0;         // 上限，防止速度估计野值时爆掉
         double process_omega = 2.0;
-        /// l/h（分组长短轴）的过程噪声方差与初始方差（见 kStateDim 注释）。
-        // l/h 的过程噪声与硬边界。实车实测（model9.csv）：真实两组深度差只有 ~2.3cm，
-        // 但状态 l 在"l ↔ 车心/深度"的耦合里被过拟合推到 −8.6cm（每帧 PnP 位置噪声
-        // ±12cm，滤波器能拿 l 去凑），把重投影带坏。所以：
-        //   · 过程噪声放慢到 1e-7（1s≈1700步 → σ≈1.3cm，只跟真正的机械偏差）；
-        //   · 硬边界收到 ±5cm（机器人前后/左右半径差不可能更大）。
-        // 这样 l/h 只做"缓慢的几何修正"，不会去追观测噪声。
         double process_geometry = 1e-7;
         double geometry_delta_max = 0.05;   // |l|,|h| 硬边界（m）
-        double P_geometry = 2.5e-3;    // 初始 σ=5cm，允许从 0 收敛到真实差值
-        // IESEKF（上科大 2026 §5B.5）：更新内迭代次数。每次用**更新后的状态**
-        // 重新线性化观测函数，再更新一次；收敛后相当于在真值附近展开，比只在
-        // 先验处展开一次更准。代价是 2-5 倍的更新计算（相对整条链可忽略）。
+        double P_geometry = 2.5e-3;    // 初始 σ=5cm，允许从 0 收敛到真实差值。
         // 1 = 关闭（退化为标准 EKF）。
         int iekf_iterations = 3;
         double meas_noise = 0.01;
         double y_noise_mult = 30.0;
         double P_min = 1e-3;
-        // Vertical armor-center offsets in the chassis/home frame. Real robot
-        // armor sets normally leave these at zero; simulator models can define
-        // plate-specific offsets instead of forcing one shared y coordinate.
         std::array<double, 4> armor_y_offsets{{0.0, 0.0, 0.0, 0.0}};
-        // 四块板各自到**车心**的水平距离（米）：真车底盘是矩形，前后 ≠ 左右。
-        // 0 = 该块板用 R（默认四块相等 → 圆，与仿真靶/旧行为一致）。
-        // 由 Tracker 从 ChassisGeometry 同步过来（见 common/chassis_model.hpp）。
+        // 四块板各自到**车心**的水平距离（米）
+        // 0 = 该块板用 R（默认四块相等 → 圆）
         std::array<double, 4> plate_distance{{0.0, 0.0, 0.0, 0.0}};
     };
 
@@ -82,27 +63,21 @@ public:
         buildQ();
     }
 
-    /// @brief 只改回转半径（在线慢层用）。**不动状态/协方差** —— 半径是几何量，
-    ///        换一个值只是让 armorPosition() 把板摆在别的半径上，
-    ///        不需要（也不能）像 setConfig 那样 reset()，否则每次更新半径都丢跟踪。
+    /// @brief 只改回转半径（在线慢层用）。**不动状态/协方差** —— 半径是几何量
     void setArmorRadius(double radius) {
         if (radius > 0.05 && radius < 1.0) cfg_.R = radius;
     }
     double armorRadius() const { return cfg_.R; }
-    /// @brief 第 plate 块板的回转半径（矩形底盘 → 逐板不同；0 表示回落到 R）。
     double plateRadius(int plate) const {
         if (plate < 0 || plate >= 4) return cfg_.R;
         const double v = cfg_.plate_distance[static_cast<std::size_t>(plate)];
         return v > 0.0 ? v : cfg_.R;
     }
-    /// @brief 该块板（1,3 = 前后组）是否受 l/h 影响（sp_vision_25 的 use_l_h）。
     static bool usesGroupDelta(int plate) { return plate == 1 || plate == 3; }
-    /// @brief **l/h 生效后**该板的回转半径：R_plate + (前后组 ? l : 0)。
     double effectiveRadius(int plate) const {
         const double r = plateRadius(plate);
         return usesGroupDelta(plate) ? r + x_(9, 0) : r;
     }
-    /// @brief **l/h 生效后**该板的竖直偏置（世界系 y 向下；h 向上为正 ⇒ 前后组 − h）。
     double effectiveYOffset(int plate) const {
         const int p = std::max(0, std::min(3, plate));
         const double off = cfg_.armor_y_offsets[static_cast<std::size_t>(p)];
@@ -116,8 +91,6 @@ public:
         cfg_.plate_distance = distances;
     }
     /// @brief 逐板竖直偏置（home 系，正 = 更靠下）。同样只改几何、不动状态。
-    ///        底盘模型的 plate_height（向上为正）取负号同步到这里，二者必须一致，
-    ///        否则"滤波器摆的板"和"画出来的板"会差一个高度。
     void setArmorYOffsets(const std::array<double, 4>& offsets) {
         cfg_.armor_y_offsets = offsets;
     }
@@ -130,9 +103,7 @@ public:
     }
 
     static double angleForPlate(int plate_id) {
-        // 与底盘模型（common/chassis_model.hpp 的 armorPhaseOffset）**同一个约定**：
-        // k=1 在 0°（正面）、k=0 在 +90°、k=2 在 −90°、k=3 在 180°。两处必须一致，
-        // 否则"滤波器摆的板"和"画出来的板"会差 90°/180°。
+        // 与底盘模型（common/chassis_model.hpp 的 armorPhaseOffset）**同一个约定**
         return armorPhaseOffset(plate_id);
     }
 
@@ -186,11 +157,6 @@ public:
         P_(1, 1) = 1.0;  P_(3, 3) = 1.0;  P_(8, 8) = 1.0;
         P_(4, 4) = 0.4; P_(5, 5) = 0.4;
         // ω 的初始方差：**别给 100**。预测一步会生成 P(ω,sin/cos) 交叉协方差
-        // （量级 ≈ P_ω·dt），随后第一帧的 yaw 量测就把它当"转速信息"吃进去 ——
-        // 实车实测（回放 dump，静止靶重捕那一帧）：
-        // P_ω=100 时 ω 被一帧拉到 -199°/s，乘 386 ms 提前量就是瞄点甩 5~8°，
-        // 下一帧再弹回来（云台上就是"抽一下"）。改成 4（σ_ω = 2 rad/s = 115°/s，
-        // 仍是小陀螺量级）后，同一帧只到 -6°/s。真正的转速由多帧
         // RotationRateEstimator 经 updateOmega() 融合进来，不靠这一帧的 yaw。
         P_(6, 6) = 4.0;
         initialized_ = true;
@@ -267,14 +233,6 @@ public:
     }
 
     /// @brief YPD 观测的**马氏距离平方** d² = rᵀ·S⁻¹·r，S = H·P·Hᵀ + R。
-    ///
-    /// 这是上科大 2026 §5B.4 推荐的关联判据，也是本项目 `tracker.matchCost` 里
-    /// 那套"手写代价 + 固定/自适应角度门限"的正统替代：
-    ///   · S 已经按每个维度的**真实噪声/不确定度**归一化（角度是 rad、距离是 m，
-    ///     而且距离噪声随距离平方增长），所以深度方向的正常抖动不会被误判成
-    ///     "换了块板"，角度方向真的对不上又会被敏锐拒绝；
-    ///   · 门限就是卡方门限 χ²(4, 95%) ≈ 9.488，不再需要按 ω 手调角度；
-    ///   · 初始化/丢帧/刚重捕时 P 大 → S 大 → 门限自动变宽；收敛后 P 小 → 收紧。
     /// 返回 +inf 表示未初始化 / plate_id 非法 / S 不可逆（调用方应放弃这一对）。
     double ypdMahalanobisSquared(const YpdObservation& observation) const {
         const double inf = std::numeric_limits<double>::infinity();
@@ -397,10 +355,6 @@ public:
         }
 
         // ---- IESEKF：在更新后的状态处重新线性化（迭代 2-5 次）--------------
-        // 迭代式（上科大 2026 §5B.5）：
-        //   r_k = z − h(x_k) + H(x_k)·(x_k − x_prior)
-        //   x_{k+1} = x_prior + K(x_k)·r_k,   K 用先验协方差 P_prior 算
-        // 迭代 1 次（k=0，x_k=x_prior）退化为标准 EKF。协方差只在最后用最后一次
         // 的 K/H 做一次 Joseph 更新（避免迭代中重复收缩 P）。
         const int iterations = std::max(1, cfg_.iekf_iterations);
         const Vec<kStateDim> x_prior = x_;
@@ -606,9 +560,6 @@ public:
         }
         const double weight = std::exp(-0.5 * distance_sq);
 
-        // A wrong plate assignment can look plausible in image space but be
-        // inconsistent with the current chassis covariance. Reject it before
-        // it contaminates the estimate.
         if (distance_sq > nis_threshold) return 0.0;
 
         Matrix<kStateDim, 3> K = P_ * H.transpose() * S_inv;
@@ -647,13 +598,6 @@ public:
         //     ∂观测/∂x4 = ∂θ/∂s =  cosθ = x5
         //     ∂观测/∂x5 = ∂θ/∂c = −sinθ = −x4
         // **必须用状态自己的 (sinθ, cosθ)**，不能用"旋转之后"的
-        // (sin_total, cos_total) —— 后者只在 angleForPlate(plate_id) == 0
-        // （本相位表里就是 plate 1）时才相等。
-        // 2026-10-11 修：原来写的是 (cos_total, -sin_total)，导致 plate 0/2 的
-        // 更新增益恰好为 0（yaw 完全不动）、plate 3 反号；而 updateWithLocalFit
-        // 固定传 plate_id=0 → **局部拟合器的 yaw 观测整条链路是空操作**。
-        // 有限差分与直接注入双重验证见 git 历史里的 docs/local_fit_tracker_responsibility_audit.md
-        // 审计项 D（修复前：plate 0/2 → +0.000°，plate 3 → −4.751°，plate 1 → +4.751°）。
         Matrix<1, kStateDim> H;
         H(0, 4) = x_(5, 0);
         H(0, 5) = -x_(4, 0);
@@ -686,16 +630,6 @@ public:
         return std::exp(-0.5 * nis);
     }
 
-    // Scalar update of the chassis yaw rate.
-    //
-    // The rate is already a filter state and the prediction step rotates
-    // [sin(theta), cos(theta)] by omega * dt, so the sequence of armor_yaw
-    // measurements carries rate information through the P(omega, sin/cos)
-    // cross covariance. An external radial-angle estimator is fused here as a
-    // gated measurement instead of overwriting the state: overwriting also
-    // zeroed that cross covariance, which stopped the filter from ever learning
-    // the rate on its own and made the estimate collapse whenever the external
-    // estimator lost validity for a frame.
     double updateOmega(
         double observed_omega, double noise,
         double nis_threshold = std::numeric_limits<double>::infinity()) {
@@ -773,21 +707,6 @@ public:
 
     Vec<kStateDim> getState() const { return x_; }
 
-    // 局部拟合器（小陀螺 θ/ω 拟合）的强观测注入。
-    //
-    // 正面观测时单帧 PnP 的 yaw 病态（左右边像素差趋零），此时不应喂 updateYpd 的
-    // yaw 分量；改用拟合器给出的**绝对 yaw + 角速度**做时序强观测。这里按质量缩放
-    // 观测噪声并走 NIS 门控（沿用 updateAngle / updateOmega，保留 ω↔sin/cos 交叉协方差，
-    // 不覆盖状态）。
-    //
-    // 约定：`fit.yaw` 已是 **EKF 坐标系**下的 chassis yaw（plate 0 相位）。相机系→
-    // EKF 系的换算由调用方（Tracker::applyLocalFit）完成。返回综合有效权重（0 表示未采用）。
-    /// @brief 相位表里"零偏移"的那块板：angleForPlate(1) == 0。
-    ///        想吃进"**底盘 yaw 本身**"这个观测量时，就用它当 plate_id ——
-    ///        updateAngle() 的预测值 = θ + angleForPlate(plate_id) = θ。
-    ///        为什么需要它：updateAngle 的语义是"某块板的相位"，直接传 0 表示
-    ///        "plate 0 的相位 = θ+90°"，和"底盘 yaw"差 90°（历史上就是把这两个
-    ///        混在一起，才让 yaw 通道失效的）。
     static constexpr int kChassisYawPlateId = 1;
 
     double updateWithLocalFit(
@@ -797,8 +716,6 @@ public:
         const double q = std::clamp(fit.quality, 0.05, 1.0);
         // LocalFitResult::yaw 是**底盘 yaw**（与 angleForPlate 同一张相位表，见
         // estimation/local_trajectory_fitter.hpp 的 plate_yaw_offsets 注释），
-        // 所以以"零偏移板"注入。fit.ref_armor_id 只用于调用方的门控/诊断 ——
-        // 表统一之后这里不再需要相位换算（见审计报告 P1-1/P1-2 的说明）。
         const double yaw_w =
             updateAngle(fit.yaw, kChassisYawPlateId, yaw_noise / q, nis_threshold);
         const double omega_w =
@@ -868,8 +785,6 @@ public:
         return r;
     }
 
-    /// 数值雅可比 8×11：手推 8×11 解析式太容易出错（本项目有过先例），
-    /// 而 h() 只是 4 次投影、很便宜 —— 11 次额外求值换"不会写错"。
     Matrix<8, kStateDim> uvJacobian(const UvObservation & o, const UvGeometry & g,
                                     double base) const
     {
@@ -888,9 +803,7 @@ public:
     }
 
     /// 差分残差（4 维）：每根灯条 (Δu, Δv) = (观测 − 预测)，与 updateAngle 同约定
-    /// ⚠ 这里是 (z − h)：EKF 形式是 x += K·(z − h)。第一版写成 (h − z)，结果把 yaw 往反方向推。
-    /// **与平移无关** —— 这正是它能单独定 θ 的原因（打破 C↔θ 退化，见
-    /// git 历史里的 docs/uv_ekf_feasibility.md §3.1）。
+
     Vec<4> uvDiffResidual(const UvObservation & o, const UvGeometry & g) const
     {
         const auto pts = uvEndpoints(o.plate_id, g);
@@ -975,15 +888,10 @@ public:
         if (!(o.fx > 1.0) || !(o.fy > 1.0)) return 0.0;
 
         // **两步**：先差分（与平移无关 → 单独定 θ/R），再平均（在 θ 已知下定 C）。
-        // 单板下 C 与 θ 近退化，合成一次 8 维会把修正劈错方向（实测发散，见
-        // git 历史里的 docs/uv_ekf_feasibility.md §3.1）—— 顺序不能反，也不能合并。
-        // 噪声：端点单次 σ 已知 ⇒ 差分 σ=√2σ、平均 σ=σ/√2（可由 obs 覆盖）。
         const double s_corner = std::sqrt(0.5 * (o.sigma_diff_px * o.sigma_diff_px +
                                                  o.sigma_avg_px * o.sigma_avg_px));
         const double s_diff = (o.sigma_diff_px > 0 ? o.sigma_diff_px : std::sqrt(2.0) * s_corner);
         const double s_avg = (o.sigma_avg_px > 0 ? o.sigma_avg_px : s_corner / std::sqrt(2.0));
-        // gain<1：单板下 (C, θ) 的近退化会让全增益步**冲过头**（实测 5.7° 的误差一步走成
-        // −10°、随后发散）。阻尼相当于"带线搜索的高斯-牛顿"，代价是要多迭代几次。
         const double w_diff = uvUpdate4(
             o, s_diff,
             [&](const ArmorEKF & e, const UvObservation & oo) { return e.uvDiffResidual(oo, g); },
@@ -1000,9 +908,6 @@ public:
     double getYaw() const { return std::atan2(x_(4, 0), x_(5, 0)); }
     double getOmega() const { return x_(6, 0); }
 
-    // Hard state injection. It discards the P(omega, sin/cos) cross covariance,
-    // so it is not suitable for fusing a rate estimate; use updateOmega() for
-    // that. It remains only for callers that genuinely re-seed the state.
     void setAngularVelocity(double omega, double covariance = 0.04) {
         if (!initialized_ || !std::isfinite(omega)) return;
         x_(6, 0) = omega;
@@ -1096,8 +1001,6 @@ public:
     /// @brief 硬置底盘 yaw（换板时"相位重锚"用）。
     ///        换板那一帧，滤波器的 yaw 还停在旧板的状态上，而车心 = 观测板 − R·radial(yaw+φ)
     ///        → yaw 一滞后，车心就被新板方向拖走（实车 CSV：换板跳 0.43m、同板只抖 0.026m）。
-    ///        新板的实测径向是**直接的**底盘相位观测（误差=PnP 那几度），用它重锚比让
-    ///        滤波器慢慢追要稳得多。只动 sin/cos，ω 与协方差保留（yaw 方差略放宽）。
     void setChassisYaw(double yaw) {
         if (!initialized_ || !std::isfinite(yaw)) return;
         x_(4, 0) = std::sin(yaw);
@@ -1156,9 +1059,6 @@ private:
         const double distance_sq = horizontal_sq + py * py;
         const double distance = std::max(std::sqrt(distance_sq), 1e-9);
 
-        // Position is a direct function of the [sin(theta), cos(theta)]
-        // representation, so differentiate the rotation matrix directly.
-        // Adding an atan2 chain here is incorrect.
         const double dpx_ds = -radius * sin_plate;
         const double dpx_dc = radius * cos_plate;
         const double dpz_ds = radius * cos_plate;

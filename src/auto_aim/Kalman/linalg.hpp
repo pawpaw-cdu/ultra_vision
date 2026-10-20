@@ -2,7 +2,6 @@
 #define AUTO_AIM_LINALG_HPP
 
 // 从 Kalman/armor_ekf.hpp 抽出的轻量定长线性代数（Matrix/Vec）。
-// 纯搬家，数值与接口不变 —— 目的只是让 armor_ekf.hpp 回到"只讲一个 EKF"的职责。
 
 #include <algorithm>
 #include <array>

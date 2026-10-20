@@ -18,9 +18,6 @@ namespace auto_aim
 {
     namespace
     {
-        // 灯条在板面切向的偏移（±W/2）；与 LocalTrajectoryFitter 的 plate_width 一致。
-        // 板宽改由 yaml 给（local_fit.plate_width）——原来这里硬编码 0.135，
-        // 把拟合器 yaml 里的 plate_width 完全架空（见 tracker.hpp 的同名注释）。
 
         double wrapPi(double a)
         {
@@ -60,13 +57,6 @@ namespace auto_aim
         const double sep_max = plate_width * camera_fx_ / std::max(0.5, depth);
         const bool front = sep > cfg_.local_fit.front_gate * sep_max;
 
-        // A1 身份：按图像板心"最近邻 + 常速预测"关联到某条已开弧。
-        // **板号（plateIdFor）只当偏好，不当硬条件**：
-        //   · 板号来自模型 yaw，会被 PnP 平面解抖动带着跳；当硬条件时一跳就每帧新建弧，
-        //     弧永远攒不到 min_bars（实车 log: push=4280 却 fit=4/5）。
-        //   · 但完全不用板号也不行：同帧两块板在图像里接近时会把两块板串进一条弧，
-        //     弧里混了两块板的数据 → 拟合残差变大、有效解比例掉（仿真实测 100%→24%）。
-        // 所以：**优先接板号一致的弧；没有才退到最近的弧**。
         LocalFitArc* arc = nullptr;
         LocalFitArc* fallback = nullptr;
         double best = 1e9;
@@ -90,12 +80,8 @@ namespace auto_aim
         if (!front)
         {
             // 板离开正对区：**只暂停，不清空**。
-            // 真机上板在门控阈值附近会来回抖，一帧不满足就把整条弧清掉 ⇒ 弧永远攒不够
-            // min_bars ⇒ 拟合器几乎不触发（实车 log: fit=2/5 就是这个原因）。
-            // "两次正面弧首尾拼起来"由下面的 gap 检查挡住（距上次累计太久才清）。
             return;
         }
-        // 距上次累计太久（板转过一圈又回来 / 中间长时间被挡）→ 清空重来：
         // θ(t) 线性模型跨过 >90° 相位会出镜像解。
         const double arc_gap_timeout = std::max(0.25, 1.5 * cfg_.local_fit.max_result_age);
         if (arc != nullptr && (t - arc->t) > arc_gap_timeout)
@@ -176,9 +162,6 @@ namespace auto_aim
         if (arc->obs.size() > cap)
             arc->obs.erase(arc->obs.begin(), arc->obs.end() - static_cast<long>(cap));
 
-        // 清理长时间不活跃的弧：**不管里面还有没有 obs** 都要删。
-        // 暂停语义下（一帧丢门控不清空）旧弧会一直留着，不清理就会堆成几百条，
-        // 而且 worker 会挑中它们去拟合几十秒前的数据。
         const double idle_timeout = std::max(1.0, 4.0 * cfg_.local_fit.max_result_age);
         local_fit_arcs_.erase(
             std::remove_if(local_fit_arcs_.begin(), local_fit_arcs_.end(),
@@ -199,10 +182,6 @@ namespace auto_aim
         {
             std::lock_guard<std::mutex> lock(local_fit_mutex_);
             if (!local_fitter_) return false;
-            // 收集 >= min_bars 的弧，并且**必须是当前还活着的弧**：
-            // 距最后一次累计不超过 max_result_age —— 否则拟合的是几十秒前的旧弧，
-            // 结果会被 applyLatestLocalFit 的老化门限丢掉（实车 log: arcs=176、apply=2
-            // 就是挑中旧弧、结果全废）。并列时先按"最新"，再按长度。
             std::vector<const LocalFitArc*> cand;
             for (const auto& a : local_fit_arcs_) {
                 if (static_cast<int>(a.obs.size()) < cfg_.local_fit.min_bars) continue;
@@ -239,9 +218,6 @@ namespace auto_aim
         }
         else
         {
-            // 两段式多板联合：① 先拟合参考弧得旋转中心 C 与 θ(t)=yaw+ω(t−t_end)；
-            // ② 各弧用"种子帧 PnP 板心相对 C 的方位角"定相位偏移 k（用位置量，避开病态 yaw）；
-            // ③ 堆叠后联合拟合。
             const std::vector<LightBarObservation> ref_window = window;
             LocalFitResult ref;
             if (fitter(ref_window, ref) && ref.valid)
@@ -265,7 +241,6 @@ namespace auto_aim
             }
             if (!ok) { window = ref_window; ok = fitter(window, result) && result.valid; }  // 退化为单板
         }
-        // 诊断/实验：每次拟合结果落 CSV（env ULTRA_VISION_LOCAL_FIT_LOG 指定路径）。
             if (const char* p = std::getenv("ULTRA_VISION_LOCAL_FIT_LOG")) {
                 static std::ofstream log(p, std::ios::out);
                 log << result.timestamp << ',' << window.size() << ',' << result.omega << ','
@@ -335,27 +310,11 @@ namespace auto_aim
         const double cam_yaw = camera_pose_.valid ? camera_pose_.yaw : 0.0;
         conv.yaw = wrapPi(conv.yaw + cam_yaw * cfg_.local_fit.yaw_rate_sign);
         conv.omega *= cfg_.local_fit.yaw_rate_sign;
-
-        // ---- 延迟量测：把拟合 yaw 用**它自己的 ω** 外推到当前时刻 -----------------
-        // NUC 上一次弧段拟合要 ~0.8~1s，发布时 age≈1s > max_result_age(0.2s)，
-        // 于是原来那句"fresh 才注入"直接把它跳过 —— 这正是"开了 use_yaw 却毫无变化"
-        // 的原因（实车 model3 vs model4 的 trusted_fit 一模一样：38.9 vs 40.4px）。
-        // yaw/ω 是同一个弧段解，用 ω 外推到 now 再用即可（标准延迟量测处理），
-        // 外推误差随 age 增长 → yaw 噪声按 age 放大。
         double yaw_noise_eff = cfg_.local_fit.yaw_noise;
         if (!fresh && slow_ok) {
             conv.yaw = wrapPi(conv.yaw + conv.omega * age);
             yaw_noise_eff *= 1.0 + age / std::max(0.05, cfg_.local_fit.max_result_age);
         }
-
-        // ---- 相位代表元：先试"精确注入"，不可信才退回"模 90° 吸附" ----------------
-        // 2026-10-11 起 LocalFitResult::yaw 是**底盘 yaw**，且拟合器与 EKF 用同一张
-        // 相位表（见 local_trajectory_fitter.hpp 的 plate_yaw_offsets 注释），所以
-        // 正常情况它和 EKF yaw 直接可比 —— 精确注入保留了绝对相位，逐板几何下也成立。
-        // 但参考板号（plateIdFor → 几何选板，读 EKF 状态）本身可能错：一旦错 k 号，
-        // 拟合 yaw 就整体差 k·90°。所以残差超门限时不信它，退回"与 EKF yaw 最近的、
-        // 模 90° 同余"的那个值（只在四块板对称的假设下成立的安全退路）。
-        // 注意这一步要在**延迟外推之后**做，否则比较的是两个不同时刻的 yaw。
         const double ekf_yaw = ekf_.getYaw();
         {
             const double gate = cfg_.local_fit.ref_yaw_gate_deg * M_PI / 180.0;
@@ -370,11 +329,6 @@ namespace auto_aim
             }
         }
 
-        // ---- 拟合 yaw 的常值相位偏置在线学习 ------------------------------------
-        // 实测（model4 vs model5）：直接注入拟合 yaw 后，慢转工况从 0.3px 劣化到 30px
-        // —— 拟合器自带 ≈8~12° 的常值偏差（它自己的几何/约定），而 EKF 的滞后 ∝ω、
-        // 整圈平均≈0。把"拟合 yaw − EKF yaw"（模 90° 内）慢低通当地标，注入前减掉，
-        // 就只取拟合器"无滞后"的那部分。
         {
             const double diff = std::remainder(conv.yaw - ekf_yaw, 0.5 * M_PI);
             const double limit = cfg_.local_fit.yaw_bias_limit_deg * M_PI / 180.0;
@@ -390,9 +344,7 @@ namespace auto_aim
             conv.yaw = wrapPi(conv.yaw - fit_yaw_bias_);
         }
 
-        // 默认只喂 ω（+中心），不喂 yaw（见 config.use_yaw；2026-10-10 起默认开）。
-        // 并**按 |ω| 混合**（见 LocalFitConfig::yaw_use_omega_* 注释）：
-        // 静态/慢转时 EKF 自己的 yaw 更准（0.3px），高速时拟合 yaw 无滞后更准。
+        // 默认只喂 ω（+中心），不喂 yaw
         double yaw_weight = 1.0;
         if (cfg_.local_fit.use_yaw && cfg_.local_fit.yaw_use_omega_full >
                                           cfg_.local_fit.yaw_use_omega_min) {
@@ -402,12 +354,6 @@ namespace auto_aim
                     (cfg_.local_fit.yaw_use_omega_full - cfg_.local_fit.yaw_use_omega_min),
                 0.0, 1.0);
         }
-        // ---- yaw 通道的质量门（2026-10-12）--------------------------------------
-        // 实测（同一份实车检测流，对照整车 EKF 的 yaw，模 90°）：
-        //   rmse <3px → σ_ψ=0.57° ｜ 3~8px → 9.7° ｜ 8~16px → 22.6°；ω 各档都稳。
-        // 而在加这道门之前，自旋时 |ω|≥2.5 就给满权重 → 那一坨 68% 的坏 yaw 直接进 EKF。
-        // ω 通道保持宽松（localFitOmegaUsable）：它是"无滞后"的那一路，也是我们在
-        // 自旋段真正要用的量。
         LocalFitGateConfig gate_cfg;
         gate_cfg.yaw_max_rmse_px = cfg_.local_fit.yaw_max_rmse_px;
         gate_cfg.yaw_min_phase_span_deg = cfg_.local_fit.yaw_min_phase_span_deg;
@@ -431,7 +377,6 @@ namespace auto_aim
         }
         if (yaw_weight <= 0.0) conv.yaw = ekf_yaw;
 
-        // ω 通道同样过质量门：拟合没贴住观测时，连角速度一起丢掉（实测见 gate 头文件）。
         const bool omega_ok = localFitOmegaUsable(*fit, gate_cfg);
         if (!omega_ok) ++local_fit_omega_gated_;
         const double fit_weight = (fresh || slow_ok) && omega_ok
@@ -441,10 +386,6 @@ namespace auto_aim
 
         // ---- 慢层几何写回（R / 安装倾角 α / 板心高度 h）------------------------
         // 拟合器在一个弧段上把这三个量一起解出来了，它们正是底盘模型的慢层参数
-        // （见 common/chassis_model.hpp）。**2026-10-11 之前这段调用被删掉了**：
-        // updateChassisFromFit 零调用点、local_fit_apply_geometry_ 无自增 →
-        // use_fit_radius 变成死配置（而 yaml 里它一直是 true）、状态行的 geometry= 恒为 0。
-        // 见 git 历史里的 docs/local_fit_tracker_responsibility_audit.md 审计项 F。
         if (cfg_.local_fit.use_fit_radius && slow_ok)
         {
             updateChassisFromFit(fit->R, fit->alpha, fit->h);
@@ -453,7 +394,6 @@ namespace auto_aim
 
         // ---- 旋转中心先验：拟合器判出的运动状态决定"中心该不该动" ----------
         // 纯旋转 → 旋转中心物理上不变 → 把车心往拟合中心拉（强）；有平移 → 只轻拉。
-        // 这一步是"防止旋转中心随检测板跑飞"的关键，也是模型构造的先验来源。
         if (cfg_.local_fit.center_anchor && slow_ok)
         {
             const double speed = std::sqrt(fit->drift[0] * fit->drift[0] +
@@ -486,11 +426,6 @@ namespace auto_aim
             }
         }
 
-        // 可选：把拟合出的**旋转中心**也当观测（also_update_center，默认关）。
-        // 单板工况下模型中心只能靠"钉在观测板上"得到，擦边/正面观测的 PnP 位置误差
-        // （实测 ±0.15 m）会 1:1 进模型中心 —— 自旋时整台车的重投影框被单块板拖着跑，
-        // 就是现场看到的"绿色框对得上、模型跑飞"。拟合中心是整段弧的最小二乘解，
-        // 抖动小一个量级，正好补这一路（拟合器输出的是**相机系**中心）。
         double center_weight = 0.0;
         if (cfg_.local_fit.also_update_center)
         {
@@ -498,8 +433,6 @@ namespace auto_aim
             camera_point(0, 0) = fit->center[0];
             camera_point(1, 0) = fit->center[1];
             camera_point(2, 0) = fit->center[2];
-            // 云台姿态已知 → 转到 home 系；未知（仿真里 tracker 不喂姿态）时
-            // EKF 本来就工作在相机系（toWorld 原样返回），直接用即可。
             const Vec<3> observation = camera_pose_.valid
                 ? tracker_detail::pointToWorld(camera_pose_, camera_point)
                 : camera_point;

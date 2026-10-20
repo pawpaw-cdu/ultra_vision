@@ -79,12 +79,7 @@ namespace auto_aim
 
     // 第 plate 块板的刚体姿态（相机系）。径向直接由滤波器的 yaw + 板相位给出
     // （和 armorPosition() 用的完全是同一个相位，所以板心与姿态必然自洽）；
-    // 车体竖直 = 世界系竖直转到相机系（EKF 的 world y 向下 → up = −y）；
-    // 灯条方向再由安装倾角 α 定死。这样"板心 + 切向 + 灯条方向"三件套把板定死，
-    // 不需要借任何观测板的东西（老 overlay 拿观测板 PnP 的 rvec 当整车竖直，
-    // 会把观测板的 roll 传染给另外三块板）。
-    // 把底盘几何同步给滤波器（逐板回转距离 + 逐板高度）。
-    // 高度符号：模型 plate_height 向上为正，EKF 的 armor_y_offsets 向下为正 → 取负。
+
     void Tracker::syncGeometryToEkf()
     {
         ekf_.setPlateDistance(geometry_.plate_distance);
@@ -97,12 +92,8 @@ namespace auto_aim
     void Tracker::syncGeometryFromConfig()
     {
         // 慢层几何的初值全部来自配置（此后只由拟合器慢层/在线慢收敛修改）：
-        //   · 半径：kalman.armor_radius（真机 0.25，仿真 0.21；矩形底盘可逐板配）
-        //   · 安装倾角：pnp.armor_pitch_deg（真机 15°）
-        //   · 板心高度：0（相对车心；由拟合器的 h 在线收敛）
-        //   · 板面尺寸：pnp.small_width/large_width/height（**与 PnP 同一组**）
         for (std::size_t i = 0; i < geometry_.plate_distance.size(); ++i) {
-            // 逐板距离配了就用它（真车矩形底盘），否则四块都用 armor_radius（圆）。
+            // 逐板距离配了就用它（真车矩形底盘）
             const double configured = cfg_.plate_distance[i];
             geometry_.plate_distance[i] =
                 configured > 0.05 ? configured : cfg_.armor_radius;
@@ -133,12 +124,6 @@ namespace auto_aim
         const double max_step = std::max(1e-4, cfg_.local_fit.radius_max_step);
         bool changed = false;
         if (std::isfinite(radius) && radius > 0.10 && radius < 0.50) {
-            // **只挪"平均半径"，保留逐板形状**（2026-10-11 修）。
-            // 原来是把四块板距离一次性写成同一个值（=正圆），但 geometry_learn /
-            // plate_distance 已经能学出**矩形底盘**（实车实测左右板到车心更远：
-            // 0.229/0.271/0.229/0.271）。一刀切成圆等于每次有效拟合都把逐板几何抹掉，
-            // 两个慢层互相打架。拟合器的 R 是"整段弧的平均回转半径"，正好对应
-            // meanDistance()，所以拿它修均值、形状交给 geometry_learn。
             const double mean = geometry_.meanDistance();
             const double step = std::clamp(radius - mean, -max_step, max_step);
             const double delta = alpha * step;
@@ -156,7 +141,6 @@ namespace auto_aim
             changed = true;
         }
         // 板心高度：拟合器的 h 是"板心在车辆系里相对旋转中心的高度"，向上为正，
-        // 与 geometry.plate_height 同号。四块板**同一高度**（真机事实）。
         if (std::isfinite(height_up) && std::abs(height_up) < 0.5) {
             const double mean = 0.25 * (geometry_.plate_height[0] + geometry_.plate_height[1] +
                                         geometry_.plate_height[2] + geometry_.plate_height[3]);
@@ -168,8 +152,7 @@ namespace auto_aim
         if (changed) syncGeometryToEkf();
     }
 
-    // 把滤波器状态里的 l/h（前后组半径差/高度差）叠加到慢层几何上：**模型与滤波器
-    // 必须用同一套几何**，否则"滤波器摆的板"和"画出来的板"又会分叉。
+    // 把滤波器状态里的 l/h（前后组半径差/高度差）叠加到慢层几何上
     ChassisGeometry Tracker::effectiveChassisGeometry() const
     {
         ChassisGeometry geometry = geometry_;
@@ -193,11 +176,6 @@ namespace auto_aim
                                 effectiveChassisGeometry(), plate);
     }
 
-    // 同帧多板联立解 (车心, yaw)：只用**观测位置**（良态），不用 PnP 朝向（±12° 双解）。
-    //   模型：p_i = C + R_i·(cos(ψ+φ_i), 0, sin(ψ+φ_i)) + (0, −h_i, 0)
-    //   两块板相减 ⇒ 与 C 无关：Δp_ij = R_i·r̂(ψ+φ_i) − R_j·r̂(ψ+φ_j)
-    //   → 只有 ψ 一个自由度可解（1D 高斯-牛顿，水平面 x/z）；C 由各板反推取平均。
-    //   逐板半径用当前慢层值（它由拟合器弧段解 + geometry_learn 提供）。
     bool Tracker::solveChassisFromPlates(const std::vector<std::pair<int, Vec<3>>>& plates,
                                          Vec<3>& center_out, double& yaw_out,
                                          double& residual_out) const
@@ -269,20 +247,12 @@ namespace auto_aim
         return true;
     }
 
-    // 重投影模型：输出口径的状态 → 按 (底速, ω) 外推到 dt → 整体变换到 render_pose 帧。
-    // 与 getEstimatedArmorPositions()（纯整车 EKF、不外推、用内部旧姿态变换）的区别：
-    //   ① 用输出口径状态（plate_model_weight_>0 时中心/yaw 来自板模型反推），
-    //      画出来的模型和瞄点/选板是同一套几何；
-    //   ② 外推到被显示那一帧的时刻，不再把观测延迟显示成模型相位滞后；
-    //   ③ 用**被显示那一帧的姿态**做世界→相机变换，云台动过也不会整片歪。
     Tracker::ModelSnapshot Tracker::modelAt(double dt, const CameraPose& render_pose) const
     {
         ModelSnapshot out;
         if (state_ == TrackerState::LOST || !ekf_.isInit()) return out;
         double clamped_dt = std::max(0.0, std::min(dt, 0.30));
-        // 未收敛（刚入靶/刚重捕：ω 还不可信）或 ω 明显是野值时**不外推** ——
-        // 用一个错的 ω 乘 0.1~0.2 s 会把模型甩到几十米外（实测初始化那几帧就是这样）。
-        // 与选择器"未收敛时不用 ω 做提前量"是同一条规则。
+        // 未收敛（刚入靶/刚重捕：ω 还不可信）或 ω 明显是野值时**不外推** 
         if (!watchdogStats().converged || !std::isfinite(getOmega()) ||
             std::abs(getOmega()) > 20.0) {
             clamped_dt = 0.0;
@@ -305,7 +275,7 @@ namespace auto_aim
 
         // 世界系 → render 帧相机系：位置用 pointToCamera，方向用旋转矩阵。
         CameraPose pose = render_pose;
-        if (!pose.valid) pose = camera_pose_;   // 没给姿态就退回内部存的（仿真无姿态时是单位阵）
+        if (!pose.valid) pose = camera_pose_; 
         const Matrix<3, 3> world_to_camera = tracker_detail::cameraToWorldRotation(pose).transpose();
         cv::Matx33d rotation;
         for (int r = 0; r < 3; ++r) {
@@ -361,14 +331,10 @@ namespace auto_aim
         const auto radial_angle = armorRadialAngle(armor);
         if (!radial_angle) return;
         // **底盘 yaw** = 灯条径向角 − 该板相位偏移。换板时径向角跳 ±90°，
-        // 减掉各自的相位偏移之后输入是连续的 —— 差分才代表真实转速。
         const double chassis_yaw = ArmorEKF::normalizeAngle(
             *radial_angle - ArmorEKF::angleForPlate(
                 (plate_id >= 0 && plate_id <= 3) ? plate_id : 0));
         if (!rotation_rate_estimator_.update(chassis_yaw, timestamp)) {
-            // One unusable sample must not erase a rate the filter already
-            // holds. Halving omega here used to make a single dropped frame
-            // (or a plate switch) look like the chassis had stopped spinning.
             return;
         }
         ekf_.updateOmega(rotation_rate_estimator_.omega(),
@@ -411,12 +377,6 @@ namespace auto_aim
                              (camera_dist_.rows * camera_dist_.cols) >= 4;
     }
 
-    // 拟合器的"车辆系→相机系"完整旋转：R_cv = G^T · R_cb(yaw,pitch)^T · B
-    //   G   = camera→gimbal 手眼外参（CameraPose.camera_to_gimbal）
-    //   R_cb= camera→home 旋转（相机光轴与云台 yaw/pitch 的关系，见 tracker_utils）
-    //   B   = 拟合器车辆系(X前/Y右/Z上) → home 系(X右/Y下/Z前)：X_v→(0,0,1),
-    //         Y_v→(1,0,0), Z_v→(0,-1,0)
-    // 外参单位阵且 pitch=0 时 R_cb=I、G=I → R_cv=B，与旧行为逐位一致（仿真不受影响）。
     std::array<double, 9> Tracker::fitterRcv() const
     {
         const auto cb = tracker_detail::cameraToBaseRotation(camera_pose_.yaw, camera_pose_.pitch);

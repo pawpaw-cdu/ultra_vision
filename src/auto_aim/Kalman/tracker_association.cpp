@@ -29,10 +29,7 @@ namespace auto_aim
 
     double Tracker::matchCost(const Armor& armor, int plate_id) const
     {
-        // 关联门限跟着滤波器自身的 yaw 不确定度走：初始化 / 丢帧 / 刚重捕时
-        // σ_yaw 大 → 门限宽（否则第一个预测还没建立，观测全被判 nomatch）；
-        // 收敛后 σ_yaw 小 → 门限回到 max_angle_error 的紧度。上限 < 90°，
-        // 保证相邻物理板始终被挡在外面。见 TrackerConfig 的注释。
+        // 关联门限跟着滤波器自身的 yaw 不确定度走
         double angle_gate = cfg_.max_angle_error;
         if (cfg_.adaptive_association_gate && ekf_.isInit()) {
             angle_gate = std::min(
@@ -41,7 +38,7 @@ namespace auto_aim
         }
         const auto observation = armorYpdObservation(armor, plate_id, cfg_);
         if (observation) {
-            // 马氏距离关联（上科大 2026 §5B.4）：代价 = d²，门限 = χ²(4,95%)。
+            // 马氏距离关联：代价 = d²，门限 = χ²(4,95%)。
             // S 已按逐维度噪声归一化，所以不需要再手调"角度多少度算换板"。
             if (cfg_.mahalanobis_matching && ekf_.isInit()) {
                 const double squared = ekf_.ypdMahalanobisSquared(*observation);
@@ -58,15 +55,10 @@ namespace auto_aim
             const double range_error = observation->distance - predicted.distance;
             const double armor_angle_error = std::abs(ArmorEKF::normalizeAngle(
                 observation->armor_yaw - predicted.armor_yaw));
-            // PnP 的 yaw（板法向 = 径向）是**双解**量：翻解时它一跳就是十几度甚至镜像。
-            // 所以它只当"弱观测量"：超过可信门限就不参与代价（也不参与下面的硬门限），
-            // 关联完全由位置（bearing 距离 + 距离误差）决定 —— 位置是良态的。
             const double yaw_trust = cfg_.pnp_yaw_trust_deg * M_PI / 180.0;
             const bool yaw_usable = (cfg_.pnp_yaw_trust_deg <= 0.0)
                 ? true
                 : (armor_angle_error <= yaw_trust);
-            // 距离门限跟着同一套"距离噪声随距离增长"的模型放大：远距 PnP 的
-            // 距离抖动本来就大（6.5 m 处 1 px≈0.5 m），固定门限会把真板挡掉。
             double range_gate = cfg_.max_match_distance;
             if (cfg_.adaptive_association_gate && ekf_.isInit()) {
                 const double range = std::max(0.5, predicted.distance);
@@ -76,9 +68,6 @@ namespace auto_aim
                                       cfg_.max_match_distance +
                                           cfg_.range_gate_sigma * sigma_range);
             }
-            // 角度硬门限改成落在**bearing 距离**上（米，= 预测距离 × 角度偏差），
-            // 与 max_match_distance 同量纲：位置差得远才是"够不着"；
-            // yaw 翻解不该把真板挡掉（那正是"选板跳/模型跟着转"的来源）。
             const double bearing_distance = predicted.distance *
                 std::hypot(yaw_error, pitch_error);
             double bearing_gate = cfg_.max_match_distance;
@@ -93,13 +82,11 @@ namespace auto_aim
                 return std::numeric_limits<double>::infinity();
             }
             if (cfg_.pnp_yaw_trust_deg <= 0.0) {
-                // 老行为（A/B 用）：直接拿 PnP 的 yaw 当硬门限。
-                // 平面解一翻，真板就会被挡在外面 —— 这就是"选板跳、模型跟着转"的老毛病。
                 if (armor_angle_error > angle_gate) {
                     return std::numeric_limits<double>::infinity();
                 }
             } else if (bearing_distance > bearing_gate) {
-                // 新行为：只用**位置**（bearing 距离）当门限；yaw 只做弱项（见上）。
+                // 只用**位置**（bearing 距离）当门限；yaw 只做弱项（见上）。
                 return std::numeric_limits<double>::infinity();
             }
 

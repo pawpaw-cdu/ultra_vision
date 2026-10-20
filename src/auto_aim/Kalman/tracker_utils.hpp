@@ -2,7 +2,6 @@
 #define AUTO_AIM_TRACKER_UTILS_HPP
 
 // 从 Kalman/tracker.cpp 抽出的无状态工具（几何/变换/YPD 观测构造）。
-// 放在 tracker_detail 命名空间里，tracker.cpp 用 using namespace 引入，调用点不用改。
 
 #include <algorithm>
 #include <cmath>
@@ -32,11 +31,6 @@ namespace
                 value(0, 0), value(1, 0), value(2, 0));
         }
 
-        /// @brief NIS 硬门限 → 软门限换算。soft_nis_gate 打开时返回 +inf，
-        ///        即"始终应用更新、只把 NIS 留给诊断"（对齐 sp_vision 的
-        ///        recent_nis_failures：它绝不因为 NIS 而丢观测）。硬门限在高速
-        ///        自旋下有正反馈——ω 没学到 → 残差大 → 拒更新 → ω 永远学不到。
-        ///        UV 路径不经过这里，仍保留硬门限（用来挡矩形板的镜像二义）。
         double effectiveNisThreshold(bool soft_nis_gate, double hard_threshold)
         {
             return soft_nis_gate ? std::numeric_limits<double>::infinity()
@@ -50,10 +44,6 @@ namespace
             const double cp = std::cos(pitch);
             const double sp = std::sin(pitch);
 
-            // Simulator camera pose in Bevy coordinates:
-            // R_home_camera = R_y(-yaw) * R_x(pitch). OpenCV optical axes are
-            // converted with diag(1, -1, -1), so the camera-to-home transform
-            // is S * R_home_camera * S.
             Matrix<3, 3> bevy_rotation;
             bevy_rotation(0, 0) = cy;
             bevy_rotation(0, 1) = -sy * sp;
@@ -97,8 +87,6 @@ namespace
             return translation;
         }
 
-        // 相机系点 → 世界系：先按手眼外参到云台系（含平移），再由 yaw/pitch 与
-        // base_to_world 转到世界系。外参为单位阵/零时与旧行为完全一致。
         Matrix<3, 3> cameraToWorldRotation(const CameraPose& pose)
         {
             Matrix<3, 3> base_to_world;
@@ -211,8 +199,7 @@ namespace
                 armor.tvec.at<double>(1),
                 armor.tvec.at<double>(2));
 
-            // The visible armor face points toward the camera. Its horizontal
-            // normal is also the radial direction from chassis center to plate.
+
             if (normal.dot(position) > 0.0) normal *= -1.0;
             const double norm = cv::norm(normal);
             if (norm < 1e-6) return std::nullopt;
@@ -244,7 +231,6 @@ namespace
             observation.yaw_noise = config.bearing_measure_noise;
             observation.pitch_noise = config.pitch_measure_noise;
             if (config.ypd_distance_sigma_coeff > 0.0) {
-                // 物理量纲：σ_dist = coeff · d（上科大 2026 §5B.2）。
                 const double sigma = config.ypd_distance_sigma_coeff * distance;
                 observation.distance_noise = sigma * sigma;
             } else {
