@@ -189,12 +189,32 @@ endif()
 # 已经在 uv 收敛时删掉。
 # calibrate_camera：棋盘格/圆点阵 → 相机内参（有海康 SDK 时还能 --live 直接拍）
 # hand_eye_calibrate：静止标定物 + 多组云台姿态 → 相机→云台外参（手眼）
+# hand_eye_verify：已有外参 + 已知板位姿 → 图像投影检查
+
+add_library(calibration_common STATIC
+    tools/calibration/board.cpp
+)
+target_include_directories(calibration_common PUBLIC
+    ${CMAKE_SOURCE_DIR}
+    ${OpenCV_INCLUDE_DIRS}
+    ${YAML_CPP_INCLUDE_DIRS}
+)
+target_link_libraries(calibration_common PUBLIC ${OpenCV_LIBS} ${YAML_CPP_LDFLAGS})
+
+add_library(handeye_core STATIC
+    tools/calibration/handeye_solver.cpp
+)
+target_include_directories(handeye_core PUBLIC
+    ${CMAKE_SOURCE_DIR}
+    ${OpenCV_INCLUDE_DIRS}
+)
+target_link_libraries(handeye_core PUBLIC ${OpenCV_LIBS})
 
 add_executable(calibrate_camera tools/calibrate_camera.cpp)
 target_include_directories(calibrate_camera PRIVATE
     ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/io
     ${OpenCV_INCLUDE_DIRS} ${YAML_CPP_INCLUDE_DIRS})
-target_link_libraries(calibrate_camera PRIVATE ${OpenCV_LIBS} ${YAML_CPP_LDFLAGS})
+target_link_libraries(calibrate_camera PRIVATE calibration_common)
 # 有海康 SDK 时把 --live 采集（直接开相机拍标定板）编进去
 if(ULTRA_VISION_USE_HIK_CAMERA AND HIK_LIB)
   target_sources(calibrate_camera PRIVATE io/camera/HikCamera.cpp)
@@ -204,26 +224,18 @@ if(ULTRA_VISION_USE_HIK_CAMERA AND HIK_LIB)
   set_target_properties(calibrate_camera PROPERTIES BUILD_RPATH "${HIK_LIB_DIR}")
 endif()
 
+add_executable(hand_eye_verify tools/hand_eye_verify.cpp)
+target_link_libraries(hand_eye_verify PRIVATE calibration_common)
+
 add_executable(hand_eye_calibrate
     tools/hand_eye_calibrate.cpp
-    src/auto_aim/perception/detector.cpp
-    src/auto_aim/perception/pnp_solver.cpp
-    src/auto_aim/perception/armor_source.cpp
     io/gimbal/gimbal.cpp io/gimbal/protocol.cpp io/serial/crc16.cpp io/serial/serial_port.cpp
 )
 target_include_directories(hand_eye_calibrate PRIVATE
     ${CMAKE_SOURCE_DIR}/src/auto_aim ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/io
     ${OpenCV_INCLUDE_DIRS} ${YAML_CPP_INCLUDE_DIRS}
 )
-target_link_libraries(hand_eye_calibrate PRIVATE ${OpenCV_LIBS} ${YAML_CPP_LDFLAGS} Threads::Threads)
-if(ULTRA_VISION_USE_OPENVINO)
-  target_sources(hand_eye_calibrate PRIVATE
-      src/auto_aim/perception/nn_detector.cpp
-      src/auto_aim/perception/keypoint_refiner.cpp
-      src/auto_aim/perception/async_detector.cpp)
-  target_compile_definitions(hand_eye_calibrate PRIVATE ULTRA_VISION_USE_OPENVINO=1)
-  target_link_libraries(hand_eye_calibrate PRIVATE openvino::runtime)
-endif()
+target_link_libraries(hand_eye_calibrate PRIVATE calibration_common handeye_core Threads::Threads)
 # 有海康 SDK 时把手眼工具的 --live（直接开相机 + 串口 + 实时解算）也编进去
 if(ULTRA_VISION_USE_HIK_CAMERA AND HIK_LIB)
   target_sources(hand_eye_calibrate PRIVATE io/camera/HikCamera.cpp)

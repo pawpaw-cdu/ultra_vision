@@ -28,19 +28,20 @@ using CameraType = rm_ultra::HikCamera;
 using CameraType = rm_ultra::GalaxyCamera;
 #endif
 
+#include "tools/calibration/board.hpp"
+
 namespace
 {
-    std::vector<cv::Point3f> boardPoints(const cv::Size& pattern, double square_mm)
+    calibration::BoardConfig makeBoardConfig(const cv::Size& pattern, double square_mm,
+                                             const std::string& kind)
     {
-        std::vector<cv::Point3f> points;
-        points.reserve(static_cast<std::size_t>(pattern.area()));
-        for (int row = 0; row < pattern.height; ++row) {
-            for (int col = 0; col < pattern.width; ++col) {
-                points.emplace_back(static_cast<float>(col * square_mm),
-                                    static_cast<float>(row * square_mm), 0.0f);
-            }
-        }
-        return points;
+        calibration::BoardConfig board;
+        board.pattern = kind;
+        board.cols = pattern.width;
+        board.rows = pattern.height;
+        board.square_mm = square_mm;
+        board.grid = "symmetric";
+        return board;
     }
 
     /// @brief 用合成棋盘格做自检：已知内参 → 造图 → 标定 → 看能否复原。
@@ -49,7 +50,9 @@ namespace
         const cv::Size pattern(9, 6);
         const double square_mm = 20.0;
         const cv::Matx33d truth(1200.0, 0.0, 720.0, 0.0, 1200.0, 540.0, 0.0, 0.0, 1.0);
-        const std::vector<cv::Point3f> object = boardPoints(pattern, square_mm);
+        const std::vector<cv::Point3f> object =
+            calibration::boardObjectPoints(
+                makeBoardConfig(pattern, square_mm, "chessboard"), 1.0);
         std::vector<std::vector<cv::Point3f>> object_points;
         std::vector<std::vector<cv::Point2f>> image_points;
         cv::Mat distortion;   // 合成数据不带畸变
@@ -82,7 +85,8 @@ namespace
     int calibrateFolder(const std::string& folder, const cv::Size& pattern, double square_mm,
                         const std::string& output, const std::string& kind = "chessboard")
     {
-    const std::vector<cv::Point3f> object = boardPoints(pattern, square_mm);
+    const calibration::BoardConfig board = makeBoardConfig(pattern, square_mm, kind);
+    const std::vector<cv::Point3f> object = calibration::boardObjectPoints(board);
     std::vector<std::vector<cv::Point3f>> object_points;
     std::vector<std::vector<cv::Point2f>> image_points;
     cv::Size image_size;
@@ -94,30 +98,7 @@ namespace
         const cv::Mat image = cv::imread(path);
         if (image.empty()) continue;
         std::vector<cv::Point2f> corners;
-        bool found = false;
-        if (kind == "circles") {
-            // 圆点阵：findCirclesGrid 给的就是亚像素质心，**不能**再跑 cornerSubPix
-            // （它会找"角点"，把圆心拖到圆盘边缘/白底上，实测能拖走 3.9 px、最大 11.7 px）。
-            found = cv::findCirclesGrid(image, pattern, corners, cv::CALIB_CB_SYMMETRIC_GRID);
-        } else {
-            // 先 SB（对光照/模糊更稳），不再用经典检测的 FAST_CHECK 提前放弃——实测同一批
-            // 30 张里经典+FAST_CHECK 只认出 24 张，SB 全中。经典检测留作兜底。
-            found = cv::findChessboardCornersSB(image, pattern, corners,
-                                                cv::CALIB_CB_NORMALIZE_IMAGE);
-            if (!found) {
-                found = cv::findChessboardCorners(
-                    image, pattern, corners,
-                    cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_NORMALIZE_IMAGE);
-            }
-        }
-        if (!found) continue;
-        if (kind != "circles") {
-            cv::Mat gray;
-            cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
-            cv::cornerSubPix(gray, corners, cv::Size(11, 11), cv::Size(-1, -1),
-                             cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::COUNT, 30,
-                                              0.01));
-        }
+        if (!calibration::detectBoardCorners(image, board, corners)) continue;
         object_points.push_back(object);
         image_points.push_back(corners);
         image_size = image.size();
@@ -254,6 +235,7 @@ int captureLive(const std::string& folder, const cv::Size& pattern, double squar
     // 存图那一刻才在**全分辨率**上复检一次（一次按键一次，代价可接受），
     // 保证存下来的是能用的高清图。
     constexpr int kPreviewWidth = 640;
+    const calibration::BoardConfig board = makeBoardConfig(pattern, square_mm, kind);
     static bool board_found = false;
     static std::vector<cv::Point2f> board_corners;
     cv::Mat preview;
@@ -286,10 +268,8 @@ int captureLive(const std::string& folder, const cv::Size& pattern, double squar
         if (run_detect) {
             board_corners.clear();
             // 预览阶段只用 SB（快，~20 ms @640）；不在预览上跑经典检测
-            board_found = (kind == "circles")
-                ? cv::findCirclesGrid(preview, pattern, board_corners, cv::CALIB_CB_SYMMETRIC_GRID)
-                : cv::findChessboardCornersSB(preview, pattern, board_corners,
-                                              cv::CALIB_CB_NORMALIZE_IMAGE);
+            board_found = calibration::detectBoardCorners(
+                preview, board, board_corners, false, false);
             detect_ms = std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - before_detect).count();
         }
@@ -324,16 +304,7 @@ int captureLive(const std::string& folder, const cv::Size& pattern, double squar
         }
         // 存图前在**全分辨率**上复检（含经典检测兜底），避免存进糊图/半张板
         std::vector<cv::Point2f> full_corners;
-        bool full_found = (kind == "circles")
-            ? cv::findCirclesGrid(frame, pattern, full_corners, cv::CALIB_CB_SYMMETRIC_GRID)
-            : cv::findChessboardCornersSB(frame, pattern, full_corners,
-                                          cv::CALIB_CB_NORMALIZE_IMAGE);
-        if (!full_found && kind != "circles") {
-            full_found = cv::findChessboardCorners(
-                frame, pattern, full_corners,
-                cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_NORMALIZE_IMAGE);
-        }
-        if (!full_found) {
+        if (!calibration::detectBoardCorners(frame, board, full_corners)) {
             std::cout << "[calib] 全分辨率复检没通过，跳过这张" << std::endl;
             continue;
         }

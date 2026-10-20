@@ -119,6 +119,16 @@ ctest --test-dir build_sim -R gimbal      # 协议帧 + 伪终端整链路
 #    s=存盘（hand_eye.yaml）→ 粘到 configs/camera.yaml 的 hikcamera 段
 ```
 
+标定完成后可用轻量投影工具检查外参：
+
+```bash
+./build/hand_eye_verify \
+  --image frame.jpg \
+  --extrinsic configs/camera.yaml \
+  --yaw 0 --pitch 0 \
+  --board-position 0.02,-0.21,1.11
+```
+
 标定板参数在 `configs/calibration.yaml`（棋盘格或圆点阵、行列数、方格边长）。
 内参不准，手眼解出来的外参会把内参误差一起吸收进去，所以顺序不能反。
 
