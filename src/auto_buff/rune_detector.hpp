@@ -132,11 +132,6 @@ namespace auto_aim::energy
         // Observation selection is deliberately class-agnostic: class 0/1/2 all
         // build the same five-slot geometry. Fire eligibility is handled by
         // RuneFireGate in the runner, never by rejecting an observation here.
-        // Soft candidate factors (A/B) combine phase, confidence, pattern and
-        // lock continuity. They intentionally contain no class term.
-        bool soft_candidate_selection = false;
-        double soft_confidence_weight = 0.10;
-        double soft_lock_weight = 0.25;
         // Fire-side latch: how long positive inactive evidence for one physical
         // slot remains usable while that blade is temporarily missed.
         double engageable_latch_s = 0.8;

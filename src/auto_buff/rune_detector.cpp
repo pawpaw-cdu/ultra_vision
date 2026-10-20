@@ -16,9 +16,6 @@ namespace auto_aim::energy
         : config_(config), model_(config.model), refiner_(config.refiner),
           plate_refiner_(config.plate_refiner)
     {
-        if (const char* soft = std::getenv("ULTRA_VISION_RUNE_SOFT_CANDIDATE")) {
-            config_.soft_candidate_selection = std::string(soft) != "0";
-        }
         if (const char* adaptive = std::getenv("ULTRA_VISION_RUNE_ADAPTIVE_SCALE")) {
             config_.canvas_adaptive = std::string(adaptive) != "0";
         }
@@ -45,7 +42,6 @@ namespace auto_aim::energy
                   << " score_thr=" << config_.model.confidence_threshold
                   << " kpt_conf=" << config_.model.keypoint_confidence_threshold
                   << " min_kpt=" << config_.model.min_valid_keypoints
-                  << " soft_candidate=" << (config_.soft_candidate_selection ? 1 : 0)
                   << " pad_adaptive=" << (config_.canvas_adaptive ? 1 : 0)
                   << " pad_recenter=" << (config_.canvas_recenter ? 1 : 0)
                   << " roi_fallback=" << (config_.canvas_recenter_fallback ? 1 : 0)
@@ -363,8 +359,7 @@ namespace auto_aim::energy
         // 这里做等价的事：先用**运动模型预测的相位**在全部候选里找"连续的那片"，
         // 找到就只保留它，类别随后不再参与。
         std::optional<std::size_t> continuous_index;
-        if (!config_.soft_candidate_selection &&
-            config_.phase_assoc.enabled && assoc_valid_ && timestamp > 0.0) {
+        if (config_.phase_assoc.enabled && assoc_valid_ && timestamp > 0.0) {
             const double dt = timestamp - assoc_time_;
             if (dt > 1e-4 && dt <= config_.phase_assoc.max_gap_s) {
                 const double predicted = assoc_phase_ + assoc_rate_ * dt;
@@ -396,52 +391,6 @@ namespace auto_aim::energy
                           << results.front().class_id << "), observation is class-agnostic"
                           << std::endl;
             }
-        }
-        if (pose_layout && config_.soft_candidate_selection && !results.empty()) {
-            const double dt = assoc_valid_ && timestamp > 0.0
-                ? timestamp - assoc_time_ : -1.0;
-            const bool phase_predictable =
-                config_.phase_assoc.enabled && assoc_valid_ && dt > 1e-4 &&
-                dt <= config_.phase_assoc.max_gap_s;
-            const double predicted_phase =
-                phase_predictable ? assoc_phase_ + assoc_rate_ * dt : 0.0;
-
-            std::size_t chosen = 0;
-            double best_score = std::numeric_limits<double>::max();
-            for (std::size_t index = 0; index < results.size(); ++index) {
-                const double phase = candidate_phase(results[index]);
-                double phase_cost = 0.0;
-                if (phase_predictable && std::isfinite(phase)) {
-                    const double residual = std::abs(limitRad(phase - predicted_phase));
-                    const double scale = std::max(0.05, config_.phase_assoc.tolerance_rad);
-                    phase_cost = std::log1p((residual / scale) * (residual / scale));
-                } else if (!std::isfinite(phase)) {
-                    phase_cost = 1.0;
-                }
-                const double confidence_reward =
-                    config_.soft_confidence_weight * results[index].prob;
-                double lock_cost = 0.0;
-                if (has_lock_) {
-                    lock_cost = config_.soft_lock_weight *
-                        std::min(1.0, cv::norm(results[index].center - locked_center_) /
-                                          std::max(1.0, config_.lock_break_px));
-                }
-                const double score =
-                    phase_cost + lock_cost - confidence_reward;
-                if (score < best_score) {
-                    best_score = score;
-                    chosen = index;
-                }
-            }
-            if (std::getenv("ULTRA_VISION_RUNE_DEBUG")) {
-                std::cerr << "[rune pick] soft factors: best=" << chosen
-                          << " cost=" << best_score
-                          << " phase_predictable=" << (phase_predictable ? 1 : 0) << std::endl;
-            }
-            std::vector<RuneModel::Object> keep;
-            keep.push_back(results[chosen]);
-            results.swap(keep);
-            picked_by_geometry_ = true;
         }
         // Observation/model construction is class-agnostic. Activated blades are
         // valuable geometry measurements and must still build the five-slot model.

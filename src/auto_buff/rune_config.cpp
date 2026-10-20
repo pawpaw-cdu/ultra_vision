@@ -182,12 +182,6 @@ namespace auto_aim::energy
             config.detector.plate_refiner.max_angle_diff_deg =
                 plate["max_angle_diff_deg"].as<double>(25.0);
         }
-        config.detector.soft_candidate_selection =
-            detector["soft_candidate_selection"].as<bool>(false);
-        config.detector.soft_confidence_weight =
-            detector["soft_confidence_weight"].as<double>(0.10);
-        config.detector.soft_lock_weight =
-            detector["soft_lock_weight"].as<double>(0.25);
         config.detector.engageable_latch_s =
             detector["engageable_latch_s"].as<double>(0.8);
         config.detector.blade_roi_ratio = detector["blade_roi_ratio"].as<double>(0.6);

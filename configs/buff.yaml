@@ -189,11 +189,6 @@ rune:
       max_center_shift_ratio: 0.25
       min_size_ratio: 0.6
       max_size_ratio: 1.6
-    # 观测软约束（A/B）：相位残差、置信度、靶面图案和锁定连续性。
-    # 这里刻意不含类别代价；类别只属于独立火控闸门。
-    soft_candidate_selection: false
-    soft_confidence_weight: 0.10
-    soft_lock_weight: 0.25
     # 火控层：某个物理槽位出现 class0 证据后，允许在短暂漏检期间继续使用该证据。
     # 只影响开火资格，不影响观测和模型构造。
     engageable_latch_s: 0.8

@@ -221,20 +221,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
     auto_aim::energy::rune_diag::RuneTelemetry telemetry_stats;
     // 本地时钟 - 仿真时钟（见遥测解析处），用于把 CSV 的时间轴对齐到仿真。
 
-    // 像素残差观测开关（默认开，`=0` 回到 3D 量测）与"多片同帧"开关。
-    static const bool pixel_residual_enabled =
-        std::getenv("ULTRA_VISION_RUNE_PIXEL_RESIDUAL") == nullptr ||
-        std::string(std::getenv("ULTRA_VISION_RUNE_PIXEL_RESIDUAL")) != "0";
-    // R 标那条量测要不要用（ULTRA_VISION_RUNE_PIXEL_RMARK=0 关掉）
-    static const bool pixel_use_rmark =
-        std::getenv("ULTRA_VISION_RUNE_PIXEL_RMARK") == nullptr ||
-        std::string(std::getenv("ULTRA_VISION_RUNE_PIXEL_RMARK")) != "0";
-    static const bool pixel_distance_anchor =
-        std::getenv("ULTRA_VISION_RUNE_PIXEL_DISTANCE_ANCHOR") == nullptr ||
-        std::string(std::getenv("ULTRA_VISION_RUNE_PIXEL_DISTANCE_ANCHOR")) != "0";
-    static const bool pixel_multi_blade =
-        std::getenv("ULTRA_VISION_RUNE_PIXEL_MULTI_BLADE") == nullptr ||
-        std::string(std::getenv("ULTRA_VISION_RUNE_PIXEL_MULTI_BLADE")) != "0";
     // 阶段计时（ULTRA_VISION_RUNE_PROFILE=1）：分出"推理之外的时间花在哪"。
     rune_diag::StageProfiler profiler(std::getenv("ULTRA_VISION_RUNE_PROFILE") != nullptr);
     const auto stage_ms = [](const auto& start) {
@@ -408,35 +394,20 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         const auto& slot_activation = slot_snapshot.activated;
         int planned_slot = slot_snapshot.slot_id;
         // 开火资格在观测/估计器更新之后由 RuneFireGate 单独计算。
-        static const bool block_hit_slot = [] {
-            const char* env = std::getenv("ULTRA_VISION_RUNE_BLOCK_HIT_SLOT");
-            return env == nullptr ? true : std::string(env) != "0";
-        }();
         bool aimed_slot_activated =
-            config.fire_block_on_hit_slot && block_hit_slot && planned_slot >= 0 &&
+            config.fire_block_on_hit_slot && planned_slot >= 0 &&
             slot_activation[static_cast<std::size_t>(planned_slot)];
         // 观测到的是**已激活**的那片（class 1/2）时告诉估计器：它相对跟踪槽位偏了
         // 几个槽位，请按这个偏移折算（相位 -offset×72°、靶心预测 +offset×72°）。
         const int observed_class = detector->targetClass();
-        // A/B 开关：ULTRA_VISION_RUNE_SLOT_OFFSET=0 关掉折算（回到"瞄点跟着观测片跑"
-        // 的旧行为），用来分离"折算"这一项对云台瞄准数据的影响。
-        // 默认**折算**（观测折算回跟踪槽位：瞄点稳、记账不漂，实测 §28）。
-    // ULTRA_VISION_RUNE_SLOT_OFFSET=0 ⇒ 观测按原样进估计器（估计器跟着观测片走，
-    // 与三家参考一致，但实测记账漂移更大、端到端相当）。
-    static const bool slot_offset_enabled =
-        std::getenv("ULTRA_VISION_RUNE_SLOT_OFFSET") == nullptr ||
-        std::string(std::getenv("ULTRA_VISION_RUNE_SLOT_OFFSET")) != "0";
-        if (slot_offset_enabled && rune.has_value() && rune->solved &&
+        if (rune.has_value() && rune->solved &&
             slot_snapshot.observed_offset_valid && observed_class > 0) {
             rune->slot_offset = slot_snapshot.observed_offset;
             rune->slot_offset_valid = true;
         }
         const auto stage_target_start = std::chrono::steady_clock::now();
-        // 像素残差观测（默认开；ULTRA_VISION_RUNE_PIXEL_RESIDUAL=0 可关回 3D 量测）：
-        // 把网络给的像素直接注入估计器，观测函数=重投影。
-        // 多片同帧（ULTRA_VISION_RUNE_PIXEL_MULTI_BLADE=1，默认开）：连 class 1/2 的
-        // 已激活片一起用 —— 同一个刚体，每多一片就多一组几何约束。
-        if (pixel_residual_enabled && rune.has_value() && rune->solved) {
+        // 把网络给的像素直接注入估计器：同一刚体的每一片都提供一组几何约束。
+        if (rune.has_value() && rune->solved) {
             auto_aim::energy::RunePixelModel pixel_model;
             pixel_model.project = [&solver](const Eigen::Vector3d& world) {
                 return solver.projectToImage(world);
@@ -446,8 +417,7 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             }
             pixel_model.radius = config.solver.target_radius_m;
             pixel_model.half_width = config.solver.target_half_width_m;
-            // 距离锚（ULTRA_VISION_RUNE_PIXEL_DISTANCE_ANCHOR=0 可关）
-            if (pixel_distance_anchor && rune->ypd_in_world[2] > 1.0) {
+            if (rune->ypd_in_world[2] > 1.0) {
                 pixel_model.pnp_distance_m = rune->ypd_in_world[2];
             }
             auto_aim::energy::RunePixelModel::Blade locked_blade;
@@ -458,26 +428,24 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                 locked_blade.slot_offset = slot_snapshot.observed_offset;
                 locked_blade.slot_offset_valid = slot_snapshot.observed_offset_valid;
                 locked_blade.class_id = detector->targetClass();
-                if (pixel_use_rmark && rune->target().has_rune_center) {
+                if (rune->target().has_rune_center) {
                     locked_blade.rmark_uv = rune->target().rune_center;
                     locked_blade.rmark_valid = true;
                 }
                 pixel_model.blades.push_back(locked_blade);
             }
-            if (pixel_multi_blade) {
-                for (const auto& candidate : detector->lastCandidates()) {
-                    if (!candidate.has_plate) continue;
-                    // 锁定的那片已经加过（同位置），跳过。
-                    if (cv::norm(candidate.center - rune->target().center) < 1.0f) continue;
-                    auto_aim::energy::RunePixelModel::Blade blade;
-                    blade.plate_uv = candidate.plate_points;
-                    blade.rmark_uv = candidate.rmark;
-                    blade.rmark_valid = pixel_use_rmark && candidate.has_rmark;
-                    blade.class_id = candidate.class_id;
-                    blade.slot_offset_valid =
-                        slot_lattice.slotOffsetForCandidate(candidate.center, blade.slot_offset);
-                    pixel_model.blades.push_back(blade);
-                }
+            for (const auto& candidate : detector->lastCandidates()) {
+                if (!candidate.has_plate) continue;
+                // 锁定的那片已经加过（同位置），跳过。
+                if (cv::norm(candidate.center - rune->target().center) < 1.0f) continue;
+                auto_aim::energy::RunePixelModel::Blade blade;
+                blade.plate_uv = candidate.plate_points;
+                blade.rmark_uv = candidate.rmark;
+                blade.rmark_valid = candidate.has_rmark;
+                blade.class_id = candidate.class_id;
+                blade.slot_offset_valid =
+                    slot_lattice.slotOffsetForCandidate(candidate.center, blade.slot_offset);
+                pixel_model.blades.push_back(blade);
             }
             target.setPixelModel(pixel_model);
         } else {
@@ -544,7 +512,7 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         if (blade_selection.retargeting && blade_selection.valid) {
             planned_slot = blade_selection.planned_slot;
             aimed_slot_activated =
-                config.fire_block_on_hit_slot && block_hit_slot && planned_slot >= 0 &&
+                config.fire_block_on_hit_slot && planned_slot >= 0 &&
                 slot_activation[static_cast<std::size_t>(planned_slot)];
         }
 
@@ -573,7 +541,7 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         fire_frame.observation_fresh = observation_fresh;
         fire_frame.planned_slot = planned_slot;
         fire_frame.planned_slot_class = planned_slot_class;
-        if (config.fire_block_on_hit_slot && block_hit_slot) {
+        if (config.fire_block_on_hit_slot) {
             fire_frame.activated = slot_activation;
         }
         fire_gate.update(fire_frame, now);
