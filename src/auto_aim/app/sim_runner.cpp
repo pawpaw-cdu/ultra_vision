@@ -22,7 +22,6 @@
 #include "app/config_paths.hpp"
 #include "app/csv_sink.hpp"
 #include "app/pipeline_config.hpp"
-#include "app/perf_stats.hpp"
 #include "app/sim_detail.hpp"
 #include "visualization/projection.hpp"
 #include "control/aim_pipeline.hpp"
@@ -234,31 +233,21 @@ namespace auto_aim
                 // 用来离线判断"时间戳该用哪个"。
                 "time_us,source_time_us,idx,u_lt,v_lt,u_lb,v_lb,u_rt,v_rt,u_rb,v_rb,x,y,z\n");
 
-            // 反"云台跑飞"守卫：瞄点相对当前下发角超过这个角度就不甩（见下发处的注释）。
-            // ULTRA_VISION_AIM_JUMP_LIMIT_DEG 可调，0 = 关。
-            aim_jump_limit_ = [] {
-                const char* value = std::getenv("ULTRA_VISION_AIM_JUMP_LIMIT_DEG");
-                const double degrees = value != nullptr ? std::atof(value) : 30.0;
-                return degrees > 0.0 ? degrees * CV_PI / 180.0 : 1e9;
-            }();
             // 曝光→收到的延迟：每秒取中位，喂给选择器当"观测年龄"的固定附加项。
             // ULTRA_VISION_SOURCE_DELAY=0 可关掉（A/B 用）。
             source_delay_enabled_ = [] {
                 const char* value = std::getenv("ULTRA_VISION_SOURCE_DELAY");
                 return value == nullptr || std::string(value) != "0";
             }();
-            prof_stages_ = std::getenv("ULTRA_VISION_PROF") != nullptr;
             // 定时退出（ULTRA_VISION_TEST_SECONDS）：仿真回归脚本要"跑 N 秒然后干净退出"，
             // 这样 CSV 的 ofstream 正常析构、最后几行不会因为 SIGTERM 丢掉。
             const char* test_seconds_env = std::getenv("ULTRA_VISION_TEST_SECONDS");
             test_seconds_ = test_seconds_env != nullptr ? std::atof(test_seconds_env) : 0.0;
             loop_start_time_ = std::chrono::steady_clock::now();
-            fps_start_ = std::chrono::steady_clock::now();
-
             return true;
         }
 
-        bool SimRunner::fetchFrame(std::chrono::steady_clock::time_point loop_start)
+        bool SimRunner::fetchFrame()
         {
             frame_sequence_ = 0;
             frame_local_timestamp_us_ = 0;
@@ -271,34 +260,32 @@ namespace auto_aim
             frame_ = receiver_->getFrame(&frame_sequence_, &frame_source_timestamp_us_,
                                          &frame_local_timestamp_us_, &frame_gimbal_yaw_,
                                          &frame_gimbal_pitch_);
-            after_frame_ = std::chrono::steady_clock::now();
             if (frame_.empty()) {
-                ++stats_.missing_frames;
-                ++stats_.net_empty;
-                if (stats_.missing_frames == 1 || stats_.missing_frames % 30 == 0) {
+                ++missing_frames_;
+                if (missing_frames_ == 1 || missing_frames_ % 30 == 0) {
                     std::cerr << "Waiting for simulator frames..." << std::endl;
                 }
                 key_ = cv::waitKey(1);
                 return false;
             }
-            stats_.missing_frames = 0;
+            missing_frames_ = 0;
             // 曝光→到手 的延迟采样（两边都是 Unix 时钟；Mac/NUC 有 NTP，
             // 常数级的钟差不影响"这段延迟有多大"的结论，只把绝对值平移）。
             // 这一项就是"观测年龄"里**原来被漏掉**的一段：检测用的是仿真端
             // 曝光时刻的像，而我们原来只用"本机收到的时刻"当观测时间。
             if (frame_source_timestamp_us_ > 0 &&
                 frame_local_timestamp_us_ > frame_source_timestamp_us_) {
-                stats_.source_delay_samples_us.push_back(
+                source_delay_samples_us_.push_back(
                     static_cast<double>(frame_local_timestamp_us_ - frame_source_timestamp_us_));
-            }
-            // 进帧速率统计（本机时钟，跨机器时间戳不可比）
-            ++stats_.net_frames;
-            stats_.net_recv_ms += std::chrono::duration<double, std::milli>(
-                std::chrono::steady_clock::now() - loop_start).count();
-            if (stats_.net_first_local_us == 0) {
-                stats_.net_first_local_us = frame_local_timestamp_us_;
-            } else {
-                stats_.net_prev_local_us = frame_local_timestamp_us_;
+                if (source_delay_samples_us_.size() >= 5) {
+                    std::vector<double> sorted = source_delay_samples_us_;
+                    std::sort(sorted.begin(), sorted.end());
+                    observation_source_delay_ = sorted[sorted.size() / 2] / 1e6;
+                }
+                if (source_delay_samples_us_.size() > 60) {
+                    source_delay_samples_us_.erase(source_delay_samples_us_.begin(),
+                                                   source_delay_samples_us_.begin() + 10);
+                }
             }
             return true;
         }
@@ -498,9 +485,9 @@ namespace auto_aim
             // 观测时刻：仿真里检测用的是**曝光那一刻**的像，所以要把
             // "曝光→到手"的延迟从收到帧的时刻里减掉（真机串口链路是同步的，直接用帧时刻）。
             const bool source_delay_usable = source_delay_enabled_ &&
-                stats_.observation_source_delay > 0.0005 && stats_.observation_source_delay < 0.120;
+                observation_source_delay_ > 0.0005 && observation_source_delay_ < 0.120;
             const uint64_t source_delay_us = source_delay_usable
-                ? static_cast<uint64_t>(stats_.observation_source_delay * 1e6) : 0;
+                ? static_cast<uint64_t>(observation_source_delay_ * 1e6) : 0;
             const double observation_time =
                 auto_aim::StandardClock::secondsFromUs(source_result_.timestamp_us) -
                 source_delay_us / 1e6;
@@ -523,14 +510,6 @@ namespace auto_aim
             frame.pose = detection_pose;
             frame.allow_control = true;         // 仿真里没有下位机，始终由我们控制
             frame.fire_enabled = fire_enabled_;
-            // 关联层统计：从 tracker 读（组件内部统计，见 assoc: 日志）
-            if (source_result_.fresh) {
-                stats_.assoc_detections += armor_count_;
-                stats_.assoc_nomatch += tracker.getDroppedNoMatch();
-                stats_.assoc_ambiguous += tracker.getDroppedAmbiguous();
-                stats_.assoc_scale += tracker.getDroppedByScale();
-                stats_.assoc_accepted += tracker.getAcceptedObservations();
-            }
             // 移动而不是拷贝：检出结果只进这一条流水线，搬走 vector 就够
             //（每帧省掉一次 Armor 列表（含嵌套 vector/cv::Mat 头）的深拷贝）。
             frame.armors = std::move(source_result_.armors);
@@ -540,11 +519,6 @@ namespace auto_aim
             aim_ready_ = outcome.aim_ready;
             aim_yaw_error_ = outcome.aim_yaw_error;
             aim_pitch_error_ = outcome.aim_pitch_error;
-            if (outcome.decision.valid) ++stats_.aim_valid_updates;
-            if (outcome.no_valid_plate) ++stats_.no_valid_plate_updates;
-            if (outcome.gave_up) ++stats_.give_up_updates;
-            if (outcome.aim_ready) ++stats_.aim_settled_updates;
-            if (outcome.held_for_jump) ++aim_jump_rejections_;
             if (outcome.fired_now) {
                 receiver_->sendFireCommand();
                 std::cout << cv::format(
@@ -554,10 +528,6 @@ namespace auto_aim
                     outcome.aim_yaw_error * 180.0 / CV_PI,
                     outcome.aim_pitch_error * 180.0 / CV_PI)
                           << std::endl;
-            }
-            if (outcome.decision.valid && previous_armor_id_ >= 0 &&
-                outcome.decision.armor_id != previous_armor_id_) {
-                ++stats_.plate_switches;
             }
             previous_armor_id_ = outcome.decision.valid ? outcome.decision.armor_id : -1;
             shooter_state_ = outcome.fire ? auto_aim::ShooterState::FIRING

@@ -112,21 +112,10 @@ ctest --test-dir build_sim -R gimbal      # 协议帧 + 伪终端整链路
 #    把输出粘到 configs/camera.yaml 的 hikcamera 段
 
 # 2) 手眼（相机→云台外参）：一个进程内开相机 + 开串口 + 找标定板 + 解算
-./build/hand_eye_calibrate --live
+./build/hand_eye_calibrate --auto
 #    把标定板**静止**摆在画面里；云台 yaw 大范围扫、pitch 分组单独变（至少 8 组，
 #    必须绕两个不同轴，只在一条线上扫数学上退化）
-#    空格=采一组（同时打印板子重投影 rms，>1px 说明板子/内参有问题）
-#    s=存盘（hand_eye.yaml）→ 粘到 configs/camera.yaml 的 hikcamera 段
-```
-
-标定完成后可用轻量投影工具检查外参：
-
-```bash
-./build/hand_eye_verify \
-  --image frame.jpg \
-  --extrinsic configs/camera.yaml \
-  --yaw 0 --pitch 0 \
-  --board-position 0.02,-0.21,1.11
+#    自动记录满足静止/新鲜度/重投影 rms 判据的样本，覆盖足够后写 hand_eye.yaml
 ```
 
 标定板参数在 `configs/calibration.yaml`（棋盘格或圆点阵、行列数、方格边长）。

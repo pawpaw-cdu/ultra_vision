@@ -13,8 +13,6 @@
 //
 // 用法：
 //   hand_eye_calibrate --auto                 自动采样（推荐）
-//   hand_eye_calibrate --live                 手动：空格采样 / s 存盘 / u 撤销 / q 退出
-//   hand_eye_calibrate --monitor              实时对表：画面里的真实转角 vs 回传角（含比值）
 //   hand_eye_calibrate <样本目录>              离线复算 + 交叉验证
 //   hand_eye_calibrate --selftest             合成数据自检（含 ±180 折返与标度错误）
 //
@@ -230,46 +228,6 @@ namespace
         return observation;
     }
 
-    /// @brief 画预览 + 状态，返回按下的键（-1 = 没按）。
-    int drawPreview(const cv::Mat& frame, const Observation& observation,
-                    const std::vector<Sample>& samples, const Fit& fit, const Options& options,
-                    double yaw_span, double pitch_span, const char* status)
-    {
-        cv::Mat display = frame.clone();
-        for (const auto& corner : observation.corners) {
-            cv::circle(display, corner, 4,
-                       observation.full ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 165, 255), -1);
-        }
-        cv::putText(display,
-                    cv::format("samples=%d  rms=%.2fpx  dist=%.2fm  tilt=%.0fdeg", 
-                               static_cast<int>(samples.size()), observation.rms,
-                               observation.dist_m, observation.tilt_deg),
-                    cv::Point(16, 40), cv::FONT_HERSHEY_SIMPLEX, 0.9,
-                    observation.found ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 0, 255), 2);
-        cv::putText(display,
-                    cv::format("yaw=%+.1f pitch=%+.1f  span %.1f/%.1f  %s",
-                               observation.yaw * 180.0 / CV_PI, observation.pitch * 180.0 / CV_PI,
-                               yaw_span, pitch_span, status),
-                    cv::Point(16, 80), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 255), 2);
-        if (fit.ok) {
-            cv::putText(display,
-                        cv::format("residual=%.1fmm  t=(%.3f,%.3f,%.3f)m  sigt=%.0fmm",
-                                   fit.residual_mm, fit.t[0], fit.t[1], fit.t[2],
-                                   std::max({fit.t_sigma[0], fit.t_sigma[1], fit.t_sigma[2]}) * 1000.0),
-                        cv::Point(16, 120), cv::FONT_HERSHEY_SIMPLEX, 0.8,
-                        cv::Scalar(255, 200, 0), 2);
-        }
-        cv::putText(display, "[space]=force sample  [s]=save  [u]=undo  [q]=quit",
-                    cv::Point(16, 160), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(200, 200, 200),
-                    2);
-        cv::putText(display, "(click this window first, keys go to the focused window)",
-                    cv::Point(16, 192), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(160, 160, 160), 2);
-        cv::resize(display, display, cv::Size(), 0.5, 0.5);
-        cv::imshow("hand_eye", display);
-        (void)options;
-        return cv::waitKey(1);
-    }
-
     void spansOf(const std::vector<Sample>& samples, double& yaw_span, double& pitch_span)
     {
         yaw_span = 0.0;
@@ -284,35 +242,6 @@ namespace
         }
         yaw_span = (yaw_max - yaw_min) * 180.0 / CV_PI;
         pitch_span = (pitch_max - pitch_min) * 180.0 / CV_PI;
-    }
-
-    /// @brief 收尾：不管是怎么退出的（采够/按 q/按 ESC），都做一次解算 + 写盘。
-    ///        上一版按 q 直接 break，什么都不输出（实测踩过：采了 64 组按 q 退出后没结果）。
-    void finishRun(const std::string& output, const std::vector<Sample>& samples,
-                   const Options& options, double yaw_span, double pitch_span)
-    {
-        std::cout << "[hand_eye] 收尾：共 " << samples.size() << " 组样本，覆盖 yaw " << yaw_span
-                  << "° / pitch " << pitch_span << "°" << std::endl;
-        if (samples.size() < 8) {
-            std::cout << "[hand_eye] 样本不足 8 组，不出结果（样本帧仍在，可用目录模式离线复算）"
-                      << std::endl;
-            return;
-        }
-        Fit fit;
-        if (!solve(samples, options.fit, fit)) return;
-        double in_sample = 0.0;
-        fit.cross_validate_mm = crossValidate(samples, options.fit, &in_sample);
-        printFit(samples, fit, "[hand_eye] 最终解算：");
-        std::cout << "[hand_eye] R_camera2gimbal = [";
-        for (int row = 0; row < 3; ++row) {
-            for (int column = 0; column < 3; ++column) {
-                std::cout << (row || column ? "," : "") << fit.R(row, column);
-            }
-        }
-        std::cout << "]" << std::endl;
-        std::cout << "[hand_eye] t_camera2gimbal = [" << fit.t[0] << "," << fit.t[1] << ","
-                  << fit.t[2] << "] m" << std::endl;
-        saveIfGood(output, samples, fit);
     }
 
     /// @brief 自动采样：板子静止、云台转动，满足判据就记一组；采够覆盖自动解算+写盘。
@@ -333,8 +262,7 @@ namespace
                   << hardware.board.cols << "x" << hardware.board.rows
                   << "）摆在画面里**别动**，然后慢慢转云台：yaw 扫一大段（跨度 ≥"
                   << options.yaw_span_target << "°）、pitch 分几档（≥" << options.pitch_span_target
-                  << "°）。采够 " << options.min_samples << " 组自动收工；窗口提示 OK 时可移动。"
-                  << "想手动补一组：点一下图像窗口再按空格（s=存盘，u=撤销，q=退出）。"
+                  << "°）。采够 " << options.min_samples << " 组自动收工。"
                   << std::endl;
 
         std::vector<Sample> samples;
@@ -343,7 +271,6 @@ namespace
         const auto session_start = std::chrono::steady_clock::now();
         double yaw_reference = 0.0;
         bool have_reference = false;
-        Fit fit;
         auto last_status = std::chrono::steady_clock::now();
 
         while (true) {
@@ -395,32 +322,8 @@ namespace
                                   : !still             ? "MOVING"
                                   : !novel             ? "SAME POSE"
                                                        : "OK";
-            const int key = drawPreview(frame, observation, samples, fit, options, yaw_span,
-                                        pitch_span, status);
-            if (key == 'q' || key == 27) {
-                finishRun(output, samples, options, yaw_span, pitch_span);
-                break;
-            }
-            if (key == 'u' && !samples.empty()) {
-                samples.pop_back();
-                std::cout << "[hand_eye] 撤销一组，剩 " << samples.size() << " 组" << std::endl;
-                continue;
-            }
-            if (key == 's') {   // 手动存盘：立刻解算并写 hand_eye.yaml
-                if (samples.size() >= 8 && solve(samples, options.fit, fit)) {
-                    double in_sample = 0.0;
-                    fit.cross_validate_mm = crossValidate(samples, options.fit, &in_sample);
-                    printFit(samples, fit, "[hand_eye] 手动存盘：");
-                    saveIfGood(output, samples, fit);
-                } else {
-                    std::cerr << "[hand_eye] 样本不足（需 ≥8 组）" << std::endl;
-                }
-                continue;
-            }
-            // 手动补采：空格强制记一组（跳过"静止/新鲜"判据），但板子必须完整、rms 别太离谱
-            const bool force = key == ' ';
             const bool accept = observation.found && observation.full && slow &&
-                                observation.rms < options.max_rms && novel && (force || still);
+                                observation.rms < options.max_rms && novel && still;
             if (accept) {
                 Sample sample;
                 sample.yaw = observation.yaw;
@@ -429,7 +332,7 @@ namespace
                 sample.tvec = observation.tvec.clone();
                 sample.time_s = std::chrono::duration<double>(frame_time - session_start).count();
                 samples.push_back(sample);
-                std::cout << "[hand_eye] " << (force ? "手动" : "自动") << "采第 " << samples.size()
+                std::cout << "[hand_eye] 自动采第 " << samples.size()
                           << " 组：yaw="
                           << sample.yaw * 180.0 / CV_PI << "° pitch="
                           << sample.pitch * 180.0 / CV_PI << "° rms=" << observation.rms
@@ -443,6 +346,7 @@ namespace
                              << observation.pitch << " " << sample.time_s << "\n";
                 }
                 if (samples.size() >= 8) {
+                    Fit fit;
                     if (solve(samples, options.fit, fit)) {
                         double in_sample = 0.0;
                         fit.cross_validate_mm = crossValidate(samples, options.fit, &in_sample);
@@ -461,7 +365,7 @@ namespace
                             yaw_span >= options.yaw_span_target &&
                             pitch_span >= options.pitch_span_target) {
                             std::cout << "[hand_eye] 覆盖够了但这个解没过质检（见上面一行），"
-                                         "继续采样；按 q 退出也会做一次收尾解算。" << std::endl;
+                                         "继续采样。" << std::endl;
                         }
                     }
                 }
@@ -481,144 +385,6 @@ namespace
     }
 
     /// @brief 手动采样：空格采一组、s 存盘、u 撤销、q 退出。
-    int collectLive(const std::string& config_dir, const std::string& output, const Options& options)
-    {
-        Hardware hardware;
-        if (!openHardware(hardware, config_dir)) return 1;
-        const std::string frame_dir =
-            options.frame_dir.empty() ? "hand_eye_samples" : options.frame_dir;
-        std::system(("mkdir -p " + frame_dir).c_str());
-        std::vector<Sample> samples;
-        double yaw_reference = 0.0;
-        bool have_reference = false;
-        Fit fit;
-        double yaw_span = 0.0, pitch_span = 0.0;
-        std::cout << "[hand_eye] 手动采样：先点一下图像窗口（按键只发给被聚焦的窗口），"
-                     "然后 空格=采一组，s=存盘，u=撤销，q=退出" << std::endl;
-        while (true) {
-            cv::Mat frame;
-            FrameTime frame_time;
-            if (!getImageTimed(hardware.camera, frame, frame_time, 500) || frame.empty()) continue;
-            if (!have_reference) {
-                io::ImuSample pose;
-                if (hardware.gimbal->latestImu(pose)) {
-                    yaw_reference = pose.yaw;
-                    have_reference = true;
-                }
-                continue;
-            }
-            const Observation observation = observeAt(hardware, frame, frame_time, yaw_reference);
-            spansOf(samples, yaw_span, pitch_span);
-            const char* status = !observation.found ? "NO BOARD"
-                                  : !observation.full ? "BOARD CUT"
-                                                      : "READY";
-            const int key = drawPreview(frame, observation, samples, fit, options, yaw_span,
-                                        pitch_span, status);
-            if (key == 'q' || key == 27) {
-                finishRun(output, samples, options, yaw_span, pitch_span);
-                break;
-            }
-            if (key == 'u' && !samples.empty()) {
-                samples.pop_back();
-                std::cout << "[hand_eye] 撤销一组，剩 " << samples.size() << " 组" << std::endl;
-                continue;
-            }
-            if (key == ' ' && observation.found && observation.full && observation.have_pose &&
-                observation.rms < options.max_rms) {
-                Sample sample;
-                sample.yaw = observation.yaw;
-                sample.pitch = observation.pitch;
-                sample.rvec = observation.rvec.clone();
-                sample.tvec = observation.tvec.clone();
-                samples.push_back(sample);
-                {
-                    const std::string stem = frame_dir + "/" + std::to_string(samples.size());
-                    cv::imwrite(stem + ".jpg", frame);
-                    std::ofstream pose_out(stem + ".yaml");
-                    pose_out << std::setprecision(10) << observation.yaw_raw << " "
-                             << observation.pitch << " " << sample.time_s << "\n";
-                }
-                std::cout << "[hand_eye] " << "手动" << "采第 " << samples.size()
-                          << " 组：yaw="
-                          << sample.yaw * 180.0 / CV_PI << "° pitch="
-                          << sample.pitch * 180.0 / CV_PI << "° rms=" << observation.rms << "px"
-                          << std::endl;
-                if (samples.size() >= 8 && solve(samples, options.fit, fit)) {
-                    double in_sample = 0.0;
-                    fit.cross_validate_mm = crossValidate(samples, options.fit, &in_sample);
-                    printFit(samples, fit, "[hand_eye] 即时解算：");
-                }
-                continue;
-            }
-            if (key == 's') {
-                if (samples.size() >= 8 && solve(samples, options.fit, fit)) {
-                    double in_sample = 0.0;
-                    fit.cross_validate_mm = crossValidate(samples, options.fit, &in_sample);
-                    printFit(samples, fit, "[hand_eye] 解算：");
-                    saveIfGood(output, samples, fit);
-                } else {
-                    std::cerr << "[hand_eye] 样本不足（需 ≥8 组）" << std::endl;
-                }
-            }
-        }
-        return 0;
-    }
-
-    /// @brief 对表模式：把"画面里测到的真实转角"和"回传角的变化"逐行对比，比值≈1 才说明回传角可信。
-    int monitorLive(const std::string& config_dir)
-    {
-        Hardware hardware;
-        if (!openHardware(hardware, config_dir)) return 1;
-        std::cout << "#  时刻   回传yaw°  回传pitch°  四元数yaw°  板心x  板心y  距m   真实转角°  回传变化°  比值"
-                  << std::endl;
-        const auto start = std::chrono::steady_clock::now();
-        double first_x = 0.0, first_yaw = 0.0, reference = 0.0;
-        bool have_first = false;
-        while (true) {
-            cv::Mat frame;
-            FrameTime frame_time;
-            if (!getImageTimed(hardware.camera, frame, frame_time, 500) || frame.empty()) continue;
-            io::ImuSample pose;
-            if (!hardware.gimbal->imuAt(frame_time, pose)) continue;
-            if (!have_first) {
-                reference = pose.yaw;
-                have_first = true;
-            }
-            const Observation observation = observeAt(hardware, frame, frame_time, reference);
-            double quad_yaw = 0.0;
-            {
-                const double w = pose.w, qx = pose.x, qy = pose.y, qz = pose.z;
-                const double r10 = 2.0 * (qx * qy + qz * w);
-                const double r00 = 1.0 - 2.0 * (qy * qy + qz * qz);
-                quad_yaw = std::atan2(r10, r00) * 180.0 / CV_PI;
-            }
-            const double elapsed =
-                std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-            std::printf("%6.1fs %+9.2f %+11.2f %+11.2f", elapsed,
-                        observation.yaw * 180.0 / CV_PI, observation.pitch * 180.0 / CV_PI,
-                        quad_yaw);
-            if (observation.found) {
-                const double x = observation.corners.front().x;
-                if (first_x == 0.0 && first_yaw == 0.0) {
-                    first_x = x;
-                    first_yaw = observation.yaw * 180.0 / CV_PI;
-                }
-                const double delta_x = x - first_x;
-                const double true_deg =
-                    std::atan2(delta_x, hardware.camera_matrix.at<double>(0, 0)) * 180.0 / CV_PI;
-                const double reported = observation.yaw * 180.0 / CV_PI - first_yaw;
-                std::printf(" %6.0f %6.0f %5.2f %11.2f %10.2f %6.2f", x, observation.corners.front().y,
-                            observation.dist_m, true_deg, reported,
-                            std::abs(reported) > 0.5 ? true_deg / reported : 0.0);
-            } else {
-                std::printf("  (no board)");
-            }
-            std::printf("\n");
-            std::cout.flush();
-            std::this_thread::sleep_for(std::chrono::milliseconds(400));
-        }
-        return 0;
-    }
 #endif
 
     /// @brief 合成数据自检：(a) 精确恢复；(b) yaw ±180 折返；(c) yaw 标度错误可被解出来。
@@ -719,9 +485,7 @@ int main(int argc, char* argv[])
     std::string config_dir = "configs";
     std::string output = "hand_eye.yaml";
     Options options;
-    bool live = false;
     bool auto_mode = false;
-    bool monitor = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -729,9 +493,6 @@ int main(int argc, char* argv[])
             std::cout << "用法:\n"
                          "  hand_eye_calibrate --auto                 自动采样（板子静止、云台转动，"
                          "采够自动解算+写盘）\n"
-                         "  hand_eye_calibrate --live                 手动：空格采样 / s 存盘 /"
-                         " u 撤销 / q 退出\n"
-                         "  hand_eye_calibrate --monitor              对表：画面里的真实转角 vs 回传角\n"
                          "  hand_eye_calibrate <样本目录>              离线复算 + 交叉验证\n"
                          "  hand_eye_calibrate --selftest             合成数据自检\n"
                          "选项：\n"
@@ -746,8 +507,6 @@ int main(int argc, char* argv[])
         }
         if (arg == "--selftest") return selftest();
         else if (arg == "--auto") auto_mode = true;
-        else if (arg == "--live") live = true;
-        else if (arg == "--monitor") monitor = true;
         else if (arg == "--yaw-scale" && i + 1 < argc) options.yaw_scale_fixed = std::atof(argv[++i]);
         else if (arg == "--pitch-scale" && i + 1 < argc)
             options.pitch_scale_fixed = std::atof(argv[++i]);
@@ -765,25 +524,16 @@ int main(int argc, char* argv[])
         else if (folder.empty()) folder = arg;
     }
 
-    if (monitor) {
+    if (auto_mode) {
 #if defined(ULTRA_VISION_USE_HIK_CAMERA) || defined(ULTRA_VISION_USE_GALAXY_CAMERA)
-        return monitorLive(config_dir);
+        return collectAuto(config_dir, output, options);
 #else
-        std::cerr << "--monitor 需要带相机 SDK 的构建" << std::endl;
-        return 2;
-#endif
-    }
-    if (auto_mode || live) {
-#if defined(ULTRA_VISION_USE_HIK_CAMERA) || defined(ULTRA_VISION_USE_GALAXY_CAMERA)
-        return auto_mode ? collectAuto(config_dir, output, options)
-                         : collectLive(config_dir, output, options);
-#else
-        std::cerr << "--auto/--live 需要带相机 SDK 的构建" << std::endl;
+        std::cerr << "--auto 需要带相机 SDK 的构建" << std::endl;
         return 2;
 #endif
     }
     if (folder.empty()) {
-        std::cerr << "给个样本目录，或 --auto / --live / --monitor / --selftest（--help 看用法）"
+        std::cerr << "给个样本目录，或 --auto / --selftest（--help 看用法）"
                   << std::endl;
         return 2;
     }

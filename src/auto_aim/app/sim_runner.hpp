@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <opencv2/opencv.hpp>
 
@@ -28,7 +29,6 @@
 #include "perception/armor_source.hpp"
 #include "sim_receiver/vision_date_receiver.hpp"
 #include "app/csv_sink.hpp"
-#include "app/perf_stats.hpp"
 
 namespace auto_aim
 {
@@ -47,7 +47,7 @@ namespace auto_aim
 
             /// @brief 取一帧；含空帧计数、"曝光→到手"延迟采样、进帧速率统计。
             /// @return false 表示这一帧为空，调用方 `continue` 等下一帧。
-            bool fetchFrame(std::chrono::steady_clock::time_point loop_start);
+            bool fetchFrame();
 
             /// @brief 时间基（指令快照）+ 处理尺寸缩放 + 内参 + 检测（含动态 ROI）。
             void prepareFrame();
@@ -63,7 +63,6 @@ namespace auto_aim
             ArmorSource& armorSource() { return *armor_source_; }
             AimPipeline& pipeline() { return *pipeline_; }
             Tracker& tracker() { return pipeline_->tracker(); }
-            PerfStats& stats() { return stats_; }
             cv::Mat& image() { return image_; }
             const cv::Mat& cameraMatrix() const { return camera_matrix_; }
             const cv::Mat& distCoeffs() const { return dist_coeffs_; }
@@ -74,15 +73,7 @@ namespace auto_aim
             int lightCount() const { return light_count_; }
             int armorCount() const { return armor_count_; }
             int pnpCount() const { return pnp_count_; }
-            int& aimJumpRejections() { return aim_jump_rejections_; }
-            std::chrono::steady_clock::time_point& fpsStart() { return fps_start_; }
-
             bool showDisplay() const { return show_display_; }
-            bool sourceDelayEnabled() const { return source_delay_enabled_; }
-            bool profStages() const { return prof_stages_; }
-            double aimJumpLimit() const { return aim_jump_limit_; }
-
-            std::chrono::steady_clock::time_point afterFrame() const { return after_frame_; }
             bool testSecondsExpired() const;
             bool exitRequested() const;
             int key() const { return key_; }
@@ -102,7 +93,8 @@ namespace auto_aim
             std::unique_ptr<CsvSink> detections_recorder_;
             int dump_counter_ = 0;   // ULTRA_VISION_DUMP_DIR 用的帧序号
 
-            PerfStats stats_;
+            std::vector<double> source_delay_samples_us_;
+            double observation_source_delay_ = 0.0;
 
             // 配置派生（initialize 里赋值）
             bool use_simulator_camera_ = false;
@@ -111,11 +103,9 @@ namespace auto_aim
             bool fire_enabled_ = true;
             bool show_display_ = true;
             bool source_delay_enabled_ = true;
-            double aim_jump_limit_ = 30.0 * CV_PI / 180.0;
-            bool prof_stages_ = false;
+            int missing_frames_ = 0;
             double test_seconds_ = 0.0;
             std::chrono::steady_clock::time_point loop_start_time_{};
-            std::chrono::steady_clock::time_point fps_start_{};
 
             // 几何 / 逐帧数据
             cv::Mat camera_matrix_;
@@ -128,7 +118,6 @@ namespace auto_aim
             std::uint64_t frame_source_timestamp_us_ = 0;
             float frame_gimbal_yaw_ = 0.0f;
             float frame_gimbal_pitch_ = 0.0f;
-            std::chrono::steady_clock::time_point after_frame_{};
             ArmorSourceResult source_result_;
             int light_count_ = 0;
             int armor_count_ = 0;
@@ -137,7 +126,6 @@ namespace auto_aim
             // 跨帧保持的控制状态
             int previous_armor_id_ = -1;
             bool aim_ready_ = false;
-            int aim_jump_rejections_ = 0;
             double aim_yaw_error_ = 0.0;
             double aim_pitch_error_ = 0.0;
             double commanded_yaw_ = 0.0;
