@@ -5,8 +5,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <iostream>
 #include <limits>
 #include <optional>
+#include <string>
 
 using namespace auto_aim::tracker_detail;
 
@@ -595,6 +598,135 @@ namespace auto_aim
                 confidence_ = 0.0;
             }
         }
+    }
+
+    bool Tracker::scaleConsistent(const Armor& camera_armor, double distance) const
+    {
+        if (cfg_.scale_gate_ratio <= 0.0 || !camera_intrinsics_valid_) return true;
+        if (camera_armor.Points_2D.size() < 4 || !(distance > 0.1)) return true;
+        const double width_m = camera_armor.armor_type == auto_aim::small
+                                   ? cfg_.uv_armor_small_width
+                                   : cfg_.uv_armor_large_width;
+        const double height_m = cfg_.uv_armor_height;
+        const auto& p = camera_armor.Points_2D;   // lb, lt, rt, rb
+        const double px_width = 0.5 * (cv::norm(p[1] - p[2]) + cv::norm(p[0] - p[3]));
+        const double px_height = 0.5 * (cv::norm(p[1] - p[0]) + cv::norm(p[2] - p[3]));
+        if (px_width < 1.0 || px_height < 1.0) return false;
+        const double implied_width = camera_fx_ * width_m / px_width;
+        const double implied_height = camera_fy_ * height_m / px_height;
+        const auto ratio_of = [](double lhs, double rhs) {
+            return std::max(lhs, rhs) / std::max(1e-3, std::min(lhs, rhs));
+        };
+        const double tolerance = 1.0 + cfg_.scale_gate_ratio;
+        return ratio_of(distance, implied_width) <= tolerance ||
+               ratio_of(distance, implied_height) <= tolerance;
+    }
+
+    void Tracker::refineArmorPose(Armor& armor) const
+    {
+        static const bool enabled = [] {
+            const char* value = std::getenv("ULTRA_VISION_UV_POSE_REFINE");
+            return value != nullptr && std::string(value) != "0";
+        }();
+        if (!enabled || !camera_intrinsics_valid_) return;
+        if (!armor.solve_result || armor.tvec.empty() || armor.Points_2D.size() < 4) return;
+        const auto object_points = getArmor3DPoints(
+            armor.armor_type == auto_aim::small ? 0 : 1,
+            static_cast<float>(cfg_.uv_armor_small_width),
+            static_cast<float>(cfg_.uv_armor_large_width),
+            static_cast<float>(cfg_.uv_armor_height));
+        if (object_points.size() != 4) return;
+        const std::vector<cv::Point2f> image_points = {
+            armor.left.bottom, armor.left.top, armor.right.top, armor.right.bottom};
+        cv::Mat camera_matrix = (cv::Mat_<double>(3, 3) << camera_fx_, 0.0, camera_cx_,
+                                 0.0, camera_fy_, camera_cy_, 0.0, 0.0, 1.0);
+        cv::Mat rvec = armor.rvec.clone();
+        cv::Mat tvec = armor.tvec.clone();
+        try {
+            cv::solvePnPRefineLM(object_points, image_points, camera_matrix, cv::Mat(), rvec, tvec);
+        } catch (const cv::Exception&) {
+            return;
+        }
+        if (cv::checkRange(tvec) && cv::checkRange(rvec)) {
+            armor.rvec = rvec;
+            armor.tvec = tvec;
+        }
+    }
+
+    cv::Mat Tracker::worldToCamera(const Vec<3>& value) const
+    {
+        return toMat(pointToCamera(camera_pose_, value));
+    }
+
+    void Tracker::noteMeasurement(bool accepted)
+    {
+        if (!cfg_.watchdog_enabled) return;
+        if (accepted) ++accepted_since_init_;
+        recent_measurements_.push_back(accepted);
+        while (static_cast<int>(recent_measurements_.size()) >
+               std::max(4, cfg_.watchdog_window)) {
+            recent_measurements_.pop_front();
+        }
+        const int samples = static_cast<int>(recent_measurements_.size());
+        int rejected = 0;
+        for (bool ok : recent_measurements_) {
+            if (!ok) ++rejected;
+        }
+        last_reject_ratio_ =
+            samples > 0 ? static_cast<double>(rejected) / samples : 0.0;
+    }
+
+    bool Tracker::watchdogTrip(const char* reason)
+    {
+        if (!cfg_.watchdog_enabled) return false;
+        ++watchdog_resets_;
+        force_reinit_ = true;
+        state_ = TrackerState::LOST;
+        lost_count_ = 0;
+        detect_count_ = 0;
+        confidence_ = 0.0;
+        has_observation_ = false;
+        accepted_since_init_ = 0;
+        recent_measurements_.clear();
+        last_reject_ratio_ = 0.0;
+        std::cerr << "[watchdog] " << reason << " → 重新初始化（第 "
+                  << watchdog_resets_ << " 次）" << std::endl;
+        return true;
+    }
+
+    Tracker::WatchdogStats Tracker::watchdogStats() const
+    {
+        WatchdogStats stats;
+        stats.resets = watchdog_resets_;
+        stats.reject_ratio = last_reject_ratio_;
+        stats.samples = static_cast<int>(recent_measurements_.size());
+        if (!cfg_.watchdog_enabled) {
+            stats.converged = true;
+            return stats;
+        }
+        stats.converged = accepted_since_init_ >= cfg_.watchdog_min_converge_updates &&
+            !stateDiverged();
+        return stats;
+    }
+
+    bool Tracker::stateDiverged() const
+    {
+        if (!ekf_.isInit()) return true;
+        const auto state = ekf_.getState();
+        const double speed =
+            std::sqrt(state(1, 0) * state(1, 0) + state(3, 0) * state(3, 0) +
+                      state(8, 0) * state(8, 0));
+        const double yaw_rate = std::abs(state(6, 0));
+        const double range =
+            std::sqrt(state(0, 0) * state(0, 0) + state(2, 0) * state(2, 0) +
+                      state(7, 0) * state(7, 0));
+        const double position_cov =
+            std::max({ekf_.positionVariance(0), ekf_.positionVariance(1),
+                      ekf_.positionVariance(2)});
+        return speed > cfg_.watchdog_max_speed ||
+               yaw_rate > cfg_.watchdog_max_yaw_rate ||
+               range > cfg_.watchdog_max_range ||
+               position_cov > cfg_.watchdog_max_position_cov;
     }
 
 }

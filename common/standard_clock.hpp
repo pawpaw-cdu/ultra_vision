@@ -38,6 +38,19 @@ namespace auto_aim
             return static_cast<double>(timestamp_us) * 1e-6;
         }
 
+        /// Prefer the source timestamp only when both clocks are close enough
+        /// to represent the same epoch; otherwise local arrival time is safer.
+        static std::uint64_t selectFrameTimestampUs(
+            std::uint64_t local_timestamp_us, std::uint64_t source_timestamp_us,
+            std::uint64_t max_skew_us = 1'000'000)
+        {
+            if (source_timestamp_us == 0) return local_timestamp_us;
+            const std::uint64_t skew = source_timestamp_us > local_timestamp_us
+                ? source_timestamp_us - local_timestamp_us
+                : local_timestamp_us - source_timestamp_us;
+            return skew < max_skew_us ? source_timestamp_us : local_timestamp_us;
+        }
+
     private:
         struct Epoch {
             TimePoint steady_start;

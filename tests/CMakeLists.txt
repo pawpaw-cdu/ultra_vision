@@ -29,6 +29,7 @@ add_executable(buff_state_test
 )
 target_include_directories(buff_state_test PRIVATE
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}
     ${OpenCV_INCLUDE_DIRS}
 )
 target_link_libraries(buff_state_test PRIVATE ${OpenCV_LIBS})

@@ -23,10 +23,8 @@ set(AUTO_AIM_CORE_SOURCES
     control/aim_pipeline.cpp
     Kalman/tracker.cpp
     Kalman/tracker_association.cpp
-    Kalman/tracker_watchdog.cpp
     Kalman/tracker_lifecycle.cpp
     Kalman/tracker_accessors.cpp
-    Kalman/tracker_scale.cpp
     Kalman/tracker_localfit.cpp
 )
 set(AUTO_AIM_REAL_ENTRY
@@ -270,10 +268,8 @@ if(ULTRA_VISION_BUILD_TESTS)
       perception/pnp_solver.cpp
       Kalman/tracker.cpp
       Kalman/tracker_association.cpp
-      Kalman/tracker_watchdog.cpp
       Kalman/tracker_lifecycle.cpp
       Kalman/tracker_accessors.cpp
-      Kalman/tracker_scale.cpp
       Kalman/tracker_localfit.cpp
   )
   target_include_directories(armor_ekf_test PRIVATE

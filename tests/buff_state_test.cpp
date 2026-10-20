@@ -14,10 +14,10 @@
 #include "auto_buff/rune_slot_lattice.hpp"
 #include "auto_buff/rune_aim_fallback.hpp"
 #include "auto_buff/rune_orbit_fit.hpp"
-#include "auto_buff/rune_timebase.hpp"
 #include "auto_buff/rune_track_lifecycle.hpp"
 #include "auto_buff/rune_fire_gate.hpp"
 #include "auto_buff/rune_blade_selector.hpp"
+#include "common/standard_clock.hpp"
 
 namespace
 {
@@ -49,11 +49,13 @@ namespace
     void testFrameTimestampSelection()
     {
         constexpr uint64_t local = 5'000'000;
-        check(selectFrameTimestampUs(local, 0) == local,
+        check(auto_aim::StandardClock::selectFrameTimestampUs(local, 0) == local,
               "timebase: video/legacy frames use the local timestamp");
-        check(selectFrameTimestampUs(local, local - 60'000) == local - 60'000,
+        check(auto_aim::StandardClock::selectFrameTimestampUs(
+                  local, local - 60'000) == local - 60'000,
               "timebase: a plausible exposure timestamp is preferred");
-        check(selectFrameTimestampUs(local, local + 1'000'000) == local,
+        check(auto_aim::StandardClock::selectFrameTimestampUs(
+                  local, local + 1'000'000) == local,
               "timebase: an implausibly offset source clock falls back to local time");
     }
 

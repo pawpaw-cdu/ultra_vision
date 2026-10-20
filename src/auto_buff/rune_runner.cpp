@@ -35,7 +35,6 @@
 #include "auto_buff/rune_aim_fallback.hpp"
 #include "auto_buff/rune_round_guard.hpp"
 #include "auto_buff/rune_slot_lattice.hpp"
-#include "auto_buff/rune_timebase.hpp"
 #include "auto_buff/rune_config.hpp"
 #include "auto_buff/rune_detector.hpp"
 #include "auto_buff/rune_solver.hpp"
@@ -317,7 +316,7 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
 
         // 时间基准：优先用仿真给的曝光时刻（与本地同一 epoch，见 StandardClock），
         // 两者相差过大说明时钟不可比，退回本地到达时刻。
-        const uint64_t frame_time_us = selectFrameTimestampUs(
+        const uint64_t frame_time_us = auto_aim::StandardClock::selectFrameTimestampUs(
             frame_local_timestamp_us, frame_source_timestamp_us);
         const double timestamp = auto_aim::StandardClock::secondsFromUs(frame_time_us);
 
