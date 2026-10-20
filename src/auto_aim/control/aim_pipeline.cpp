@@ -89,10 +89,37 @@ namespace auto_aim
             desired = last_desired_;
             aimed_at_observed = true;
         }
-        if (!aimed_at_observed && outcome.track_usable && tracker_.hasObservation() &&
-            selector_.targetStill()) {
+        // ---- 静止档：按板号锁定，锁不到就保持上一拍，避免两块静止板之间来回抖 ----
+        // 判据来源（2026-10-20 现场反馈）：画面里有两块**静止**板时，关联层给出的
+        // "最后观测板"会在两块之间交替；原来静止档直接瞄 lastObserved ⇒ 瞄点每帧在
+        // 两块板之间跳。静止靶本来不需要换板：锁住一块，看到另一块也不动。
+        //   · 首次进入静止档（或离开静止档）→ 锁当前观测板；
+        //   · 观测到的是锁定板 → 用它的 tvec 过一遍 aim_filter（同一 id 平滑，不重置）；
+        //   · 观测到别的板 → **保持上一拍瞄点**；锁定板连续丢失超过阈值才换锁。
+        const bool still_now = outcome.track_usable && tracker_.hasObservation() &&
+            selector_.targetStill();
+        if (!still_now) {
+            still_was_active_ = false;
+            still_lock_id_ = -1;
+            still_lock_lost_ = 0;
+        }
+        if (!aimed_at_observed && still_now) {
             const auto& observed = tracker_.getLastObservedArmor();
             if (observed.solve_result && observed.tvec.rows == 3) {
+                constexpr int kStillLockLostFrames = 20;   // ≈0.2~0.3 s（60~100 fps）
+                const int observed_id = tracker_.getLastObservedPlateId();
+                if (!still_was_active_ || still_lock_id_ < 0) {
+                    still_lock_id_ = observed_id;
+                    still_lock_lost_ = 0;
+                }
+                const bool locked_observed = observed_id == still_lock_id_;
+                if (locked_observed) {
+                    still_lock_lost_ = 0;
+                } else if (++still_lock_lost_ > kStillLockLostFrames) {
+                    // 锁定的板太久没看到（真的换板/出了视野）→ 重新锁定
+                    still_lock_id_ = observed_id;
+                    still_lock_lost_ = 0;
+                }
                 std::array<double, 3> aim_camera{{
                     observed.tvec.at<double>(0),
                     observed.tvec.at<double>(1),
@@ -107,13 +134,22 @@ namespace auto_aim
                 aim_camera[1] -= 0.5 * 9.81 * flight_time * flight_time;
                 const auto solved =
                     bootstrap_aimer_.solveTargetAngles(aim_camera, current_yaw, current_pitch);
-                if (solved.valid) {
-                    desired = solved;
+                if (solved.valid && observed_id == still_lock_id_) {
+                    // 用锁定板的观测更新瞄点；同一板号走 aim_filter 平滑（不再每帧 reset）
+                    const auto filtered = aim_filter_.update(
+                        solved.yaw, solved.pitch, observed_id, now);
+                    desired.valid = filtered.valid;
+                    desired.yaw = filtered.yaw;
+                    desired.pitch = filtered.pitch;
                     desired.yaw_velocity = 0.0;
                     desired.pitch_velocity = 0.0;
-                    aim_filter_.reset();
+                    aimed_at_observed = true;
+                } else if (have_last_desired_ && last_desired_.valid) {
+                    // 看到的是"另一块静止板"→ 保持上一拍瞄点，绝不跟着跳
+                    desired = last_desired_;
                     aimed_at_observed = true;
                 }
+                still_was_active_ = true;
             }
         }
         // "没合格板"的触发条件（与策略无关，统计/遥测用）

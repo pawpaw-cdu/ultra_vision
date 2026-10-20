@@ -128,6 +128,14 @@ namespace auto_aim
         // 重新选板 → 跳到相邻板 → 云台瞎转（2026-09-29 实测）。
         GimbalTargetAngles last_desired_;
         bool have_last_desired_ = false;
+        // ---- 静止档的板号锁（2026-10-20）------------------------------------
+        // 两块静止板同时可见时，关联层给出的"最后观测板"会在两块之间交替；静止档
+        // 若直接瞄 lastObserved，云台就会在两块板之间来回抖。这里按板号锁定：
+        // 锁定板的观测才用来更新瞄点，看到别的板时**保持上一拍瞄点**，直到锁定板
+        // 连续丢失超过阈值才允许换板。离开静止档则清零。
+        int still_lock_id_ = -1;
+        int still_lock_lost_ = 0;
+        bool still_was_active_ = false;
         std::chrono::steady_clock::time_point last_heartbeat_;
     };
 } // namespace auto_aim
