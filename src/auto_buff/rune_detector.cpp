@@ -30,10 +30,8 @@ namespace auto_aim::energy
         // 启动横幅：把"这次到底用了哪套模型/阈值"打出来 —— 现场排查最常见的
         // 误判就是配置与模型不匹配（类别数、点序、输入尺寸、阈值），
         // 所以这几个量必须在日志开头就有据可查。
-        std::cout << "[rune config] output_layout=" << config_.model.output_layout
-                  << " classes=" << config_.model.num_classes
+        std::cout << "[rune config] classes=" << config_.model.num_classes
                   << " keypoints=" << config_.model.num_keypoints
-                  << (config_.model.keypoints_have_confidence ? "(with conf)" : "")
                   << " input=" << config_.model.input_size << "x"
                   << (config_.model.input_height > 0 ? config_.model.input_height
                                                     : config_.model.input_size)
@@ -118,28 +116,9 @@ namespace auto_aim::energy
             return hint;
         }
 
-        // 2) 旧六点布局：第 6 个关键点是臂上的点，沿"臂点 - 靶心"外推。
-        cv::Point2f rough(0.0f, 0.0f);
-        bool have_rough = false;
-        if (config_.model.output_layout != "v8_pose_5kpt") {
-            for (const FanBlade& blade : blades) {
-                if (blade.points.size() < 6) continue;
-                const cv::Point2f plate_center = blade.points[4];
-                const cv::Point2f arm_point = blade.points[5];
-                rough += (arm_point - plate_center) *
-                             static_cast<float>(config_.center_extrapolation) +
-                         plate_center;
-                have_rough = true;
-            }
-            if (have_rough) rough /= static_cast<float>(blades.size());
-        }
-
-        cv::Mat gray;
-        cv::cvtColor(bgr_image, gray, cv::COLOR_BGR2GRAY);
-
         // 3) 没有可用方向：沿环带找"最亮方位"。能量机关的 R 标是画面里唯一
         //    稳定的亮点（仿真里是一块红色 R），靶面图案离该环带也够远。
-        if (!have_rough) {
+        {
             const cv::Point2f plate_center = blades.front().center;
             // 判据是"小亮点 + 周围暗"：R 标是几像素大小的亮块（仿真是纯红，
             // 灰度只有 ~76，二值化阈值抓不到，必须用通道最大值），而靶面图案
@@ -201,42 +180,6 @@ namespace auto_aim::energy
             if (ring_confident) return best;
             return plate_center;
         }
-
-        // The model's keypoints 5 and 6 are the plate centre and a point on
-        // the arm; the rune centre lies on that line, a fixed multiple of the
-        // plate-centre-to-arm distance beyond the plate centre.
-        // Refine on the rune's bright hub: threshold, dilate, then keep the
-        // blob nearest to the rough estimate whose aspect ratio is closest to 1.
-        cv::Mat binary;
-        cv::threshold(gray, binary, config_.gray_threshold, 255, cv::THRESH_BINARY);
-        const cv::Mat kernel = cv::getStructuringElement(
-            cv::MORPH_RECT, cv::Size(config_.dilate_size, config_.dilate_size));
-        cv::Mat dilated;
-        cv::dilate(binary, dilated, kernel, cv::Point(-1, -1), 1);
-
-        const double radius =
-            cv::norm(blades.front().points[2] - blades.front().center) * config_.center_mask_ratio;
-        cv::Mat mask = cv::Mat::zeros(dilated.size(), CV_8U);
-        cv::circle(mask, rough, radius, cv::Scalar(255), -1);
-        cv::bitwise_and(dilated, mask, dilated);
-
-        std::vector<std::vector<cv::Point>> contours;
-        cv::findContours(dilated, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);
-        cv::Point2f center = rough;
-        double best_score = std::numeric_limits<double>::max();
-        for (const auto& contour : contours) {
-            const cv::RotatedRect rect = cv::minAreaRect(contour);
-            if (rect.size.width <= 0.0f || rect.size.height <= 0.0f) continue;
-            double score = std::max(rect.size.width, rect.size.height) /
-                           std::min(rect.size.width, rect.size.height);
-            score += cv::norm(rect.center - rough) / std::max(1.0, radius / 3.0);
-            if (score < best_score) {
-                best_score = score;
-                center = rect.center;
-            }
-        }
-        hub_source_ = HubSource::RingBrightness;
-        return center;
     }
 
     std::optional<PowerRune> RuneDetector::buildRune(std::vector<RuneModel::Object>&& results,
@@ -276,7 +219,6 @@ namespace auto_aim::energy
                 ++class_counts_[static_cast<std::size_t>(candidate.class_id)];
             }
         }
-        const bool pose_layout = config_.model.output_layout == "v8_pose_5kpt";
         const auto plateCenter = [](const RuneModel::Object& candidate) {
             return candidate.center;
         };
@@ -285,7 +227,7 @@ namespace auto_aim::energy
         //    射线上。≥2 片时用最小二乘求交点 —— 已激活扇叶在这里只贡献几何约束，
         //    不参与目标选择。这正是"用已激活扇叶做重投影修正"的最小实现。
         std::optional<cv::Point2f> multi_blade_hub;
-        if (pose_layout) {
+        {
             Eigen::Matrix2d normal_matrix = Eigen::Matrix2d::Zero();
             Eigen::Vector2d rhs = Eigen::Vector2d::Zero();
             std::vector<std::pair<cv::Point2f, Eigen::Vector2d>> rays;
@@ -731,7 +673,7 @@ namespace auto_aim::energy
             refine_stats_ = RefineStats{};
             refine_stats_.candidates = static_cast<int>(candidates.size());
             for (auto& candidate : candidates) {
-                if (pose_layout) {
+                {
                     // 深大五点模型：图像上逆时针依次是 k0 -> k1 -> k4 -> k3，
                     // 对应 PnP 物点的 外 -> 右 -> 内 -> 左（RuneSolver 的顺序），
                     // k2 是 R 标（机关旋转中心）。
@@ -789,9 +731,6 @@ namespace auto_aim::energy
                     }
                     blades.back().rune_center = center;
                     blades.back().has_rune_center = true;
-                } else {
-                    if (candidate.keypoints.size() < 6) continue;
-                    blades.emplace_back(candidate.keypoints, candidate.keypoints[4], Lit);
                 }
             }
             if (blades.empty()) return std::nullopt;
@@ -801,8 +740,7 @@ namespace auto_aim::energy
 
             const cv::Point2f center =
                 estimateRuneCenter(blades, bgr_image, multi_blade_hub);
-            // 自适应画布缩放的尺度：五点布局在前面已由靶面尺寸反推；旧六点布局
-            // （没有靶面四点）退化成"圆心→靶心"的像素距离，同样够用。
+            // 自适应画布缩放的尺度：由靶面尺寸反推轨道半径。
             if (frame_orbit_px_ <= 5.0 && !blades.empty()) {
                 const double orbit = cv::norm(blades.front().center - center);
                 if (orbit > 5.0) frame_orbit_px_ = orbit;

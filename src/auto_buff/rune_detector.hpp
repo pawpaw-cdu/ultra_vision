@@ -82,10 +82,6 @@ namespace auto_aim::energy
         // "20 帧"可能代表 0.5~1.0 s，行为不一致。
         double status_track_hold_s = 0.15;
         double status_lost_timeout_s = 0.8;
-        int gray_threshold = 100;   // used to localise the rune centre
-        int dilate_size = 5;
-        double center_mask_ratio = 0.8;    // mask radius / blade half-size
-        double center_extrapolation = 1.4; // (arm point - plate centre) scale
         // Use every lit blade instead of only the best one. The reference
         // implementation tracks the single best blade, which is enough to keep
         // the five-slot lattice; the multi-candidate path additionally reports

@@ -36,22 +36,15 @@ rune:
   # 5 个关键点里 k0/k1/k3/k4 是靶面四点（图像上逆时针），k2 是 R 标（机关
   # 旋转中心）——见模型仓库 pic/ 的标注图，不是 README 正文写的"第 5 点"。
   #
-  # 旧的 sp_vision 六点模型（assets/yolo11_buff_{fp16,int8}.xml，17 通道、
-  # 单类 fanblade）仍然支持：把 output_layout 改回 sp_vision_6kpt、
-  # num_keypoints: 6、keypoints_have_confidence: false、input_scale 也保持 0.00392
-  # 即可。本机 fp16 p50 19.5~21.6 ms、int8 25.8~29.7 ms（ARM CPU 上 int8
-  # 不占优），可用 rune_model_bench 复测。
   model:
     path: models/openvino/RuneDetectionModel-master/model/model-0624.onnx
     device: CPU
     input_size: 640
     input_height: 480
-    output_layout: v8_pose_5kpt
     num_classes: 3
     num_keypoints: 5
     keypoint_confidence_threshold: 0.8   # 逐点置信度下限（作者默认 0.8）
     min_valid_keypoints: 3               # 有效关键点少于此值判该框无效
-    keypoints_have_confidence: true
     class_scores_are_logits: false
     # 检出阈值：深大 RP-26Rune 部署配置用 0.65（kconf 0.5 / 五点全可用）；
     # 本机保持 kconf 0.8 + 至少 3 点（网络在离域画面上会有"关键点塌缩"的
@@ -60,7 +53,6 @@ rune:
     # 之前这里重复写了 kconf/min_valid，实际用的是第一组（0.8/3）——
     # 已删掉重复项，避免"改了配置却没生效"。
     score_threshold: 0.65
-    nms_threshold: 0.4                   # 旧六点布局按框 IoU 抑制
     nms_center_dist_px: 30.0             # 五点布局按中心点距离抑制（作者参考实现值）
     min_plate_radius_px: 3.0             # 剔退"关键点塌缩"的退化框
     pad_value: 114         # 模型导出元数据 fit_to_window_letterbox 的填充值
@@ -108,10 +100,6 @@ rune:
     # 固定 20 帧可能代表 0.5~1.0 s，行为会漂移。
     status_track_hold_s: 0.15   # 短时间内即使观测被拒，仍保持 TRACK
     status_lost_timeout_s: 0.8  # 超过这段时间没有接受观测才进入 LOST
-    gray_threshold: 100    # 圆心精定位的二值化阈值
-    dilate_size: 5
-    center_mask_ratio: 0.8
-    center_extrapolation: 1.4   # 由扇叶中心 + 臂点外推圆心
     # 默认只跟踪置信度最高的扇叶（与 sp_vision 一致）；打开后会同时跟踪所有
     # 点亮的扇叶，为激活状态机提供“哪几个扇叶亮着”的信息。
     # 打开：网络在离域画面上会给暗扇叶/反光更高置信度，必须把所有候选都

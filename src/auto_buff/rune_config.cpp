@@ -72,20 +72,15 @@ namespace auto_aim::energy
         config.detector.model.input_size = model["input_size"].as<int>(640);
         config.detector.model.confidence_threshold =
             model["score_threshold"].as<float>(0.7f);
-        config.detector.model.nms_threshold = model["nms_threshold"].as<float>(0.4f);
         config.detector.model.pad_value = model["pad_value"].as<int>(114);
-        config.detector.model.output_layout =
-            model["output_layout"].as<std::string>("sp_vision_6kpt");
-        config.detector.model.num_classes = model["num_classes"].as<int>(1);
-        config.detector.model.num_keypoints = model["num_keypoints"].as<int>(6);
+        config.detector.model.num_classes = model["num_classes"].as<int>(3);
+        config.detector.model.num_keypoints = model["num_keypoints"].as<int>(5);
         config.detector.model.keypoint_confidence_threshold =
             model["keypoint_confidence_threshold"].as<float>(0.8f);
         config.detector.model.min_valid_keypoints =
             model["min_valid_keypoints"].as<int>(3);
         config.detector.model.class_scores_are_logits =
             model["class_scores_are_logits"].as<bool>(false);
-        config.detector.model.keypoints_have_confidence =
-            model["keypoints_have_confidence"].as<bool>(false);
         config.detector.model.input_height = model["input_height"].as<int>(0);
         config.detector.model.input_pad_scale =
             model["input_pad_scale"].as<double>(1.0);
@@ -123,11 +118,6 @@ namespace auto_aim::energy
             detector["status_track_hold_s"].as<double>(0.15);
         config.detector.status_lost_timeout_s =
             detector["status_lost_timeout_s"].as<double>(0.8);
-        config.detector.gray_threshold = detector["gray_threshold"].as<int>(100);
-        config.detector.dilate_size = detector["dilate_size"].as<int>(5);
-        config.detector.center_mask_ratio = detector["center_mask_ratio"].as<double>(0.8);
-        config.detector.center_extrapolation =
-            detector["center_extrapolation"].as<double>(1.4);
         config.detector.multi_candidate = detector["multi_candidate"].as<bool>(false);
         config.detector.fallback_single_blade =
             detector["fallback_single_blade"].as<bool>(true);

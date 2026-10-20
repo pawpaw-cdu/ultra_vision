@@ -11,15 +11,6 @@
 
 namespace auto_aim::energy
 {
-    namespace
-    {
-        // 旧布局（sp_vision）：4 box + 1 score + kpt*2；新布局（深大五点）：
-        // N 类分数 + kpt*3（x, y, conf），没有 box 行，框由关键点外接矩形得到。
-        // 深大五点模型的 5 个点：0/1/3/4 = 靶面四点（图像上逆时针），2 = R 标
-        // （能量机关的旋转中心，见模型仓库 pic/ 里的标注图）。
-        constexpr int kLegacyAttributes = 4 + 1 + 6 * 2; // 17
-    }
-
     struct RuneModel::Impl
     {
         RuneModelConfig config;
@@ -210,11 +201,8 @@ namespace auto_aim::energy
 
         // Accept either [1, attributes, anchors] or the transposed export.
         const RuneModelConfig& cfg = impl_->config;
-        const bool pose_layout = cfg.output_layout == "v8_pose_5kpt";
-        const int keypoint_dim = cfg.keypoints_have_confidence ? 3 : 2;
-        const int attributes =
-            pose_layout ? cfg.num_classes + cfg.num_keypoints * keypoint_dim
-                        : kLegacyAttributes;
+        const int keypoint_dim = 3;   // 深大五点模型：x, y, confidence
+        const int attributes = cfg.num_classes + cfg.num_keypoints * keypoint_dim;
         const bool attributes_first = shape[1] == static_cast<std::size_t>(attributes);
         const std::size_t anchors = attributes_first ? shape[2] : shape[1];
         const std::size_t stride = attributes_first ? shape[2] : shape[1];
@@ -257,20 +245,16 @@ namespace auto_aim::energy
         for (std::size_t anchor = 0; anchor < anchors; ++anchor) {
             float score = 0.0f;
             int class_id = 0;
-            if (pose_layout) {
-                // N 类分数：逐 anchor 取最大类（与参考实现一致）。
-                for (int c = 0; c < cfg.num_classes; ++c) {
-                    float value = at(anchor, c);
-                    if (cfg.class_scores_are_logits) {
-                        value = 1.0f / (1.0f + std::exp(-value));
-                    }
-                    if (c == 0 || value > score) {
-                        score = value;
-                        class_id = c;
-                    }
+            // N 类分数：逐 anchor 取最大类（与参考实现一致）。
+            for (int c = 0; c < cfg.num_classes; ++c) {
+                float value = at(anchor, c);
+                if (cfg.class_scores_are_logits) {
+                    value = 1.0f / (1.0f + std::exp(-value));
                 }
-            } else {
-                score = at(anchor, 4);
+                if (c == 0 || value > score) {
+                    score = value;
+                    class_id = c;
+                }
             }
             anchor_best_score = std::max(anchor_best_score, score);
             if (score < config.confidence_threshold) continue;
@@ -281,7 +265,7 @@ namespace auto_aim::energy
 
             // 关键点：逐点置信度过滤（作者的判据：conf >= 阈值、有效点 >= 3、
             // 出现负坐标直接丢弃），并把坐标映射回原图。
-            const int keypoint_base = pose_layout ? cfg.num_classes : 5;
+            const int keypoint_base = cfg.num_classes;
             bool negative = false;
             int valid_keypoints = 0;
             float keypoint_confidence_sum = 0.0f;
@@ -297,8 +281,7 @@ namespace auto_aim::energy
                     to_image_x(raw_x), 0.0, static_cast<double>(image.cols - 1)));
                 const float y = static_cast<float>(std::clamp(
                     to_image_y(raw_y), 0.0, static_cast<double>(image.rows - 1)));
-                const float keypoint_confidence =
-                    cfg.keypoints_have_confidence ? at(anchor, row + 2) : 1.0f;
+                const float keypoint_confidence = at(anchor, row + 2);
                 object.keypoints.emplace_back(x, y);
                 object.keypoint_confidence.push_back(keypoint_confidence);
                 if (keypoint_confidence >= cfg.keypoint_confidence_threshold) {
@@ -308,10 +291,9 @@ namespace auto_aim::energy
             }
             if (negative || valid_keypoints < cfg.min_valid_keypoints) continue;
 
-            // 靶面中心与框：五点布局用 0/1/3/4（k2 是 R 标/旋转中心，不是靶心），
-            // 六点布局沿用 sp_vision 的第 5 点（靶心）。
+            // 靶面中心与框：使用 0/1/3/4；k2 是 R 标/旋转中心，不是靶心。
             std::vector<cv::Point2f> plate_points;
-            if (pose_layout && object.keypoints.size() >= 5) {
+            if (object.keypoints.size() >= 5) {
                 plate_points = {object.keypoints[0], object.keypoints[1],
                                 object.keypoints[3], object.keypoints[4]};
                 for (const cv::Point2f& point : plate_points) object.center += point;
@@ -322,10 +304,8 @@ namespace auto_aim::energy
                 }
                 plate_radius /= static_cast<float>(plate_points.size());
                 if (plate_radius < config.min_plate_radius_px) continue;
-            } else if (!object.keypoints.empty()) {
-                plate_points.assign(object.keypoints.begin(), object.keypoints.end());
-                object.center =
-                    object.keypoints[std::min<std::size_t>(4, object.keypoints.size() - 1)];
+            } else {
+                continue;
             }
             object.rect = cv::boundingRect(plate_points);
             const float mean_keypoint_confidence =
@@ -356,37 +336,18 @@ namespace auto_aim::energy
             return qualities[lhs] > qualities[rhs];
         });
 
-        if (pose_layout) {
-            // 参考实现按中心点距离抑制：同一个扇叶被相邻 anchor 重复检出很常见，
-            // 而 IoU 抑制会把"大符两片同时点亮"互相叠着的框合掉一片。
-            const float distance_threshold = std::max(1.0f, config.nms_center_dist_px);
-            for (const std::size_t index : order) {
-                bool suppressed = false;
-                for (const Object& kept : objects) {
-                    if (cv::norm(candidates[index].center - kept.center) < distance_threshold) {
-                        suppressed = true;
-                        break;
-                    }
+        // 参考实现按中心点距离抑制：同一个扇叶被相邻 anchor 重复检出很常见，
+        // 而 IoU 抑制会把"大符两片同时点亮"互相叠着的框合掉一片。
+        const float distance_threshold = std::max(1.0f, config.nms_center_dist_px);
+        for (const std::size_t index : order) {
+            bool suppressed = false;
+            for (const Object& kept : objects) {
+                if (cv::norm(candidates[index].center - kept.center) < distance_threshold) {
+                    suppressed = true;
+                    break;
                 }
-                if (!suppressed) objects.push_back(candidates[index]);
             }
-        } else {
-            std::vector<cv::Rect> boxes;
-            std::vector<float> confidences;
-            for (const Object& candidate : candidates) {
-                boxes.emplace_back(static_cast<int>(candidate.rect.x),
-                                   static_cast<int>(candidate.rect.y),
-                                   std::max(1, static_cast<int>(candidate.rect.width)),
-                                   std::max(1, static_cast<int>(candidate.rect.height)));
-                confidences.push_back(candidate.prob);
-            }
-            std::vector<int> keep;
-            cv::dnn::NMSBoxes(boxes, confidences, config.confidence_threshold,
-                              config.nms_threshold, keep);
-            objects.reserve(keep.size());
-            for (const int index : keep) {
-                objects.push_back(candidates[static_cast<std::size_t>(index)]);
-            }
+            if (!suppressed) objects.push_back(candidates[index]);
         }
         return objects;
     }

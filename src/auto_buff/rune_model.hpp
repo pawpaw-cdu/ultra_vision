@@ -26,17 +26,12 @@ namespace auto_aim::energy
         std::string device = "CPU";
         int input_size = 640;
         int input_height = 0;             // 0 = 与 input_size 相同（方形输入）
-        // 输出布局："sp_vision_6kpt"（单类 + 6 点×2）或
-        // "v8_pose_5kpt"（N 类分数 + 5 点×3，深大 RM2026 五点模型）。
-        std::string output_layout = "sp_vision_6kpt";
-        int num_classes = 1;
-        int num_keypoints = 6;
-        bool keypoints_have_confidence = false;
+        int num_classes = 3;
+        int num_keypoints = 5;
         bool class_scores_are_logits = false;
         float keypoint_confidence_threshold = 0.8f;
         int min_valid_keypoints = 3;
         float confidence_threshold = 0.7f;
-        float nms_threshold = 0.4f;      // 旧布局：按框 IoU 抑制
         // 深大五点模型按"中心点距离"抑制重复框（其 infer 参考实现用 30 px），
         // 相邻扇叶的框重叠很明显，用 IoU 会把大符同时点亮的两片合成一片。
         float nms_center_dist_px = 30.0f;
@@ -70,8 +65,7 @@ namespace auto_aim::energy
             cv::Rect_<float> rect;
             float prob = 0.0f;
             int class_id = 0;
-            // 靶面中心（图像坐标）：五点布局取四个靶面点的均值，六点布局取
-            // 第 5 个关键点（sp_vision 的靶心点）。
+            // 靶面中心（图像坐标）：四个靶面点的均值。
             cv::Point2f center{0.0f, 0.0f};
             std::vector<cv::Point2f> keypoints;
             std::vector<float> keypoint_confidence;
