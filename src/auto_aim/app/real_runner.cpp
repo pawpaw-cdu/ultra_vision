@@ -286,16 +286,6 @@ int auto_aim::app::RealRunner::run()
     std::atomic<double> sent_yaw_now{0.0};
     std::atomic<double> sent_pitch_now{0.0};
     std::atomic<int> sent_mode_now{0};
-    // ---- 运行时响应自标定（见下发的 world 分支）------------------------------
-    // 目标：测出"命令通道 → 云台/电机角"的 2×2 响应 M，再用 M⁻¹ 发增量。
-    // 这样"符号"和"通道耦合"同时被量出来，不需要任何坐标系假设。
-    std::atomic<double> probe_off_yaw{0.0};     // 叠加到命令上的探针偏置（rad）
-    std::atomic<double> probe_off_pitch{0.0};
-    // 轴符号探针期间**冻结图像闭环**：探针要量的是"命令 → 板在画面里的位移"这一条
-    // 纯开环响应，闭环在同时改命令就量不清了（以前的探针就是栽在这里）。
-    std::atomic<int> probe_freeze{0};
-    std::atomic<double> minv00{1.0}, minv01{0.0}, minv10{0.0}, minv11{1.0};   // M⁻¹
-    std::atomic<int> probe_ready{0};            // 1 = M 已实测（仅诊断）
     // 图像闭环的命令偏置（叠加在"当前回传角"上）与自适应增益符号。
     std::atomic<double> aim_off_yaw{0.0};
     std::atomic<double> aim_off_pitch{0.0};
@@ -330,8 +320,7 @@ int auto_aim::app::RealRunner::run()
     double cmd_rate_last_yaw = 0.0;
     double cmd_rate_last_pitch = 0.0;
     auto pipe_send = [&gimbal, serial_cfg, yaw_sign, &sent_yaw_now, &sent_pitch_now,
-                      &sent_mode_now, &probe_off_yaw, &probe_off_pitch, &minv00, &minv01,
-                      &minv10, &minv11, &probe_ready, &aim_off_yaw, &aim_off_pitch,
+                      &sent_mode_now, &aim_off_yaw, &aim_off_pitch,
                       &cmd_abs_yaw, &cmd_abs_pitch, &cmd_abs_valid, &ff_last_send_t,
                       &ff_last_out_yaw, &ff_last_out_pitch, &ff_yaw_vel, &ff_pitch_vel,
                       &image_err_yaw, &image_err_pitch, &image_err_time, &fire_gate_blocked,
@@ -421,13 +410,9 @@ int auto_aim::app::RealRunner::run()
             const double d_internal_pitch = pitch - pitch_now;
             const double d_raw_yaw = -d_internal_yaw;
             const double d_raw_pitch = d_internal_pitch;
-            // 增量用**运行时实测**的 M⁻¹ 换算；M 还没量出来之前先用探针偏置让它自己动。
-            // 对照分支：基准仍是实测 hold，增量用同一套实测 M⁻¹（不再用运行时自标定，
-            // 那个采样窗口太短、会把上一相位的残运动算进来，实测 det≈0.066 接近奇异）。
-            out_yaw = base_yaw + 1.172 * d_raw_yaw - 1.116 * d_raw_pitch +
-                probe_off_yaw.load(std::memory_order_relaxed);
-            out_pitch = base_pitch + 0.093 * d_raw_yaw - 1.141 * d_raw_pitch +
-                probe_off_pitch.load(std::memory_order_relaxed);
+            // 对照分支：基准仍是实测 hold，增量使用现场实测并固定的 M⁻¹。
+            out_yaw = base_yaw + 1.172 * d_raw_yaw - 1.116 * d_raw_pitch;
+            out_pitch = base_pitch + 0.093 * d_raw_yaw - 1.141 * d_raw_pitch;
             // 速度前馈先不发（0）：位置命令本身已经由轨迹发生器平滑，而两个通道与云台
             // 轴之间存在耦合，"按通道直传角速度"会引入误差。等位置环调好再按实测的
             // 雅可比补，别在方向还没稳的时候加。
@@ -435,11 +420,8 @@ int auto_aim::app::RealRunner::run()
             out_pitch_vel = 0.0;
         } else {
             // command_frame: motor —— 命令 = 回传角(采样保持) + 图像闭环偏置，
-            // 再加**轴符号探针**偏置（默认 0；只有跑探针时非零）。
-            out_yaw += probe_off_yaw.load(std::memory_order_relaxed);
-            out_pitch += probe_off_pitch.load(std::memory_order_relaxed);
             // pitch 有软限位（下位机 Pitch_Max/Min_Angle = [-0.49, +0.27] rad），
-            // 探针叠加后仍要夹在范围内，否则下位机自己夹会导致"命令 ≠ 预期"。
+            // 命令必须夹在范围内，否则下位机自己夹会导致"命令 ≠ 预期"。
             out_pitch = std::max(-0.49, std::min(0.27, out_pitch));
         }
         // ---- 命令角速率限幅：把"台阶"变成"斜坡" ----
@@ -650,14 +632,6 @@ int auto_aim::app::RealRunner::run()
     double servo_win_max_az_ = 0.0;
     double servo_win_max_el_ = 0.0;
     double selector_speed_ = 25.0;      // 弹速，用于下坠补偿（节点里会按回传更新）
-    // 运行时响应自标定的状态（见主循环里 "self-cal" 一段）
-    int probe_phase = 0;
-    int probe_samples = 0;
-    double probe_t0 = 0.0;
-    double probe_az[2] = {0.0, 0.0};
-    double probe_el[2] = {0.0, 0.0};
-    double probe_d_az_yaw = 0.0, probe_d_el_yaw = 0.0;
-    double probe_d_az_pitch = 0.0, probe_d_el_pitch = 0.0;
     // ---- 曲线用的"最近一次量测"（给下面的曲线面板用；没观测时保持不变）----
     // 这几个量都在图像闭环那一段算过一遍，这里只做记录，不再重复算像素→角度。
     double curve_az_deg = 0.0;
@@ -760,27 +734,6 @@ int auto_aim::app::RealRunner::run()
         }
     }
     const bool show_display = windows_usable;
-    // ------------------- 3.6 一次性"轴符号"探针 ---------------------------
-    // 命令帧/符号这台车已经反复猜错（两版符号都试过、都朝反方向转），但"哪个符号对"
-    // 其实是个**可测的量**，而且不需要任何坐标系假设：冻结图像闭环，只给 pitch 通道
-    // +3° 保持 1s，看板在画面里往哪边走（Δel）；再只给 yaw 通道 +3°，看 Δaz。
-    //   Δel < 0（板下移） ⇒ 命令 + = 枪口上抬 ⇒ 偏置要用 off = +k·el
-    // 用它把 ULTRA_VISION_SERVO_SIGN_* 定死，后面不再靠试。
-    const bool axis_probe_enabled = std::getenv("ULTRA_VISION_AXIS_PROBE") != nullptr;
-    struct AxisProbe
-    {
-        int phase = 0;
-        int settle = 0;
-        int n = 0;
-        double t0 = 0.0;
-        double sum_az = 0.0;
-        double sum_el = 0.0;
-        double base_az = 0.0;
-        double base_el = 0.0;
-        double d_el_pitch = 0.0;
-        double d_az_yaw = 0.0;
-    };
-    AxisProbe axis_probe;
     int key = -1;
 
     while (key != 27 && key != 'e' && key != 'E') {
@@ -1329,17 +1282,14 @@ int auto_aim::app::RealRunner::run()
                     const double raw_pose_pitch = gimbal_state_now_pitch;
                     const double pitch_lo = -0.49;
                     const double pitch_hi = 0.27;
-                    // 轴符号探针期间不改闭环命令（见 probe_freeze 注释）。
-                    if (probe_freeze.load(std::memory_order_relaxed) == 0) {
-                        // 没权限时退化成"保持当前姿态"：不让偏置继续堆（否则恢复接管的瞬间会甩）。
-                        const double out_off_yaw = authority_ok ? off_yaw : 0.0;
-                        const double out_off_pitch = authority_ok ? off_pitch : 0.0;
-                        cmd_abs_yaw.store(raw_pose_yaw + out_off_yaw, std::memory_order_relaxed);
-                        cmd_abs_pitch.store(
-                            std::max(pitch_lo, std::min(pitch_hi, raw_pose_pitch + out_off_pitch)),
-                            std::memory_order_relaxed);
-                        cmd_abs_valid.store(1, std::memory_order_relaxed);
-                    }
+                    // 没权限时退化成"保持当前姿态"：不让偏置继续堆（否则恢复接管的瞬间会甩）。
+                    const double out_off_yaw = authority_ok ? off_yaw : 0.0;
+                    const double out_off_pitch = authority_ok ? off_pitch : 0.0;
+                    cmd_abs_yaw.store(raw_pose_yaw + out_off_yaw, std::memory_order_relaxed);
+                    cmd_abs_pitch.store(
+                        std::max(pitch_lo, std::min(pitch_hi, raw_pose_pitch + out_off_pitch)),
+                        std::memory_order_relaxed);
+                    cmd_abs_valid.store(1, std::memory_order_relaxed);
                 }
                 // ---- 符号自适应：Σ(Δ偏置 × Δ误差) > 0 表示"越推误差越大" = 符号反了 ----
                 // 自适应只在"误差还大(>4°) + 偏置在动"时累计：板被手移动造成的 Δerr 不会
@@ -1401,202 +1351,6 @@ int auto_aim::app::RealRunner::run()
             }
         }
     image_servo_done:;
-        // ------------------- 7.1 轴符号探针（ULTRA_VISION_AXIS_PROBE=1）--------
-        // 只在稳定跟踪后跑一次；期间 probe_freeze=1（图像闭环不改命令），
-        // 探针偏置经 pipe_send 叠加到"保持中的命令"上 → 纯开环台阶。
-        if (axis_probe_enabled && axis_probe.phase < 5) {
-            AxisProbe& pb = axis_probe;
-            const double pb_now = std::chrono::duration<double>(
-                std::chrono::steady_clock::now().time_since_epoch()).count();
-            const bool usable = has_observation && last_source_fresh_ && allow_control_now &&
-                tracker.getState() == auto_aim::TrackerState::TRACKING;
-            const auto accumulate = [&]() {
-                if (usable) {
-                    pb.sum_az += curve_az_deg;
-                    pb.sum_el += curve_el_deg;
-                    ++pb.n;
-                }
-            };
-            const auto mean_az = [&]() { return pb.n > 0 ? pb.sum_az / pb.n : pb.base_az; };
-            const auto mean_el = [&]() { return pb.n > 0 ? pb.sum_el / pb.n : pb.base_el; };
-            const auto restart = [&](int phase, double hold) {
-                pb.phase = phase;
-                pb.t0 = pb_now;
-                pb.n = 0;
-                pb.sum_az = 0.0;
-                pb.sum_el = 0.0;
-                (void)hold;
-            };
-            constexpr double kStep = 3.0 * M_PI / 180.0;
-            switch (pb.phase) {
-            case 0:   // 等"60 次可用观测"（不能要求连续：异步推理下 fresh 会在 0/1 之间交替，
-                // 上一版要求"连续 60 帧"实测永远等不到，探针根本没跑起来）
-                if (usable) {
-                    pb.settle = pb.settle + 1;
-                    pb.t0 = pb_now;   // 复用 t0 记"最近一次可用时刻"
-                } else if (pb_now - pb.t0 > 0.5) {
-                    pb.settle = 0;    // 超过 0.5s 没观测才算断
-                }
-                if (pb.settle >= 60) {
-                    probe_freeze.store(1, std::memory_order_relaxed);
-                    std::cout << "[probe] 开始轴符号测量：先 0.4s 基准，再单独给 pitch/yaw "
-                                 "各 +3°（图像闭环已冻结）" << std::endl;
-                    restart(1, 0.4);
-                }
-                break;
-            case 1:   // 基准 0.4s
-                accumulate();
-                if (pb_now - pb.t0 >= 0.4) {
-                    pb.base_az = mean_az();
-                    pb.base_el = mean_el();
-                    probe_off_pitch.store(kStep, std::memory_order_relaxed);
-                    std::cout << "[probe] 基准 az=" << pb.base_az << "° el=" << pb.base_el
-                              << "°（" << pb.n << " 帧）→ pitch 通道 +3° 保持 1.0s" << std::endl;
-                    restart(2, 1.0);
-                }
-                break;
-            case 2:   // pitch +3°，1.0s
-                accumulate();
-                if (pb_now - pb.t0 >= 1.0) {
-                    pb.d_el_pitch = mean_el() - pb.base_el;
-                    probe_off_pitch.store(0.0, std::memory_order_relaxed);
-                    std::cout << "[probe] pitch +3° → el " << pb.base_el << "° ⇒ " << mean_el()
-                              << "°（Δ=" << pb.d_el_pitch << "°，" << pb.n << " 帧）" << std::endl;
-                    restart(3, 0.4);   // 回零稳定
-                }
-                break;
-            case 3:   // 回零 0.4s
-                accumulate();
-                if (pb_now - pb.t0 >= 0.4) {
-                    pb.base_az = mean_az();
-                    probe_off_yaw.store(kStep, std::memory_order_relaxed);
-                    std::cout << "[probe] 回到基准 az=" << pb.base_az << "° → yaw 通道 +3° 保持 1.0s"
-                              << std::endl;
-                    restart(4, 1.0);
-                }
-                break;
-            case 4:   // yaw +3°，1.0s
-                accumulate();
-                if (pb_now - pb.t0 >= 1.0) {
-                    pb.d_az_yaw = mean_az() - pb.base_az;
-                    probe_off_yaw.store(0.0, std::memory_order_relaxed);
-                    probe_freeze.store(0, std::memory_order_relaxed);
-                    const double sp_now = servo_sign_pitch.load(std::memory_order_relaxed);
-                    const double sy_now = servo_sign_yaw.load(std::memory_order_relaxed);
-                    const char* sp_rec = pb.d_el_pitch < -0.5
-                        ? "-1（命令+ = 枪口上抬；用 off=+k·el）"
-                        : (pb.d_el_pitch > 0.5 ? "+1（命令+ = 枪口下压）" : "测不出来（Δ 太小）");
-                    const char* sy_rec = pb.d_az_yaw < -0.5
-                        ? "-1（命令+ = 相机右转；用 off=+k·az）"
-                        : (pb.d_az_yaw > 0.5 ? "+1（命令+ = 相机左转）" : "测不出来（Δ 太小）");
-                    std::cout << "[probe] yaw +3° → az " << pb.base_az << "° ⇒ " << mean_az()
-                              << "°（Δ=" << pb.d_az_yaw << "°）" << std::endl
-                              << "[probe] ===== 结论 =====" << std::endl
-                              << "[probe] pitch: Δel=+3°→" << pb.d_el_pitch
-                              << "°，建议 SERVO_SIGN_PITCH=" << sp_rec << "（当前 " << sp_now << "）"
-                              << std::endl
-                              << "[probe] yaw  : Δaz=+3°→" << pb.d_az_yaw
-                              << "°，建议 SERVO_SIGN_YAW=" << sy_rec << "（当前 " << sy_now << "）"
-                              << std::endl
-                              << "[probe] 图像闭环已恢复；把上面两个建议值写进环境变量即可。" << std::endl;
-                    pb.phase = 5;
-                }
-                break;
-            default: break;
-            }
-        }
-        // ---- 运行时响应自标定：量出"命令通道 → 云台角"的 2×2 矩阵 -----------------
-        // 为什么必须实测：这台车的下位机视觉支路既不是"对角"也不是"同坐标系"
-        // （符号两版都试过、都朝反方向转；探针台阶又量到 pitch 通道会把 yaw 带走 0.9 倍）。
-        // 做法：稳定跟踪后，先记"板在画面里的 az/el"当基准，再单独给 yaw 通道 +2.9°、
-        // 再单独给 pitch 通道 +2.9°，看板在画面里往哪边移动 —— 这就是含符号、含耦合的响应。
-        // 换算到电机/INS 角：raw_yaw 与 az_板 同号；相机抬头 → 板在画面里下移，故
-        // raw_pitch 与 el_板 反号。最后用 M⁻¹ 发增量（见下发分支）。
-        // **默认关闭**：这段自标定会主动把云台推 2.9°×2（"云台会小幅动两下"），而它的结果
-        // 自己都注明"仅诊断、不用于下发"。实测中它每次启动都会动一次，就是现场反馈的
-        // "一开控制云台就莫名转一点"。要看就显式开：ULTRA_VISION_SELFCAL=1。
-        const bool selfcal_enabled = std::getenv("ULTRA_VISION_SELFCAL") != nullptr;
-        if (selfcal_enabled && probe_ready.load(std::memory_order_relaxed) == 0) {
-            const auto probe_now_clock = std::chrono::steady_clock::now();
-            constexpr double probe_step_rad = 0.05;   // ≈2.9° 的探针台阶
-            const bool probe_ok = has_observation && allow_control_now &&
-                tracker.getState() == auto_aim::TrackerState::TRACKING &&
-                tracker.watchdogStats().converged;
-            const bool valid_tvec = observed_armor.tvec.rows >= 3 &&
-                std::abs(observed_armor.tvec.at<double>(2)) > 1e-6;
-            if (!probe_ok || !valid_tvec) {
-                probe_phase = 0;   // 条件不满足就重新开始（比如目标丢了）
-                probe_samples = 0;
-            } else {
-                const double z = observed_armor.tvec.at<double>(2);
-                const double x = observed_armor.tvec.at<double>(0);
-                const double y = observed_armor.tvec.at<double>(1);
-                const double az_now = std::atan2(x, z);
-                const double el_now = -std::atan2(y, std::hypot(x, z));
-                if (probe_phase == 0) {
-                    probe_phase = 1;
-                    probe_t0 = std::chrono::duration<double>(probe_now_clock.time_since_epoch()).count();
-                    probe_samples = 0;
-                    probe_az[0] = probe_el[0] = 0.0;
-                    probe_off_yaw.store(0.0, std::memory_order_relaxed);
-                    probe_off_pitch.store(0.0, std::memory_order_relaxed);
-                    std::cout << "[self-cal] 开始响应自标定：云台会小幅动两下（约 1s），"
-                                 "请让靶板保持在画面内" << std::endl;
-                } else if (probe_phase == 1) {          // 基准
-                    probe_az[0] += az_now;
-                    probe_el[0] += el_now;
-                    if (++probe_samples >= 8) {
-                        probe_az[0] /= probe_samples;
-                        probe_el[0] /= probe_samples;
-                        probe_phase = 2;
-                        probe_t0 = std::chrono::duration<double>(probe_now_clock.time_since_epoch()).count();
-                        probe_samples = 0;
-                        probe_off_yaw.store(probe_step_rad, std::memory_order_relaxed);
-                    }
-                } else if (probe_phase == 2) {          // yaw 通道 +step
-                    probe_az[1] += az_now;
-                    probe_el[1] += el_now;
-                    if (++probe_samples >= 8) {
-                        probe_az[1] /= probe_samples;
-                        probe_el[1] /= probe_samples;
-                        probe_d_az_yaw = (probe_az[1] - probe_az[0]) / probe_step_rad;
-                        probe_d_el_yaw = (probe_el[1] - probe_el[0]) / probe_step_rad;
-                        probe_phase = 3;
-                        probe_t0 = std::chrono::duration<double>(probe_now_clock.time_since_epoch()).count();
-                        probe_samples = 0;
-                        probe_az[1] = probe_el[1] = 0.0;
-                        probe_off_yaw.store(0.0, std::memory_order_relaxed);
-                        probe_off_pitch.store(probe_step_rad, std::memory_order_relaxed);
-                    }
-                } else if (probe_phase == 3) {          // pitch 通道 +step
-                    probe_az[1] += az_now;
-                    probe_el[1] += el_now;
-                    if (++probe_samples >= 8) {
-                        probe_az[1] /= probe_samples;
-                        probe_el[1] /= probe_samples;
-                        probe_d_az_pitch = (probe_az[1] - probe_az[0]) / probe_step_rad;
-                        probe_d_el_pitch = (probe_el[1] - probe_el[0]) / probe_step_rad;
-                        probe_off_yaw.store(0.0, std::memory_order_relaxed);
-                        probe_off_pitch.store(0.0, std::memory_order_relaxed);
-                        // 命令通道 → 电机(INS)角：
-                        //   raw_yaw   = +az_板   （同号）
-                        //   raw_pitch = -el_板   （相机抬头 → 板在画面里下移）
-                        const double m00 = probe_d_az_yaw;
-                        const double m01 = probe_d_az_pitch;
-                        const double m10 = -probe_d_el_yaw;
-                        const double m11 = -probe_d_el_pitch;
-                        const double det = m00 * m11 - m01 * m10;
-                        std::cout << "[self-cal] 实测响应 M = [[" << m00 << "," << m01 << "],["
-                                  << m10 << "," << m11 << "]]（命令→电机角），det=" << det
-                                  << "（仅诊断，不用于下发：这个窗口太短，容易把上一相位残运动"
-                                     "算进来；下发固定用独立探针在稳定状态下实测的 M⁻¹）"
-                                  << std::endl;
-                        probe_ready.store(1, std::memory_order_relaxed);
-                        probe_phase = 4;
-                    }
-                }
-            }
-        }
         const int observed_plate =
             has_observation ? tracker.getLastObservedPlateId() : -1;
         // 尺寸不再在这里拼：每块板的半宽由底盘几何按"大板/小板"给（tracker.armorHalfWidth）。
