@@ -38,7 +38,11 @@ namespace auto_aim
             config.performance_mode == "throughput"
                 ? ov::hint::PerformanceMode::THROUGHPUT
                 : ov::hint::PerformanceMode::LATENCY));
-        if (config.num_threads > 0) {
+        // INFERENCE_NUM_THREADS 是 **CPU 专有**属性：给 GPU 设会抛
+        // "Attempt to set user property INFERENCE_NUM_THREADS which was not registered"
+        // 并把整个视觉进程 SIGABRT（2026-10-20 在 NUC 的 Iris Xe 上实测）。只在 CPU 上加。
+        const bool cpu_device = config.device.rfind("CPU", 0) == 0;
+        if (cpu_device && config.num_threads > 0) {
             properties.emplace(ov::inference_num_threads(config.num_threads));
         }
         if (config.num_streams > 0) {
@@ -54,7 +58,22 @@ namespace auto_aim
         // dynamic ROI in node_sim pay off: cropping the ROI alone does not
         // reduce cost, because the crop is letterboxed back up to 640x640.
         (void)config.input_size;
-        impl_->compiled = impl_->core.compile_model(model, config.device, properties);
+        try {
+            impl_->compiled = impl_->core.compile_model(model, config.device, properties);
+        } catch (const std::exception& error) {
+            // 任何设备初始化失败都**回落 CPU**，不让一个配置项把整条视觉链打崩
+            // （现场教训：device 写成 GPU 而驱动/属性不匹配时，整个进程 abort）。
+            std::cerr << "[nn] compile on " << config.device << " failed: " << error.what()
+                      << " → falling back to CPU" << std::endl;
+            ov::AnyMap cpu_properties;
+            cpu_properties.emplace(ov::hint::performance_mode(
+                ov::hint::PerformanceMode::LATENCY));
+            if (config.num_threads > 0) {
+                cpu_properties.emplace(ov::inference_num_threads(config.num_threads));
+            }
+            impl_->config.device = "CPU";
+            impl_->compiled = impl_->core.compile_model(model, "CPU", cpu_properties);
+        }
     }
 
     NnArmorDetector::~NnArmorDetector() = default;
