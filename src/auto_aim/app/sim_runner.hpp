@@ -69,6 +69,10 @@ namespace auto_aim
             int lightCount() const { return light_count_; }
             int armorCount() const { return armor_count_; }
             int pnpCount() const { return pnp_count_; }
+            /// 神经网络检测器自己的速率/耗时（0 表示本次运行没走神经网络）。
+            /// 仿真入口原来没有这两个量，导致"无相机压测"时看不到 NN 的真实速率。
+            double neuralFps() const;
+            double neuralLatencyMs() const;
             bool showDisplay() const { return show_display_; }
             bool testSecondsExpired() const;
             bool exitRequested() const;

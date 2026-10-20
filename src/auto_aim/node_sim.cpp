@@ -51,6 +51,8 @@ int main(int argc, char** argv)
                       << ", lights: " << runner.lightCount()
                       << ", armors: " << runner.armorCount()
                       << ", PnP: " << runner.pnpCount()
+                      << ", nn: " << runner.neuralFps() << "Hz/"
+                      << runner.neuralLatencyMs() << "ms"
                       << ", tracker: " << trackerStateName(tracker.getState())
                       << ", lost: " << tracker.getLostCount()
                       << ", omega: " << tracker.getOmega()

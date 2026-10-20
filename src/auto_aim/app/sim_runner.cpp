@@ -366,6 +366,16 @@ namespace auto_aim
             return shooterStatusName(shooter_state_, shooter_error_);
         }
 
+        double SimRunner::neuralFps() const
+        {
+            return armor_source_ ? armor_source_->neuralFps() : 0.0;
+        }
+
+        double SimRunner::neuralLatencyMs() const
+        {
+            return armor_source_ ? armor_source_->neuralLatencyMs() : 0.0;
+        }
+
         bool SimRunner::testSecondsExpired() const
         {
             if (test_seconds_ <= 0.0) return false;
