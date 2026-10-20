@@ -1,15 +1,10 @@
-// ArmorEKF 相位观测（updateAngle / updateWithLocalFit）的回归自检。
+// ArmorEKF 相位观测 updateAngle 的回归自检。
 //
 // 为什么单独钉这一组：`updateAngle` 的雅可比一度写成"旋转之后"的 (cos(θ+p),
 // −sin(θ+p))，而不是状态自己的 (cosθ, −sinθ)。结果是——
 //   · plate 0 / 2 → 更新增益恰好为 0（yaw 完全不动）
 //   · plate 3     → 增益 −1（把 yaw 往反方向推，正反馈）
 //   · plate 1     → 正确（唯一一个 angleForPlate == 0 的板）
-// 而 `updateWithLocalFit` 固定传 plate_id=0 → **局部拟合器的 yaw 观测整条链路
-// 是空操作**，依赖它的三套机制（模 90° 吸附 / yaw 常值偏置学习 / 按 |ω| 混合）
-// 全部空转。这个 bug 在真机上表现为"开了 use_yaw 却毫无变化"。
-// 见 git 历史里的 docs/local_fit_tracker_responsibility_audit.md 审计项 D。
-//
 // 判据（对每个 plate_id）：告诉滤波器"这块板的相位比预测大 5°"，
 // 底盘 yaw 必须**朝同方向**移动，且增益接近 1（K = P/(P+R) 不会正好 1）。
 
@@ -100,50 +95,12 @@ namespace
         }
     }
 
-    /// @brief updateWithLocalFit 的 yaw 通道必须真的能推动状态（修复前完全不动）。
-    void testLocalFitYawChannel()
-    {
-        auto_aim::ArmorEKF ekf = makeInitEkf();
-        const double before = ekf.getYaw();
-
-        auto_aim::LocalFitResult fit;
-        fit.valid = true;
-        fit.quality = 1.0;
-        fit.ref_armor_id = 1;
-        fit.yaw = before + 0.05;   // 拟合说"底盘 yaw 就是当前值 +2.86°"
-        fit.omega = ekf.getOmega();   // ω 不动，隔离 yaw 通道
-        ekf.updateWithLocalFit(fit, 0.02, 0.05, std::numeric_limits<double>::infinity());
-
-        const double delta = yawDeltaDeg(before, ekf.getYaw());
-        expect(delta > 0.5, "updateWithLocalFit 的 yaw 通道必须推动底盘 yaw（修复前恒为 0）");
-        expect(delta <= 0.05 * 180.0 / kPi + 1e-6,
-               "updateWithLocalFit 的 yaw 变化不该超过观测残差");
-    }
-
-    /// @brief ω 通道独立可用（与 yaw 无关），避免以后把两条通道又绑在一起。
-    void testLocalFitOmegaChannel()
-    {
-        auto_aim::ArmorEKF ekf = makeInitEkf();
-        const double before = ekf.getOmega();
-
-        auto_aim::LocalFitResult fit;
-        fit.valid = true;
-        fit.quality = 1.0;
-        fit.ref_armor_id = 1;
-        fit.yaw = ekf.getYaw();       // yaw 不动
-        fit.omega = before + 2.0;
-        ekf.updateWithLocalFit(fit, 0.02, 0.05, std::numeric_limits<double>::infinity());
-
-        expect(ekf.getOmega() > before + 0.5, "updateWithLocalFit 的 omega 通道必须能推动角速度");
-    }
 }
 
 int main()
 {
     testPlatePhaseGain();
     testPlatePhaseGainUniform();
-    testLocalFitYawChannel();
-    testLocalFitOmegaChannel();
 
     if (failures == 0)
     {

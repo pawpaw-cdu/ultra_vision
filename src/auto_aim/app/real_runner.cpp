@@ -118,44 +118,6 @@ int auto_aim::app::RealRunner::run()
     const auto_aim::DetectorConfig det_cfg =
         auto_aim::loadDetectorConfig(detector_file);
     auto_aim::TrackerConfig track_cfg = auto_aim::loadTrackerConfig(tracker_file);
-    // P2 A/B 开关：ULTRA_VISION_LOCAL_FIT=1 打开局部拟合器（否则用 tracker.yaml 的默认）。
-    if (const char* lf = std::getenv("ULTRA_VISION_LOCAL_FIT")) {
-        track_cfg.local_fit.enabled = (std::atoi(lf) == 1);
-    }
-
-#ifdef ULTRA_VISION_HAVE_LOCAL_FIT
-    if (track_cfg.local_fit.enabled && camera_matrix.rows == 3) {
-        const auto env_d = [](const char* n, double d) {
-            const char* v = std::getenv(n);
-            return v != nullptr ? std::atof(v) : d;
-        };
-        auto_aim::LocalTrajectoryFitConfig fcfg;
-        fcfg.K = { camera_matrix.at<double>(0, 0), camera_matrix.at<double>(1, 1),
-                   camera_matrix.at<double>(0, 2), camera_matrix.at<double>(1, 2) };
-        fcfg.max_rmse_deg = env_d("ULTRA_VISION_LOCAL_FIT_MAX_RMSE_DEG", 0.4);
-        fcfg.lightbar_len = env_d("ULTRA_VISION_LOCAL_FIT_L", 0.060);   // 灯条/板高（m）
-        fcfg.plate_width = env_d("ULTRA_VISION_LOCAL_FIT_W", 0.135);    // 灯条中心间距（m）
-        fcfg.gimbal_pitch = 0.0;     // 每帧按实际云台俯仰更新（见主循环）
-        fcfg.center_init = {{ 0.0, 0.0, 3.0 }};
-        // 真实裁判系统灯条有 ~15° 安装倾角：α 固定 15°（慢层只在线估计 R）。
-        const double alpha0 = env_d("ULTRA_VISION_LOCAL_FIT_ALPHA_DEG", 15.0) * M_PI / 180.0;
-        fcfg.pitch_offset = env_d("ULTRA_VISION_LOCAL_FIT_PITCH_OFFSET_DEG", 0.0) * M_PI / 180.0;
-        local_fit_pitch_sign_ = env_d("ULTRA_VISION_LOCAL_FIT_PITCH_SIGN", 1.0);
-        local_fit_r_fixed_ = (std::getenv("ULTRA_VISION_LOCAL_FIT_R_FIXED") != nullptr);
-        const char* rcv = std::getenv("ULTRA_VISION_LOCAL_FIT_RCV");
-        local_fit_rcv_pose_ =
-            !(rcv != nullptr && (std::string(rcv) == "0" || std::string(rcv) == "off"));
-        local_fitter_ = std::make_unique<auto_aim::LocalTrajectoryFitter>(fcfg);
-        local_fitter_->seedSlow(alpha0, fcfg.R_prior);
-        std::cout << "[local_fit] enabled (real): alpha="
-                  << env_d("ULTRA_VISION_LOCAL_FIT_ALPHA_DEG", 15.0) << "deg pitch_sign="
-                  << local_fit_pitch_sign_ << " R_fixed=" << local_fit_r_fixed_
-                  // 有效性门限：max(像素保底, fx·tan(角度门限))。实车 f≈2390，
-                  // 角度门限 0.4° ≈ 16.7px —— 仿真(1444)那套 5px 会把实车好拟合全拒掉。
-                  << " max_rmse_deg=" << env_d("ULTRA_VISION_LOCAL_FIT_MAX_RMSE_DEG", 0.4)
-                  << std::endl;
-    }
-#endif
     const auto_aim::PnpGeometry pnp_geometry =
         auto_aim::loadPnpGeometry(tracker_file);
 
@@ -595,7 +557,7 @@ int auto_aim::app::RealRunner::run()
     // the same estimator in the gimbal/world frame once that feedback exists.
     auto_aim::Tracker& tracker = pipeline.tracker();   // 估计器归流水线所有
     // 装甲板安装倾角：默认取 configs/tracker.yaml 的 pnp.armor_pitch_deg（真机 15°），
-    // 现场可覆盖（换车/换支架要重标）。重投影整车轮廓与局部拟合器的 slow α 用同一个数。
+    // 现场可覆盖（换车/换支架要重标）。
     {
         const char* tilt_env = std::getenv("ULTRA_VISION_ARMOR_TILT_DEG");
         if (tilt_env != nullptr) tracker.setArmorTiltDeg(std::atof(tilt_env));
@@ -613,23 +575,7 @@ int auto_aim::app::RealRunner::run()
                                     camera_matrix.at<double>(1, 1),
                                     camera_matrix.at<double>(0, 2),
                                     camera_matrix.at<double>(1, 2));
-        // 局部拟合器要按针孔重投影：把镜头畸变给 Tracker，push 灯条端点时先去畸变。
-        if (dist_coeffs.rows * dist_coeffs.cols >= 4) tracker.setCameraDistortion(dist_coeffs);
     }
-
-#ifdef ULTRA_VISION_HAVE_LOCAL_FIT
-    if (local_fitter_) {
-        auto* fitter = local_fitter_.get();
-        const bool r_fixed = local_fit_r_fixed_;
-        tracker.setLocalFitter([fitter, r_fixed](const std::vector<auto_aim::LightBarObservation>& obs,
-                                                 auto_aim::LocalFitResult& out) {
-            // 默认：快层 + 在线慢层（R 在线估计）；r_fixed 时退回写死 R 做 A/B。
-            return r_fixed ? fitter->fit(obs, fitter->slowAlpha(), fitter->slowR(), out)
-                           : fitter->fitWithSlow(obs, out);
-        });
-        tracker.startLocalFitWorker();
-    }
-#endif
 
     // 真机观测记录（可选）：与仿真同格式，便于离线对账"重投影残差多大、集中在哪"。
     auto observation_recorder = std::make_unique<auto_aim::app::CsvSink>(
@@ -989,39 +935,7 @@ int auto_aim::app::RealRunner::run()
         if (control_disabled) allow_control_now = false;
         frame_input.allow_control = allow_control_now;
         frame_input.fire_enabled = fire_enabled;
-#ifdef ULTRA_VISION_HAVE_LOCAL_FIT
-        if (local_fitter_) {
-            // R_cv 每帧更新：默认用 pose 推的**完整**旋转（含手眼外参 + 云台俯仰）；
-            // 关掉 rcv 时退回 Rx(gimbal_pitch·sign + pitch_offset)·R_base 的旧口径做 A/B。
-            auto fcfg = local_fitter_->config();
-            bool changed = false;
-            // h 的慢层先验 = tracker 慢层几何里的板心高度（见 LocalTrajectoryFitConfig
-            // 的 h_prior 注释：显式加入"板心高度是机械常数"这条硬约束，防止快层把
-            // Cz 的误差吸进 h）。慢层本身由拟合器结果缓慢更新，所以这是一条**慢反馈**。
-            {
-                const double h_now = tracker.chassisGeometry().height(0);
-                if (std::abs(fcfg.h_prior - h_now) > 1e-4) {
-                    fcfg.h_prior = h_now;
-                    changed = true;
-                }
-            }
-            if (local_fit_rcv_pose_) {
-                const auto R = tracker.fitterRcv();
-                if (!fcfg.use_rcv || fcfg.rcv != R) { fcfg.use_rcv = true; fcfg.rcv = R; changed = true; }
-            } else {
-                const double gp = local_fit_pitch_sign_ * camera_pose.pitch;
-                if (fcfg.use_rcv) { fcfg.use_rcv = false; changed = true; }
-                if (std::abs(fcfg.gimbal_pitch - gp) > 1e-4) { fcfg.gimbal_pitch = gp; changed = true; }
-            }
-            if (changed) local_fitter_->setConfig(fcfg);
-            for (const auto& a : frame_input.armors)
-                tracker.pushArmorLightBars(a, observation_time, tracker.plateIdFor(a));
-        }
-#endif
         const auto outcome = pipeline.update(frame_input);
-#ifdef ULTRA_VISION_HAVE_LOCAL_FIT
-        if (local_fitter_) tracker.applyLatestLocalFit();
-#endif
         // 全部检测落盘（见 detection_recorder 的注释）。
         if (*detection_recorder && !frame_input.armors.empty()) {
             auto& d = detection_recorder->stream();
@@ -2055,8 +1969,8 @@ int auto_aim::app::RealRunner::run()
                       << "deg(闸门拦下 " << fire_gate_blocked.load(std::memory_order_relaxed)
                       << ")"
                       << ", fire=" << (outcome.fire ? 1 : 0) << ", reproj=" << reprojection_px
-                      // 模型口径：R 是模型用的回转半径（online=被拟合器慢层改过），
-                      // model_age 是重投影外推到"现在"用的时间（=观测延迟）。
+                      // 模型口径：R 是模型用的回转半径，model_age 是重投影外推到
+                      // "现在"用的时间（=观测延迟）。
                       // 模型解释度（对**所有**检测，不只被钉那块）：med/max px。
                       // 调 ULTRA_VISION_PITCH_SIGN 时就看这个数（取小者），
                       // 照片上表现为"背面那块板被画高还是画低"。
@@ -2086,37 +2000,6 @@ int auto_aim::app::RealRunner::run()
                                     tracker.chassisGeometry().distance(1),
                                     tracker.chassisGeometry().distance(2),
                                     tracker.chassisGeometry().distance(3))
-                      // 局部拟合器统计：attempts/valids + 最近一次 rmse/R/灯条数。
-                      // 实车若一直 R=(cfg)、motion=0，就看这里的 valids 与 rmse。
-                      << ", fit=" << tracker.localFitValids() << "/" << tracker.localFitAttempts()
-                      << " rmse=" << tracker.localFitLastRmse() << "px Rfit="
-                      << tracker.localFitLastR() << " nbars=" << tracker.localFitLastBars()
-                      // push=推给拟合器的灯条累计、arcs=当前弧数、apply=结果真正写进几何的次数。
-                      // 若 push 在涨而 arcs 一直是 0/1 → 门控把它挡了；apply=0 → 时间基/老化。
-                      << " push=" << tracker.localFitPushed()
-                      << " arcs=" << tracker.localFitArcs()
-                      << " link=" << tracker.localFitLinks()
-                      << " new=" << tracker.localFitNewArcs()
-                      << " obsmax=" << tracker.localFitObsMax()
-                      << " cand0=" << tracker.localFitCandEmpty()
-                      << " pub=" << tracker.localFitApplied()
-                      // 关键三个：calls=进入次数 nofit=没拿到有效结果 stale=太老被丢
-                      // geometry=真正写进几何的次数；ufr=use_fit_radius 开关；age=本次结果年龄
-                      << " calls=" << tracker.localFitApplyCalls()
-                      << " nofit=" << tracker.localFitApplyNoFit()
-                      << " stale=" << tracker.localFitApplyStale()
-                      << " geometry=" << tracker.localFitApplyGeometry()
-                      // ysnap=相位代表元不可信、退回"模 90° 吸附"的次数（长期为 0 最好）。
-                      << " ysnap=" << tracker.localFitYawSnaps()
-                      // ygate=yaw 被**质量门**拦下的次数（rmse>3px 或 相位跨度<20°），
-                      // yexact=走精确注入的次数，yspan=最近一次拟合的相位跨度（度）。
-                      // ω 通道不受这道门影响（实测 ω 各档都稳）。
-                      << " ygate=" << tracker.localFitYawGated()
-                      << " yexact=" << tracker.localFitYawExact()
-                      << " yspan=" << tracker.localFitPhaseSpanDeg()
-                      << " ogate=" << tracker.localFitOmegaGated()
-                      << " age=" << tracker.localFitApplyAgeMs() << "ms"
-                      << " fitms=" << tracker.localFitLastMs()
                       // view=被选中那块板的视视角（度）：>graze_gate_deg 时该板的
                       // PnP 径向/距离会被降权（只信 bearing）。调门限就看这个数。
                       // joint=同帧多板联立解 (车心,yaw) 的次数 + 最近一次残差(m)。
@@ -2124,8 +2007,6 @@ int auto_aim::app::RealRunner::run()
                       << " joint=" << tracker.jointSolveCount() << " jres="
                       << tracker.jointSolveResidual()
                       << " view=" << tracker.lastViewDeg()
-                      << " ufr=" << (tracker.fitRadiusEnabled() ? 1 : 0)
-                      << " lf=" << (tracker.localFitEnabled() ? 1 : 0)
                       // 逐板高度（cm，向上为正）——默认应恒为 0.0/0.0/0.0/0.0；
                       // 若它在漂，就是"高度学习"在随机游走（默认已关）。
                       << ", Hgeo="
@@ -2135,10 +2016,7 @@ int auto_aim::app::RealRunner::run()
                                     tracker.chassisGeometry().height(2) * 100.0,
                                     tracker.chassisGeometry().height(3) * 100.0)
                       << ", np_flip=" << tracker.nearestPlateFlips()
-                      << ", motion=" << static_cast<int>(tracker.lastMotion())
-                      << "(0静/1转/2移/3转+移)"
                       << ", R=" << tracker.getArmorRadius()
-                      << (tracker.armorRadiusOnline() ? "(online)" : "(cfg)")
                       << ", model_age=" << observation_age * 1000.0 << "ms"
                       << ", send=" << sent_yaw_now.load(std::memory_order_relaxed) * 180.0 / CV_PI
                       << "/" << sent_pitch_now.load(std::memory_order_relaxed) * 180.0 / CV_PI

@@ -405,24 +405,9 @@ int main()
         }
     }
 
-    // ---- 构造板一定最近（硬约束）+ 运动状态判定（旋转中心先验）----------------
+    // ---- 构造板一定最近（硬约束）----------------------------------------------
     {
-        // ① 运动状态判定：拟合器的 (ω, |drift|) → 纯旋转 / 平移 / 旋转+平移 / 静止。
-        //    纯旋转时旋转中心才有"不该动"这个先验（见 center_anchor）。
-        using auto_aim::ChassisMotion;
-        passed &= expect(auto_aim::classifyChassisMotion(3.0, 0.05, 1.0, 0.15) == ChassisMotion::Rotating,
-                         "fast spin + no drift must classify as pure rotation");
-        passed &= expect(auto_aim::classifyChassisMotion(0.2, 0.6, 1.0, 0.15) == ChassisMotion::Translating,
-                         "no spin + drift must classify as translation");
-        passed &= expect(auto_aim::classifyChassisMotion(3.0, 0.6, 1.0, 0.15) == ChassisMotion::RotatingAndTranslating,
-                         "spin + drift must classify as rotating and translating");
-        passed &= expect(auto_aim::classifyChassisMotion(0.1, 0.02, 1.0, 0.15) == ChassisMotion::Still,
-                         "slow and steady must classify as still");
-        passed &= expect(auto_aim::chassisCenterAnchorGain(ChassisMotion::Rotating, 0.35, 0.1) >
-                             auto_aim::chassisCenterAnchorGain(ChassisMotion::Translating, 0.35, 0.1),
-                         "pure rotation must anchor the chassis center harder than translation");
-
-        // ② 硬约束"观测板一定离相机最近"：干净（物理）观测流不该误触发，
+        // 硬约束"观测板一定离相机最近"：干净（物理）观测流不该误触发，
         //    且车心必须始终在观测板**后面**（画面上更靠上）。
         auto_aim::Tracker nearest_tracker(tracker_config);
         constexpr double kSpin = 3.0;
@@ -654,7 +639,7 @@ int main()
     {
         // ---- 底盘模型：慢层几何 + 输出口径 + 外推 + 渲染姿态 ----------------
         // 这组断言盯的正是真机上"四块板高度不统一/底盘不对"的三个来源：
-        //   · 半径（配置 0.25 / 实测 0.20~0.21）——在线改半径只动几何，不能 reset 滤波器；
+        //   · 半径（配置 0.25 / 实测 0.20~0.21）与逐板几何；
         //   · 矩形底盘（前后距离 ≠ 左右距离）+ 四块板**同一高度** + 15° 安装倾角；
         //   · 重投影必须外推到"被显示那一帧"（观测延迟在 3 rad/s 上是 10~30°）。
         auto_aim::Tracker online_tracker(tracker_config);
@@ -672,27 +657,14 @@ int main()
                                  nearestPlate(0.0, true_omega, time), radius)}, time);
         }
         auto_aim::CameraPose identity_pose;   // invalid → 用 tracker 内部姿态（无姿态=单位阵）
-        const auto before_radius = online_tracker.modelAt(0.0, identity_pose);
-        passed &= expect(before_radius.valid, "chassis model must be valid after tracking starts");
-
-        online_tracker.setArmorRadius(0.185);
-        passed &= expect(std::abs(online_tracker.getArmorRadius() - 0.185) < 1e-9,
-                         "setArmorRadius must update the tracker geometry");
-        passed &= expect(online_tracker.getState() == auto_aim::TrackerState::TRACKING,
-                         "changing the radius must not reset the filter (state must stay TRACKING)");
-        const auto after_radius = online_tracker.modelAt(0.0, identity_pose);
-        passed &= expect(after_radius.valid, "chassis model must stay valid after setArmorRadius");
+        const auto model = online_tracker.modelAt(0.0, identity_pose);
+        passed &= expect(model.valid, "chassis model must be valid after tracking starts");
         for (int plate = 0; plate < 4; ++plate) {
-            const double dx = after_radius.poses[plate].center[0] -
-                              after_radius.center_camera[0];
-            const double dy = after_radius.poses[plate].center[1] -
-                              after_radius.center_camera[1];
-            const double dz = after_radius.poses[plate].center[2] -
-                              after_radius.center_camera[2];
+            const double dx = model.poses[plate].center[0] - model.center_camera[0];
+            const double dy = model.poses[plate].center[1] - model.center_camera[1];
+            const double dz = model.poses[plate].center[2] - model.center_camera[2];
             const double plate_radius = std::sqrt(dx * dx + dy * dy + dz * dz);
-            // 模型半径 = 慢层 R + 滤波器状态里的 l/h（前后组）；这里按**生效几何**比较
-            const double expected_r = after_radius.geometry.distance(plate);
-            passed &= expect(std::abs(plate_radius - expected_r) < 1e-6,
+            passed &= expect(std::abs(plate_radius - model.geometry.distance(plate)) < 1e-6,
                              "modeled plate must sit on the effective armor radius");
         }
 

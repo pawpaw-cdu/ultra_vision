@@ -424,12 +424,11 @@ namespace auto_aim
                 }
             }
             if (geometry_changed) {
-                // **尺度锚定**：只让学习器改"组间差"，总尺度不动（尺度由拟合器的弧段解给）。
+                // **尺度锚定**：只让学习器改"组间差"，总尺度固定为标定半径。
                 double mean = 0.0;
                 for (double d : geometry_.plate_distance) mean += d;
                 mean /= 4.0;
-                const double anchor = armor_radius_online_ > 0.0 ? armor_radius_online_
-                                                                  : cfg_.armor_radius;
+                const double anchor = cfg_.armor_radius;
                 for (std::size_t i = 0; i < geometry_.plate_distance.size(); ++i)
                     geometry_.plate_distance[i] = std::clamp(
                         geometry_.plate_distance[i] + (anchor - mean),

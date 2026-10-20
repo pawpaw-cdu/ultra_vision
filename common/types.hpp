@@ -98,61 +98,6 @@ namespace auto_aim
         Armor() = default;
     };
 
-    // ---------------------------------------------------------------------
-    // 局部拟合器（小陀螺 θ/ω + 慢变量 α/R）的数据契约。
-    // 见 docs/local_trajectory_fitter.md 与 experiments/local_fitter。
-    // ---------------------------------------------------------------------
-
-    /// @brief 一根灯条的上/下端点像素观测（相机系）。
-    ///        armor_id 用于多板联合（同一帧可给多块板）；bar_offset 是灯条在板面
-    ///        切向的偏移（米，左=+W/2、右=-W/2；提示词单灯条模型取 0）。
-    struct LightBarObservation
-    {
-        double timestamp = 0.0;
-        double u_top = 0.0, v_top = 0.0;
-        double u_bot = 0.0, v_bot = 0.0;
-        int armor_id = 0;
-        double bar_offset = 0.0;
-        double confidence = 1.0;
-    };
-
-    /// @brief 局部拟合器一窗输出。**相机系**（yaw 为绕竖直轴的底盘偏航）。
-    ///
-    /// `yaw` 的相位约定：它是**底盘 yaw**，且与 `ArmorEKF::angleForPlate()` /
-    /// `chassis_model::armorPhaseOffset()`（即 0→+90°、1→0°、2→−90°、3→−180°）
-    /// **同一张表**。拟合器自己那张表是 `LocalTrajectoryFitConfig::plate_yaw_offsets`，
-    /// 两处必须一致 —— 否则"拟合 yaw"和"EKF yaw"会差 ±90°/180°：四块板完全对称时
-    /// 还能靠"模 90° 吸附"掩盖，一旦启用逐板几何（plate_distance / l / h）就会
-    /// 让模型分叉。见 git 历史里的 docs/local_fit_tracker_responsibility_audit.md 审计项 G。
-    struct LocalFitResult
-    {
-        bool valid = false;
-        double timestamp = 0.0;         // 窗口末端时间（拟合历经的时间）
-        double center[3] = {0, 0, 0};   // 旋转中心（相机系，米）
-        double yaw = 0.0;               // 该时刻的底盘 yaw（rad，与 EKF 同一相位表）
-        double omega = 0.0;             // 角速度（rad/s）
-        /// 这条拟合的**参考板绝对编号**（0..3；-1 = 未知）。
-        /// 用途：① 诊断"这次拟合算的是哪块板"；② 注入前的相位门控
-        /// （拟合 yaw 与 EKF yaw 残差超门限 → 认为参考板号错了 k 号，退回模 90° 吸附）；
-        /// ③ 将来启用逐板几何时，按板号判断"yaw"与"yaw+90°"到底哪个才是物理解。
-        /// 以前没有这个字段，调用方只能靠"模 90° 吸附"猜，属于治标。
-        int ref_armor_id = -1;
-        double alpha = 0.0;             // 灯条安装倾角（rad，慢层）
-        double R = 0.20;                // 回转半径（m，慢层）
-        double h = 0.0;                 // 板心相对旋转中心的高度（m，向上为正；慢层）
-        double drift[3] = {0, 0, 0};    // 旋转中心的平移速度（m/s，相机系；快层）
-        double reprojection_rmse_px = 0.0;  // 诊断用，不作为唯一有效性判据
-        /// 这条弧在窗口内**覆盖的相位跨度**（rad，=|ω·T + ½βT²|）。
-        /// 为什么单列一个字段：`reprojection_rmse_px` 只是"模型和点贴不贴"，
-        /// 而 yaw 能不能被这条弧**定住**取决于相位覆盖——覆盖不足时代价函数在
-        /// yaw 方向是平谷（残差看着不大，yaw 却可能偏 20°+）。
-        /// 2026-10-12 实车检测流实测（按拟合 rmse 分层，对照整车 EKF 的 yaw）：
-        ///   rmse < 3px → σ_ψ = 0.57°；3~8px → 9.7°；8~16px → 22.6°。
-        /// 所以 yaw 通道必须同时看 rmse 与相位跨度（见 estimation/local_fit_gate.hpp）。
-        double phase_span_rad = 0.0;
-        double quality = 0.0;           // 0~1，越大越可信（用于缩放观测协方差）
-        int num_bars = 0;               // 参与拟合的灯条数
-    };
 }
 
 #endif

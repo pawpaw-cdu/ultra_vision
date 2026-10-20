@@ -30,9 +30,6 @@
 #include "visualization/curve_plotter.hpp"
 #include "app/csv_sink.hpp"
 #include "app/perf_stats.hpp"
-#ifdef ULTRA_VISION_HAVE_LOCAL_FIT
-#include "estimation/local_trajectory_fitter.hpp"
-#endif
 
 namespace auto_aim
 {
@@ -109,9 +106,6 @@ namespace auto_aim
             // 可选：记录**每一帧的全部检测**（每块板的左右两根灯条端点），供离线分析
             // （如小陀螺灯条轨迹几何估计）。默认关（不设 ULTRA_VISION_DETECTIONS_CSV 就不开）。
             std::unique_ptr<CsvSink> detections_recorder_;
-#ifdef ULTRA_VISION_HAVE_LOCAL_FIT
-            std::unique_ptr<auto_aim::LocalTrajectoryFitter> local_fitter_;
-#endif
             int dump_counter_ = 0;   // ULTRA_VISION_DUMP_DIR 用的帧序号
 
             visualization::CurvePlotter curves_{300};

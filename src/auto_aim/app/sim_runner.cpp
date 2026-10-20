@@ -66,18 +66,6 @@ namespace auto_aim
 
             const auto_aim::DetectorConfig det_cfg = auto_aim::loadDetectorConfig(detector_cfg);
             auto_aim::TrackerConfig track_cfg = auto_aim::loadTrackerConfig(tracker_cfg);
-            // P2 A/B 开关：ULTRA_VISION_LOCAL_FIT=1 时打开局部拟合器（否则用 yaml 的默认）。
-            if (const char* lf = std::getenv("ULTRA_VISION_LOCAL_FIT")) {
-                track_cfg.local_fit.enabled = (std::atoi(lf) == 1);
-            }
-            // B 段标定项（拟合 θ 约定 → EKF yaw/ω 约定）：仿真里给个环境变量便于扫符号。
-            if (const char* s = std::getenv("ULTRA_VISION_LOCAL_FIT_SIGN")) {
-                track_cfg.local_fit.yaw_rate_sign = std::atof(s);
-            }
-            // 多板联合 A/B 开关（方向2）
-            if (const char* j = std::getenv("ULTRA_VISION_LOCAL_FIT_JOINT")) {
-                track_cfg.local_fit.joint_plates = (std::atoi(j) == 1);
-            }
             const auto_aim::PnpGeometry pnp_geometry = auto_aim::loadPnpGeometry(tracker_cfg);
 
             // Optional neural-network detector. It replaces the light-bar pipeline but
@@ -217,58 +205,14 @@ namespace auto_aim
                 "ULTRA_VISION_ESTIMATE_CSV",
                 "x,y,z,color,distance,time_us,plate_id,model_dt,yaw,omega,radius\n");
 
-            // 模型构造（重投影整车轮廓）用的装甲板安装倾角：**仿真靶没有 15° 支架**
-            // （灯条在板坐标系里绝对竖直），所以默认 0；要和局部拟合器的 α 保持一致，
-            // 于是 ULTRA_VISION_LOCAL_FIT_ALPHA_DEG 也当作这里的默认值
-            // （ULTRA_VISION_ARMOR_TILT_DEG 可单独覆盖，做"倾角画错会怎样"的对照）。
+            // 模型构造（重投影整车轮廓）用的装甲板安装倾角：仿真靶没有 15° 支架
+            // （灯条在板坐标系里绝对竖直），所以默认 0。
             {
                 const char* tilt_env = std::getenv("ULTRA_VISION_ARMOR_TILT_DEG");
-                const char* alpha_env = std::getenv("ULTRA_VISION_LOCAL_FIT_ALPHA_DEG");
-                const double tilt = tilt_env != nullptr ? std::atof(tilt_env)
-                                   : (alpha_env != nullptr ? std::atof(alpha_env) : 0.0);
+                const double tilt = tilt_env != nullptr ? std::atof(tilt_env) : 0.0;
                 pipeline_->tracker().setArmorTiltDeg(tilt);
             }
 
-#ifdef ULTRA_VISION_HAVE_LOCAL_FIT
-            if (track_cfg.local_fit.enabled) {
-                auto_aim::LocalTrajectoryFitConfig fcfg;
-                if (camera_matrix_.rows == 3) {
-                    fcfg.K = { camera_matrix_.at<double>(0, 0), camera_matrix_.at<double>(1, 1),
-                               camera_matrix_.at<double>(0, 2), camera_matrix_.at<double>(1, 2) };
-                }
-                fcfg.lightbar_len = 0.060;    // 仿真小装甲板灯条/板高
-                fcfg.plate_width = 0.1315;    // 仿真小装甲板等效宽度
-                fcfg.gimbal_pitch = 0.0;
-                fcfg.center_init = {{ 0.0, 0.0, 3.0 }};
-                local_fitter_ = std::make_unique<auto_aim::LocalTrajectoryFitter>(fcfg);
-                auto* fitter = local_fitter_.get();
-                // α 固定（仿真靶 α=0；真实裁判系统 15° 支架仿真里没建模），走环境变量。
-                const double alpha0 = [] {
-                    const char* v = std::getenv("ULTRA_VISION_LOCAL_FIT_ALPHA_DEG");
-                    return (v != nullptr ? std::atof(v) : 15.0) * M_PI / 180.0;
-                }();
-                // 慢层：R 在线估计（默认开）；ULTRA_VISION_LOCAL_FIT_R_FIXED=1 时退回写死 R 做 A/B。
-                const bool r_fixed = std::getenv("ULTRA_VISION_LOCAL_FIT_R_FIXED") != nullptr;
-                fitter->seedSlow(alpha0, fcfg.R_prior);
-                pipeline_->tracker().setLocalFitter(
-                    [fitter, alpha0, r_fixed](const std::vector<auto_aim::LightBarObservation>& obs,
-                                              auto_aim::LocalFitResult& out) {
-                        const bool ok = r_fixed ? fitter->fit(obs, alpha0, fitter->slowR(), out)
-                                                : fitter->fitWithSlow(obs, out);
-                        static int dbg = 0;
-                        if (std::getenv("ULTRA_VISION_LOCAL_FIT_DBG") && ++dbg % 40 == 0) {
-                            std::cerr << "[local_fit] ok=" << ok << " rmse="
-                                      << out.reprojection_rmse_px << " yaw="
-                                      << out.yaw * 180.0 / M_PI << " w=" << out.omega
-                                      << " R=" << fitter->slowR()
-                                      << " nbars=" << obs.size() << std::endl;
-                        }
-                        return ok;
-                    });
-                pipeline_->tracker().startLocalFitWorker();
-                std::cout << "[local_fit] enabled (P2 A/B)" << std::endl;
-            }
-#endif
             observation_recorder_ = std::make_unique<auto_aim::app::CsvSink>(
                 "ULTRA_VISION_OBSERVATION_CSV",
                 "x,y,z,rx,ry,rz,tracker_x,tracker_y,tracker_z,"
@@ -435,22 +379,6 @@ namespace auto_aim
                                             camera_matrix_.at<double>(1, 1),
                                             camera_matrix_.at<double>(0, 2),
                                             camera_matrix_.at<double>(1, 2));
-#ifdef ULTRA_VISION_HAVE_LOCAL_FIT
-                // 局部拟合器在 pipeline 初始化时创建，那时 camera_matrix_ 还没算出来
-                // （它依赖首帧尺寸）→ 拟合器会拿到默认内参(f≈800) 导致 ω 完全错。
-                // 这里把真实内参补给它（只在变化时更新）。
-                if (local_fitter_) {
-                    auto fcfg = local_fitter_->config();
-                    const double fx = camera_matrix_.at<double>(0, 0);
-                    const double fy = camera_matrix_.at<double>(1, 1);
-                    const double cx = camera_matrix_.at<double>(0, 2);
-                    const double cy = camera_matrix_.at<double>(1, 2);
-                    if (fcfg.K.fx != fx || fcfg.K.cx != cx || fcfg.K.cy != cy) {
-                        fcfg.K = auto_aim::LocalFitIntrinsics{ fx, fy, cx, cy };
-                        local_fitter_->setConfig(fcfg);
-                    }
-                }
-#endif
             }
 
             // ------------------- 检测（共用组件：传统/神经网络 + 动态 ROI + PnP）----
@@ -623,31 +551,8 @@ namespace auto_aim
             }
             // 移动而不是拷贝：检出结果只进这一条流水线，搬走 vector 就够
             //（每帧省掉一次 Armor 列表（含嵌套 vector/cv::Mat 头）的深拷贝）。
-            // 局部拟合器：把本帧灯条端点推入缓冲（内部按 cfg.local_fit.enabled 早退）。
-            // 时间用**曝光戳**（ω=dθ/dt，dt 精度直接决定 ω）：仿真里回传的曝光时刻比
-            // "到手时刻−中位延迟"更准（后者带网络/解码抖动，会把 ω 带偏）。
-            const double local_fit_time = (frame_source_timestamp_us_ > 0)
-                ? auto_aim::StandardClock::secondsFromUs(frame_source_timestamp_us_)
-                : observation_time;
-            for (const auto& a : source_result_.armors) {
-                tracker.pushArmorLightBars(a, local_fit_time, tracker.plateIdFor(a));
-            }
-            if (std::getenv("ULTRA_VISION_LOCAL_FIT_DBG") && tracker.getState() != auto_aim::TrackerState::LOST) {
-                static int dbg2 = 0;
-                if (++dbg2 % 20 == 0 && !source_result_.armors.empty()) {
-                    const auto& a = source_result_.armors.front();
-                    std::cerr << "[gimbal] yaw=" << frame_gimbal_yaw_ * 180.0 / CV_PI
-                              << " pitch=" << frame_gimbal_pitch_ * 180.0 / CV_PI
-                              << " | armor#" << a.number
-                              << " Lt(" << a.left.top.x << "," << a.left.top.y << ") Lb("
-                              << a.left.bottom.x << "," << a.left.bottom.y << ") Rt("
-                              << a.right.top.x << "," << a.right.top.y << ") Rb("
-                              << a.right.bottom.x << "," << a.right.bottom.y << ")" << std::endl;
-                }
-            }
             frame.armors = std::move(source_result_.armors);
             const auto outcome = pipeline_->update(frame);
-            tracker.applyLatestLocalFit();
 
             last_decision_ = outcome.decision;
             aim_ready_ = outcome.aim_ready;

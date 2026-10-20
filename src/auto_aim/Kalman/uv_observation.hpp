@@ -10,7 +10,7 @@
 
 namespace auto_aim
 {
-    /// 灯条几何（实测/官方标定值，见 docs/design_decision_local_fit.md）：
+    /// 灯条几何（实测/官方标定值）：
     ///   W = 0.135
     ///   α = 14.5
     struct UvGeometry

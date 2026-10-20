@@ -24,7 +24,6 @@ set(AUTO_AIM_CORE_SOURCES
     Kalman/tracker_association.cpp
     Kalman/tracker_lifecycle.cpp
     Kalman/tracker_accessors.cpp
-    Kalman/tracker_localfit.cpp
 )
 set(AUTO_AIM_REAL_ENTRY
     node.cpp
@@ -110,40 +109,7 @@ else()
   message(STATUS "auto_aim_real 跳过：未找到可用的海康或大恒相机 SDK")
 endif()
 
-# ---- 局部拟合器（运行组件；只要找到 Ceres 就编译，与是否构建测试无关）----------
-# 定位：EKF 弱点的补强（正面 Yaw/Omega + 旋转中心），异步低频、可注入、默认不接管主链路。
-# 单独成库、不进 auto_aim_core；Tracker 通过 setLocalFitter 注入。
-# 注意：这是**运行组件**，不能藏在 ULTRA_VISION_BUILD_TESTS 里——真机构建 tests=OFF，
-# 那样 auto_aim_real 根本编不出拟合器（2026-10-10 发现）。
-find_package(Ceres QUIET)
-find_package(Eigen3 QUIET)
-if(Ceres_FOUND AND Eigen3_FOUND)
-  add_library(auto_aim_local_fit STATIC estimation/local_trajectory_fitter.cpp)
-  target_include_directories(auto_aim_local_fit PUBLIC
-      ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}
-      ${Eigen3_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS})
-  target_link_libraries(auto_aim_local_fit PUBLIC Eigen3::Eigen Ceres::ceres ${OpenCV_LIBS})
-  message(STATUS "auto_aim_local_fit: 启用（Ceres ${Ceres_VERSION}）")
-  # 仿真/真机入口都接入（ULTRA_VISION_LOCAL_FIT=1 打开，默认关）。
-  target_link_libraries(auto_aim_sim PRIVATE auto_aim_local_fit)
-  target_compile_definitions(auto_aim_sim PRIVATE ULTRA_VISION_HAVE_LOCAL_FIT=1)
-  if(TARGET auto_aim_real)
-    target_link_libraries(auto_aim_real PRIVATE auto_aim_local_fit)
-    target_compile_definitions(auto_aim_real PRIVATE ULTRA_VISION_HAVE_LOCAL_FIT=1)
-  endif()
-else()
-  message(STATUS "auto_aim_local_fit: 跳过（未找到 Ceres/Eigen）")
-endif()
-
 if(ULTRA_VISION_BUILD_TESTS)
-  if(TARGET auto_aim_local_fit)
-    add_executable(local_trajectory_fitter_test
-        test/local_trajectory_fitter_test.cpp)
-    target_include_directories(local_trajectory_fitter_test PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR})
-    target_link_libraries(local_trajectory_fitter_test PRIVATE auto_aim_local_fit)
-    add_test(NAME local_trajectory_fitter_test COMMAND local_trajectory_fitter_test)
-  endif()
 
   add_executable(standard_clock_test
       test/standard_clock_test.cpp
@@ -239,7 +205,6 @@ if(ULTRA_VISION_BUILD_TESTS)
       Kalman/tracker_association.cpp
       Kalman/tracker_lifecycle.cpp
       Kalman/tracker_accessors.cpp
-      Kalman/tracker_localfit.cpp
   )
   target_include_directories(armor_ekf_test PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}
@@ -264,7 +229,7 @@ if(ULTRA_VISION_BUILD_TESTS)
   add_test(NAME pnp_yaw_refine_test COMMAND pnp_yaw_refine_test)
 
   # 模型构造（整车轮廓重投影）的几何自检：装甲板刚体姿态 + 15° 安装倾角。
-  # 把"模型构造 == 局部拟合器的车辆系几何"钉成恒等式，并回归掉历史三个坑
+  # 把模型构造的车辆系几何钉成恒等式，并回归掉历史三个坑
   # （世界系 yaw 造切向 / 观测板 rvec 当竖直 / 丢 tangent.y）。纯头文件，无额外依赖。
   add_executable(armor_geometry_test
       test/armor_geometry_test.cpp
@@ -277,8 +242,7 @@ if(ULTRA_VISION_BUILD_TESTS)
   target_link_libraries(armor_geometry_test PRIVATE ${OpenCV_LIBS})
   add_test(NAME armor_geometry_test COMMAND armor_geometry_test)
 
-  # 相位观测自检（审计项 D 的回归）：updateAngle 对四个板位的增益/符号 +
-  # updateWithLocalFit 的 yaw / ω 两条通道必须各自独立可用。
+  # 相位观测自检：updateAngle 对四个板位的增益与符号必须一致。
   # 纯头文件（armor_ekf.hpp 是实现头），无额外依赖。
   add_executable(armor_ekf_angle_test
       test/armor_ekf_angle_test.cpp
@@ -291,8 +255,6 @@ if(ULTRA_VISION_BUILD_TESTS)
   target_link_libraries(armor_ekf_angle_test PRIVATE ${OpenCV_LIBS})
   add_test(NAME armor_ekf_angle_test COMMAND armor_ekf_angle_test)
 
-  # 局部拟合 yaw 质量门（实测分层：rmse<3px→σ_ψ≈0.6°，8~16px→22.6°，而 ω 各档都稳）。
-  # 纯头文件（estimation/local_fit_gate.hpp），无额外依赖。
   # UV-EKF（刚体分解）自检：差分灵敏度 / 更新收敛 / 错板号被 NIS 拒。
   add_executable(uv_ekf_test
       test/uv_ekf_test.cpp
@@ -304,16 +266,6 @@ if(ULTRA_VISION_BUILD_TESTS)
   )
   target_link_libraries(uv_ekf_test PRIVATE ${OpenCV_LIBS})
   add_test(NAME uv_ekf_test COMMAND uv_ekf_test)
-
-  add_executable(local_fit_gate_test
-      test/local_fit_gate_test.cpp
-  )
-  target_include_directories(local_fit_gate_test PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}
-      ${CMAKE_SOURCE_DIR}
-      ${OpenCV_INCLUDE_DIRS}
-  )
-  add_test(NAME local_fit_gate_test COMMAND local_fit_gate_test)
 
   # 下位机协议层自检：CRC16 标准值 / 43B+29B 字节布局 / 打包解析往返 / 非法帧。
   # 真机"连上但不动"最常见的三个原因（CRC 口径、结构体 padding、帧长）都在这里钉死。

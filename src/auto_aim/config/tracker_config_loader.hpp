@@ -56,73 +56,6 @@ namespace auto_aim
         cfg.plate_lock_margin =
             tracker["plate_lock_margin"].as<double>(cfg.plate_lock_margin);
 
-        // 局部拟合器（小陀螺 θ/ω；默认关）。见 docs/local_trajectory_fitter.md。
-        if (const YAML::Node lf = tracker["local_fit"]) {
-            cfg.local_fit.enabled = lf["enabled"].as<bool>(cfg.local_fit.enabled);
-            cfg.local_fit.window_frames = lf["window_frames"].as<int>(cfg.local_fit.window_frames);
-            cfg.local_fit.min_bars = lf["min_bars"].as<int>(cfg.local_fit.min_bars);
-            cfg.local_fit.period_frames = lf["period_frames"].as<int>(cfg.local_fit.period_frames);
-            cfg.local_fit.max_result_age =
-                lf["max_result_age"].as<double>(cfg.local_fit.max_result_age);
-            cfg.local_fit.max_window_gap_frames =
-                lf["max_window_gap_frames"].as<int>(cfg.local_fit.max_window_gap_frames);
-            cfg.local_fit.yaw_noise = lf["yaw_noise"].as<double>(cfg.local_fit.yaw_noise);
-            cfg.local_fit.omega_noise = lf["omega_noise"].as<double>(cfg.local_fit.omega_noise);
-            cfg.local_fit.use_yaw = lf["use_yaw"].as<bool>(cfg.local_fit.use_yaw);
-            cfg.local_fit.yaw_use_omega_min =
-                lf["yaw_use_omega_min"].as<double>(cfg.local_fit.yaw_use_omega_min);
-            cfg.local_fit.yaw_use_omega_full =
-                lf["yaw_use_omega_full"].as<double>(cfg.local_fit.yaw_use_omega_full);
-            // yaw 通道的质量门（见 estimation/local_fit_gate.hpp）
-            cfg.local_fit.yaw_max_rmse_px =
-                lf["yaw_max_rmse_px"].as<double>(cfg.local_fit.yaw_max_rmse_px);
-            cfg.local_fit.yaw_min_phase_span_deg =
-                lf["yaw_min_phase_span_deg"].as<double>(cfg.local_fit.yaw_min_phase_span_deg);
-            cfg.local_fit.omega_max_rmse_px =
-                lf["omega_max_rmse_px"].as<double>(cfg.local_fit.omega_max_rmse_px);
-            // A 段深度门控（实车靶 1.2~1.6m，别用 sp_vision 的 1.5）
-            cfg.local_fit.min_depth = lf["min_depth"].as<double>(cfg.local_fit.min_depth);
-            cfg.local_fit.plate_width = lf["plate_width"].as<double>(cfg.local_fit.plate_width);
-            cfg.local_fit.lightbar_len =
-                lf["lightbar_len"].as<double>(cfg.local_fit.lightbar_len);
-            cfg.local_fit.max_depth = lf["max_depth"].as<double>(cfg.local_fit.max_depth);
-            cfg.local_fit.yaw_bias_alpha =
-                lf["yaw_bias_alpha"].as<double>(cfg.local_fit.yaw_bias_alpha);
-            cfg.local_fit.yaw_bias_limit_deg =
-                lf["yaw_bias_limit_deg"].as<double>(cfg.local_fit.yaw_bias_limit_deg);
-            cfg.local_fit.ref_yaw_gate_deg =
-                lf["ref_yaw_gate_deg"].as<double>(cfg.local_fit.ref_yaw_gate_deg);
-            cfg.local_fit.yaw_rate_sign =
-                lf["yaw_rate_sign"].as<double>(cfg.local_fit.yaw_rate_sign);
-            cfg.local_fit.also_update_center =
-                lf["also_update_center"].as<bool>(cfg.local_fit.also_update_center);
-            cfg.local_fit.center_noise =
-                lf["center_noise"].as<double>(cfg.local_fit.center_noise);
-            cfg.local_fit.use_fit_radius =
-                lf["use_fit_radius"].as<bool>(cfg.local_fit.use_fit_radius);
-            cfg.local_fit.radius_alpha =
-                lf["radius_alpha"].as<double>(cfg.local_fit.radius_alpha);
-            cfg.local_fit.radius_max_step =
-                lf["radius_max_step"].as<double>(cfg.local_fit.radius_max_step);
-            cfg.local_fit.center_anchor =
-                lf["center_anchor"].as<bool>(cfg.local_fit.center_anchor);
-            cfg.local_fit.center_anchor_spin_min =
-                lf["center_anchor_spin_min"].as<double>(cfg.local_fit.center_anchor_spin_min);
-            cfg.local_fit.center_anchor_move_max =
-                lf["center_anchor_move_max"].as<double>(cfg.local_fit.center_anchor_move_max);
-            cfg.local_fit.center_anchor_gain_rotating =
-                lf["center_anchor_gain_rotating"].as<double>(
-                    cfg.local_fit.center_anchor_gain_rotating);
-            cfg.local_fit.center_anchor_gain_other =
-                lf["center_anchor_gain_other"].as<double>(
-                    cfg.local_fit.center_anchor_gain_other);
-            cfg.local_fit.center_anchor_max_error =
-                lf["center_anchor_max_error"].as<double>(
-                    cfg.local_fit.center_anchor_max_error);
-            cfg.local_fit.max_slow_result_age =
-                lf["max_slow_result_age"].as<double>(cfg.local_fit.max_slow_result_age);
-        }
-
         if (const YAML::Node rotation = tracker["rotation_rate"]) {
             cfg.rotation_rate.window =
                 rotation["window"].as<double>(cfg.rotation_rate.window);
@@ -163,8 +96,7 @@ namespace auto_aim
             cfg.armor_radius =
                 kalman["armor_radius"].as<double>(cfg.armor_radius);
             // env 覆盖（仿真/实车切换用）：仿真车的装甲板回转半径真值是 0.2101，
-            // 实车实测约 0.29（见 docs/design_decision_local_fit.md 的标定一节），
-            // 两者不能共用同一个配置值。
+            // 实车实测约 0.29，两者不能共用同一个配置值。
             if (const char * r = std::getenv("ULTRA_VISION_ARMOR_RADIUS")) {
                 const double v = std::atof(r);
                 if (v > 0.05 && v < 1.0) cfg.armor_radius = v;
@@ -291,8 +223,7 @@ namespace auto_aim
             cfg.armor_large_width =
                 pnp["large_width"].as<double>(cfg.armor_large_width);
             cfg.armor_height = pnp["height"].as<double>(cfg.armor_height);
-            // 装甲板安装倾角（真机 15° 支架；仿真靶 0°）。模型构造/重投影用它 ——
-            // 与局部拟合器的 slow α 是同一个物理量（见 common/armor_geometry.hpp）。
+            // 装甲板安装倾角（真机 15° 支架；仿真靶 0°）。模型构造/重投影用它。
             cfg.armor_tilt_deg =
                 pnp["armor_pitch_deg"].as<double>(cfg.armor_tilt_deg);
             // 逐板回转距离 + 大/小板标记（真车是**矩形**底盘：前后 ≠ 左右）。

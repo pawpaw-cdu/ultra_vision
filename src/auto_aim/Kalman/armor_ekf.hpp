@@ -707,22 +707,6 @@ public:
 
     Vec<kStateDim> getState() const { return x_; }
 
-    static constexpr int kChassisYawPlateId = 1;
-
-    double updateWithLocalFit(
-        const LocalFitResult& fit, double yaw_noise = 0.02, double omega_noise = 0.05,
-        double nis_threshold = std::numeric_limits<double>::infinity()) {
-        if (!initialized_ || !fit.valid) return 0.0;
-        const double q = std::clamp(fit.quality, 0.05, 1.0);
-        // LocalFitResult::yaw 是**底盘 yaw**（与 angleForPlate 同一张相位表，见
-        // estimation/local_trajectory_fitter.hpp 的 plate_yaw_offsets 注释），
-        const double yaw_w =
-            updateAngle(fit.yaw, kChassisYawPlateId, yaw_noise / q, nis_threshold);
-        const double omega_w =
-            updateOmega(fit.omega, omega_noise / q, nis_threshold);
-        return std::max(yaw_w, omega_w);
-    }
-
     // ======================================================================
     // UV-EKF（刚体分解）：直接用四个灯条端点像素更新整车状态。
     // 见 Kalman/uv_observation.hpp 的推导与两处设计说明（差分/平均的分块噪声、
@@ -730,7 +714,6 @@ public:
     // ======================================================================
 
     /// 四个灯条端点在**世界系**，顺序 [左灯条上, 左灯条下, 右灯条上, 右灯条下]。
-    /// 与 estimation/local_trajectory_fitter 的 barEndpointV 同构（同一个刚体模型）。
     std::array<Vec<3>, 4> uvEndpoints(int plate_id, const UvGeometry& g) const
     {
         const double phi = std::atan2(x_(4, 0), x_(5, 0)) + angleForPlate(plate_id);

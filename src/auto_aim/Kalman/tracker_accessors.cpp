@@ -118,40 +118,6 @@ namespace auto_aim
         cfg_.armor_tilt_deg = geometry_.armor_pitch * 180.0 / CV_PI;
     }
 
-    void Tracker::updateChassisFromFit(double radius, double armor_pitch_rad, double height_up)
-    {
-        const double alpha = std::clamp(cfg_.local_fit.radius_alpha, 0.01, 1.0);
-        const double max_step = std::max(1e-4, cfg_.local_fit.radius_max_step);
-        bool changed = false;
-        if (std::isfinite(radius) && radius > 0.10 && radius < 0.50) {
-            const double mean = geometry_.meanDistance();
-            const double step = std::clamp(radius - mean, -max_step, max_step);
-            const double delta = alpha * step;
-            for (auto& d : geometry_.plate_distance) d += delta;
-            cfg_.armor_radius = mean + delta;
-            ekf_.setArmorRadius(cfg_.armor_radius);
-            armor_radius_online_ = cfg_.armor_radius;
-            changed = true;
-        }
-        if (std::isfinite(armor_pitch_rad) && std::abs(armor_pitch_rad) < 1.0) {
-            const double step = std::clamp(armor_pitch_rad - geometry_.armor_pitch,
-                                           -0.02, 0.02);
-            geometry_.armor_pitch += alpha * step;
-            cfg_.armor_tilt_deg = geometry_.armor_pitch * 180.0 / CV_PI;
-            changed = true;
-        }
-        // 板心高度：拟合器的 h 是"板心在车辆系里相对旋转中心的高度"，向上为正，
-        if (std::isfinite(height_up) && std::abs(height_up) < 0.5) {
-            const double mean = 0.25 * (geometry_.plate_height[0] + geometry_.plate_height[1] +
-                                        geometry_.plate_height[2] + geometry_.plate_height[3]);
-            const double step = std::clamp(height_up - mean, -0.02, 0.02);
-            const double target = mean + alpha * step;
-            for (auto& h : geometry_.plate_height) h = target;
-            changed = true;
-        }
-        if (changed) syncGeometryToEkf();
-    }
-
     // 把滤波器状态里的 l/h（前后组半径差/高度差）叠加到慢层几何上
     ChassisGeometry Tracker::effectiveChassisGeometry() const
     {
@@ -368,38 +334,6 @@ namespace auto_aim
         camera_cx_ = cx;
         camera_cy_ = cy;
         camera_intrinsics_valid_ = true;
-    }
-
-    void Tracker::setCameraDistortion(const cv::Mat& dist_coeffs)
-    {
-        camera_dist_ = dist_coeffs.clone();
-        camera_dist_valid_ = !camera_dist_.empty() &&
-                             (camera_dist_.rows * camera_dist_.cols) >= 4;
-    }
-
-    std::array<double, 9> Tracker::fitterRcv() const
-    {
-        const auto cb = tracker_detail::cameraToBaseRotation(camera_pose_.yaw, camera_pose_.pitch);
-        const auto g = tracker_detail::cameraToGimbal(camera_pose_);
-        const double B[3][3] = {{0.0, 1.0, 0.0}, {0.0, 0.0, -1.0}, {1.0, 0.0, 0.0}};
-        // M = G^T · R_cb^T
-        double M[3][3];
-        for (int i = 0; i < 3; ++i)
-            for (int l = 0; l < 3; ++l)
-            {
-                double v = 0.0;
-                for (int k = 0; k < 3; ++k) v += g(k, i) * cb(l, k);
-                M[i][l] = v;
-            }
-        std::array<double, 9> out{};
-        for (int i = 0; i < 3; ++i)
-            for (int j = 0; j < 3; ++j)
-            {
-                double v = 0.0;
-                for (int l = 0; l < 3; ++l) v += M[i][l] * B[l][j];
-                out[i * 3 + j] = v;
-            }
-        return out;
     }
 
     Armor Tracker::toWorld(const Armor& armor) const

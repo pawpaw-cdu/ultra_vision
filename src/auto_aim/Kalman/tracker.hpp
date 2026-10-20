@@ -5,11 +5,6 @@
 #include <deque>
 #include <chrono>
 #include <cmath>
-#include <atomic>
-#include <functional>
-#include <mutex>
-#include <optional>
-#include <thread>
 #include <vector>
 
 #include <opencv2/core.hpp>
@@ -43,48 +38,6 @@ namespace auto_aim
             {{0.0, 0.0, 1.0}}
         }};
         std::array<double, 3> camera_to_gimbal_translation{{0.0, 0.0, 0.0}};
-    };
-
-    struct LocalFitConfig
-    {
-        bool enabled = false;
-        int window_frames = 24;         // 滑窗帧数（覆盖相位 ≥ π/3 才有 ω 可辨识性）
-        int min_bars = 8;               // 窗口内至少这么多条灯条观测才拟合
-        int period_frames = 10;         // 每多少帧触发一次拟合（低频异步）
-        double max_result_age = 0.20;   // s：拟合结果比当前帧老过它就外推/丢弃
-        int max_window_gap_frames = 6;  // 连续丢帧超过它就清空窗口（避免跨运动段）
-        double front_gate = 0.5;
-        double assoc_gate_px = 45.0;    // 帧间板心关联门限（px），配合常速预测
-        double plate_width = 0.135;
-        double lightbar_len = 0.060;
-        double min_depth = 0.8;
-        double max_depth = 9.0;         // 上限（m）
-        bool joint_plates = false;
-        int joint_max_arcs = 4;         // 联合时最多用几条板弧
-        double yaw_noise = 0.02;        // 拟合 yaw 的观测噪声（rad²，质量再缩放）
-        double omega_noise = 0.05;      // 拟合 ω 的观测噪声
-        bool use_yaw = false;
-        double yaw_use_omega_min = 1.0;    // rad/s
-        double yaw_use_omega_full = 2.5;   // rad/s
-        double yaw_max_rmse_px = 3.0;          // yaw 可注入的最大拟合 rmse
-        double yaw_min_phase_span_deg = 20.0;  // yaw 可注入的最小弧段相位跨度
-        double omega_max_rmse_px = 3.0;
-        double yaw_bias_alpha = 0.02;      // 学习率
-        double yaw_bias_limit_deg = 30.0;  // 限幅（防跑飞）
-        double ref_yaw_gate_deg = 40.0;
-        double yaw_rate_sign = -1.0;
-        bool also_update_center = false;
-        double center_noise = 0.01;
-        bool use_fit_radius = false;
-        double radius_alpha = 0.25;      // 一阶低通系数（每次有效拟合最多跟 25%）
-        double radius_max_step = 0.02;   // 单次最大变化（m）
-        bool center_anchor = true;
-        double center_anchor_spin_min = 1.0;      // rad/s
-        double center_anchor_move_max = 0.15;     // m/s
-        double center_anchor_gain_rotating = 0.35;
-        double center_anchor_gain_other = 0.10;
-        double center_anchor_max_error = 0.60;    // 差太多（m）说明拟合不可信
-        double max_slow_result_age = 2.0;
     };
 
     struct TrackerConfig {
@@ -183,14 +136,13 @@ namespace auto_aim
         double association_chi2 = 9.488;   // χ²(4, 95%)
         std::array<double, 4> armor_y_offsets{{0.0, 0.0, 0.0, 0.0}};
 
-        LocalFitConfig local_fit;
     };
 
     class Tracker
     {
     public:
         explicit Tracker(const TrackerConfig& cfg);
-        ~Tracker();
+        ~Tracker() = default;
 
         void init(const Armor& armor, double timestamp);
         void init(const std::vector<Armor>& armors, double timestamp);
@@ -223,7 +175,6 @@ namespace auto_aim
         const ChassisGeometry& chassisGeometry() const { return geometry_; }
         /// @brief 直接写入慢层几何（会同步到 EKF 的逐板半径）。
         void setChassisGeometry(const ChassisGeometry& geometry);
-        void updateChassisFromFit(double radius, double armor_pitch_rad, double height_up);
         void syncGeometryFromConfig();
         void syncGeometryToEkf();
 
@@ -275,64 +226,10 @@ namespace auto_aim
         double ekfCovarianceDiag(int i) const { return ekf_.covarianceDiag(i); }
         bool hasRotationRate() const { return rotation_rate_estimator_.valid(); }
         double getArmorRadius() const { return cfg_.armor_radius; }
-        void setArmorRadius(double radius)
-        {
-            if (!(radius > 0.05 && radius < 1.0)) return;
-            cfg_.armor_radius = radius;
-            ekf_.setArmorRadius(radius);
-            for (auto& d : geometry_.plate_distance) d = radius;
-            ekf_.setPlateDistance(geometry_.plate_distance);
-            if (std::isfinite(radius)) armor_radius_online_ = radius;
-        }
-        bool armorRadiusOnline() const { return armor_radius_online_ > 0.0; }
         double getLastMeasurementWeight() const { return last_measurement_weight_; }
         /// @brief "构造板一定最近"硬约束把 yaw 翻回来的累计次数（诊断用）。
         int nearestPlateFlips() const { return nearest_plate_flips_; }
-        /// @brief 最近一次拟合判出的运动状态（诊断用）。
-        ChassisMotion lastMotion() const { return last_motion_; }
-        /// @brief 局部拟合器运行统计（诊断：实车"R=(cfg)/motion 一直 0"就是它没出过有效解）。
-        int localFitAttempts() const { return local_fit_attempts_; }
-        int localFitValids() const { return local_fit_valids_; }
-        double localFitLastRmse() const { return local_fit_last_rmse_; }
-        double localFitLastR() const { return local_fit_last_R_; }
-        int localFitLastBars() const { return local_fit_last_bars_; }
-        /// 推给拟合器的灯条总数 / 拟合结果真正写进几何的次数（诊断用）。
-        int localFitPushed() const { return local_fit_pushed_; }
-        int localFitApplied() const { return local_fit_applied_; }
-        bool fitRadiusEnabled() const { return cfg_.local_fit.use_fit_radius; }
-        bool localFitEnabled() const { return cfg_.local_fit.enabled; }
-        int localFitLinks() const { return local_fit_links_; }
-        int localFitNewArcs() const { return local_fit_new_arcs_; }
-        int localFitObsMax() const { return local_fit_obs_max_; }
-        int localFitCandEmpty() const { return local_fit_cand_empty_; }
-        int localFitApplyCalls() const { return local_fit_apply_calls_; }
-        int localFitApplyNoFit() const { return local_fit_apply_no_fit_; }
-        int localFitApplyStale() const { return local_fit_apply_stale_; }
-        int localFitApplyGeometry() const { return local_fit_apply_geometry_; }
-        /// @brief 相位代表元被判"不可信"、退回模 90° 吸附的累计次数（诊断用）。
-        ///        长期为 0 说明 ref_armor_id 一直自洽（可以放心用精确注入）。
-        int localFitYawSnaps() const { return local_fit_yaw_snaps_; }
-        /// @brief 最近一次"拟合 yaw − EKF yaw"的残差（rad，已做相机系→home 系换算与
-        ///        延迟外推）。诊断用：它长期贴在 ±90°/180° 附近 = 参考板号或相位表
-        ///        不一致；贴在几十度 = 常值偏置/拟合器自身偏差。
-        double localFitYawResidual() const { return local_fit_yaw_residual_; }
-        /// @brief 参考板号自洽（|残差| ≤ ref_yaw_gate_deg）的累计次数，与
-        ///        localFitYawSnaps() 对照着看就是"精确注入 vs 吸附"的比例。
-        int localFitYawExact() const { return local_fit_yaw_exact_; }
-        /// @brief yaw 通道被**质量门**拦下的累计次数（拟合 rmse 超限 或 相位跨度不足）。
-        ///        与 localFitYawExact() 一起看 = "该喂 yaw 的帧里有多少被门控挡住"。
-        ///        实测口径见 estimation/local_fit_gate.hpp。
-        int localFitYawGated() const { return local_fit_yaw_gated_; }
-        /// @brief ω 通道被质量门拦下的累计次数（实测：放宽深度后 ω 也会害人，见 gate 头文件）。
-        int localFitOmegaGated() const { return local_fit_omega_gated_; }
-        /// @brief 最近一次 yaw 门控的判定（0=ok 1=bad_rmse 2=bad_span 3=invalid）。
-        int localFitYawVerdict() const { return local_fit_yaw_verdict_; }
-        /// @brief 最近一次拟合的相位跨度（度）——yaw 可辨识性的直接读数量。
-        double localFitPhaseSpanDeg() const { return local_fit_phase_span_deg_; }
-        double localFitApplyAgeMs() const { return local_fit_apply_age_ms_; }
-        double localFitLastMs() const { return local_fit_last_ms_; }
         double lastViewDeg() const { return last_view_deg_; }
-        int localFitArcs() const { return static_cast<int>(local_fit_arcs_.size()); }
 
         /// @brief 同帧多板联立解 (车心, yaw)（home 系）。返回是否成功（残差 < limit）。
         ///        几何用当前慢层的逐板半径；只解 1 个 yaw 自由度（1D 高斯-牛顿），
@@ -363,26 +260,8 @@ namespace auto_aim
 
         void setCameraIntrinsics(double fx, double fy, double cx, double cy);
         bool hasCameraIntrinsics() const { return camera_intrinsics_valid_; }
-        void setCameraDistortion(const cv::Mat& dist_coeffs);
-
-        std::array<double, 9> fitterRcv() const;
-
-        using LocalFitterCallback =
-            std::function<bool(const std::vector<LightBarObservation>&, LocalFitResult&)>;
-        void setLocalFitter(LocalFitterCallback fn);
-
-        void pushArmorLightBars(const Armor& armor, double timestamp, int armor_id);
 
         int plateIdFor(const Armor& armor) const { return selectPlateId(toWorld(armor)); }
-
-        bool runLocalFitNow();
-
-        void startLocalFitWorker();
-        void stopLocalFitWorker();
-
-        std::optional<LocalFitResult> latestLocalFit() const;
-
-        double applyLatestLocalFit();
 
     private:
 
@@ -394,51 +273,19 @@ namespace auto_aim
 
         TrackerConfig cfg_;
         ArmorEKF ekf_;
-        /// >0 表示半径已经被在线慢层改过（诊断/状态行用）。
-        double armor_radius_online_ = 0.0;
-        /// 底盘慢层几何（唯一模型来源；由 config / 拟合器慢层 / 观测慢收敛更新）。
+        /// 底盘慢层几何（唯一模型来源；由 config / 观测慢收敛更新）。
         ChassisGeometry geometry_;
         PlateEKF plate_ekf_;                       // 双模型的装甲板模型
         /// "最近板硬约束"把 yaw 翻回来的次数（诊断：正常应长期为 0，只有翻解时才动）。
         int nearest_plate_flips_ = 0;
         /// 连续多少帧处在"观测板落到远半侧"（两条确认才翻，防单帧异常）。
         int nearest_plate_violation_frames_ = 0;
-        /// 最近一次拟合判出的运动状态（诊断/状态行用）。
-        ChassisMotion last_motion_ = ChassisMotion::Still;
-        /// 局部拟合器统计（诊断用）。
-        int local_fit_attempts_ = 0;
-        int local_fit_valids_ = 0;
-        double local_fit_last_rmse_ = -1.0;
-        double local_fit_last_R_ = 0.0;
-        int local_fit_last_bars_ = 0;
-        int local_fit_pushed_ = 0;
-        int local_fit_links_ = 0;
-        int local_fit_new_arcs_ = 0;
-        int local_fit_obs_max_ = 0;
-        int local_fit_cand_empty_ = 0;
-        int local_fit_apply_calls_ = 0;
-        int local_fit_apply_no_fit_ = 0;
-        int local_fit_apply_stale_ = 0;
-        int local_fit_apply_geometry_ = 0;
-        int local_fit_yaw_snaps_ = 0;
-        int local_fit_yaw_exact_ = 0;
-        int local_fit_yaw_gated_ = 0;
-        int local_fit_omega_gated_ = 0;
-        int local_fit_yaw_verdict_ = 0;
-        double local_fit_phase_span_deg_ = 0.0;
-        double local_fit_yaw_residual_ = 0.0;
-        double local_fit_apply_age_ms_ = -1.0;
-        double local_fit_last_ms_ = -1.0;
         int joint_solves_ = 0;
         double joint_solve_residual_ = -1.0;
         double joint_solve_yaw_ = 0.0;
-        double fit_yaw_bias_ = 0.0;
-        bool fit_yaw_bias_valid_ = false;
         int previous_plate_id_ = -1;
         double last_view_deg_ = -1.0;
 
-        double last_push_time_ = 0.0;
-        int local_fit_applied_ = 0;
         double plate_model_last_timestamp_ = -1.0;
         double plate_model_weight_ = 0.0;
         Vec<3> plateDerivedCenter() const;
@@ -472,8 +319,6 @@ namespace auto_aim
         int accepted_observations_ = 0;
         CameraPose camera_pose_;
         bool camera_intrinsics_valid_ = false;
-        cv::Mat camera_dist_;            // 镜头畸变系数（可为空 = 无畸变）
-        bool camera_dist_valid_ = false;
         double camera_fx_ = 0.0;
         double camera_fy_ = 0.0;
         double camera_cx_ = 0.0;
@@ -507,20 +352,6 @@ namespace auto_aim
         void updateRotationRate(const Armor& armor, double timestamp, bool yaw_valid = true,
                                 int plate_id = -1);
 
-        mutable std::mutex local_fit_mutex_;
-        struct LocalFitArc
-        {
-            std::vector<LightBarObservation> obs;  // 每帧 2 根灯条
-            int plate_hint = -1;                   // 种子帧板号（0..3，-1=未知）
-            double seed_cx = 0.0, seed_cz = 0.0, seed_t = 0.0;
-            double u = 0.0, v = 0.0, t = 0.0;      // 最近一次板心(px)与时间
-            double vu = 0.0, vv = 0.0;             // 板心速度(px/s)，用于关联预测
-        };
-        std::vector<LocalFitArc> local_fit_arcs_;
-        std::optional<LocalFitResult> latest_local_fit_;
-        LocalFitterCallback local_fitter_;
-        std::thread local_fit_thread_;
-        std::atomic<bool> local_fit_running_{false};
     };
 }
 
