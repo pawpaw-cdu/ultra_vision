@@ -14,7 +14,6 @@
 #include "auto_buff/rune_slot_lattice.hpp"
 #include "auto_buff/rune_aim_fallback.hpp"
 #include "auto_buff/rune_orbit_fit.hpp"
-#include "auto_buff/rune_plate_pattern.hpp"
 #include "auto_buff/rune_timebase.hpp"
 #include "auto_buff/rune_track_lifecycle.hpp"
 #include "auto_buff/rune_fire_gate.hpp"
@@ -81,31 +80,6 @@ namespace
         check(lifecycle.currentStatus() == RuneTrackStatus::Track &&
                   lifecycle.rejectedFrames() == 0,
               "track lifecycle: a new accepted observation resets the lifecycle");
-    }
-
-    void testPlatePatternScore()
-    {
-        cv::Mat ring = cv::Mat::zeros(128, 128, CV_8UC3);
-        cv::circle(ring, {64, 64}, 38, cv::Scalar(180, 180, 180), -1, cv::LINE_AA);
-        cv::circle(ring, {64, 64}, 17, cv::Scalar(20, 20, 20), -1, cv::LINE_AA);
-
-        cv::Mat arms = cv::Mat::zeros(128, 128, CV_8UC3);
-        for (int arm = 0; arm < 4; ++arm) {
-            const double angle = arm * kPi / 2.0 + 0.2;
-            const cv::Point2f end(
-                static_cast<float>(64.0 + 42.0 * std::cos(angle)),
-                static_cast<float>(64.0 + 42.0 * std::sin(angle)));
-            cv::line(arms, {64, 64}, end, cv::Scalar(220, 220, 220), 7, cv::LINE_AA);
-        }
-
-        const auto ring_score = scoreRunePlatePattern(ring, {64.0f, 64.0f}, 76.0f);
-        const auto arm_score = scoreRunePlatePattern(arms, {64.0f, 64.0f}, 76.0f);
-        check(ring_score.valid && arm_score.valid,
-              "plate pattern: both synthetic faces must produce a score");
-        check(arm_score.pvd > ring_score.pvd + 0.08,
-              "plate pattern: four-arm face must have a higher PVD than a ring (got " +
-                  std::to_string(arm_score.pvd) + " vs " +
-                  std::to_string(ring_score.pvd) + ")");
     }
 
     // ---- 回合记账 / 开火窗口 -------------------------------------------------
@@ -745,7 +719,6 @@ int main()
 {
     testFrameTimestampSelection();
     testTrackLifecycleHysteresis();
-    testPlatePatternScore();
     testRoundWindow();
     testBladeJumpRestartsRound();
     testClassHitNeedsInactiveFirst();

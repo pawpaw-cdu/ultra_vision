@@ -14,7 +14,7 @@ namespace auto_aim::energy
 {
     RuneDetector::RuneDetector(const RuneDetectorConfig& config)
         : config_(config), model_(config.model), refiner_(config.refiner),
-          plate_refiner_(config.plate_refiner), blade_state_(config.blade_state)
+          plate_refiner_(config.plate_refiner)
     {
         if (const char* soft = std::getenv("ULTRA_VISION_RUNE_SOFT_CANDIDATE")) {
             config_.soft_candidate_selection = std::string(soft) != "0";
@@ -255,7 +255,6 @@ namespace auto_aim::energy
         frame_orbit_px_ = -1.0;
         lit_center_ = {0.0f, 0.0f};
         target_class_ = -1;
-        target_pattern_pvd_ = -1.0;
         picked_by_geometry_ = false;
         candidate_count_ = static_cast<int>(results.size());
         best_brightness_ = 0.0;
@@ -274,10 +273,6 @@ namespace auto_aim::energy
                 info.has_rmark = true;
                 info.has_plate = true;
             }
-            const auto pattern = scoreRunePlatePattern(
-                bgr_image, candidate.center,
-                std::max(candidate.rect.width, candidate.rect.height));
-            info.pattern_pvd = pattern.valid ? pattern.pvd : -1.0;
             last_candidates_.push_back(info);
         }
         for (const RuneModel::Object& candidate : results) {
@@ -425,9 +420,6 @@ namespace auto_aim::energy
                 }
                 const double confidence_reward =
                     config_.soft_confidence_weight * results[index].prob;
-                const double pattern_reward =
-                    config_.soft_pattern_weight *
-                    std::max(0.0, last_candidates_[index].pattern_pvd);
                 double lock_cost = 0.0;
                 if (has_lock_) {
                     lock_cost = config_.soft_lock_weight *
@@ -435,7 +427,7 @@ namespace auto_aim::energy
                                           std::max(1.0, config_.lock_break_px));
                 }
                 const double score =
-                    phase_cost + lock_cost - confidence_reward - pattern_reward;
+                    phase_cost + lock_cost - confidence_reward;
                 if (score < best_score) {
                     best_score = score;
                     chosen = index;
@@ -459,8 +451,7 @@ namespace auto_aim::energy
             std::cerr << "[rune detect] candidates=" << results.size();
             for (const RuneModel::Object& candidate : results) {
                 std::cerr << " | cls" << candidate.class_id << " p=" << candidate.prob
-                          << " c=(" << candidate.center.x << "," << candidate.center.y << ")"
-                          << " pvd=" << last_candidates_[&candidate - results.data()].pattern_pvd;
+                          << " c=(" << candidate.center.x << "," << candidate.center.y << ")";
                 for (const cv::Point2f& point : candidate.keypoints) {
                     std::cerr << " (" << point.x << "," << point.y << ")";
                 }
@@ -742,11 +733,6 @@ namespace auto_aim::energy
             picked_brightness_ = scores[chosen];
 
             const cv::Point2f chosen_center = plateCenter(results[chosen]);
-            const auto chosen_pattern = scoreRunePlatePattern(
-                bgr_image, chosen_center,
-                std::max(results[chosen].rect.width, results[chosen].rect.height));
-            target_pattern_pvd_ = chosen_pattern.valid ? chosen_pattern.pvd : -1.0;
-            refine_stats_.pattern_pvd = target_pattern_pvd_;
             locked_center_ = chosen_center;
             has_lock_ = true;
             target_class_ = results[chosen].class_id;
@@ -826,84 +812,6 @@ namespace auto_aim::energy
                             ++refine_stats_.plate_refined;
                         }
                     }
-                    // SCUT 式经典状态特征：在网络四点外接框（放大 25%）内统计
-                    // "点亮像素"（红/橙色 LED 图案：R 明显大于 B）的面积与占比。
-                    {
-                        const cv::Rect box = cv::boundingRect(points);
-                        const int margin_x = static_cast<int>(0.25 * box.width);
-                        const int margin_y = static_cast<int>(0.25 * box.height);
-                        cv::Rect roi(box.x - margin_x, box.y - margin_y,
-                                     box.width + 2 * margin_x, box.height + 2 * margin_y);
-                        roi &= cv::Rect(0, 0, bgr_image.cols, bgr_image.rows);
-                        if (roi.width > 4 && roi.height > 4) {
-                            std::vector<cv::Mat> channels;
-                            cv::split(bgr_image(roi), channels);
-                            cv::Mat lit;
-                            cv::subtract(channels[2], channels[0], lit);      // R − B（红/橙图案）
-                            cv::threshold(lit, lit, 40, 255, cv::THRESH_BINARY);
-                            const double area = cv::countNonZero(lit);
-                            refine_stats_.classic_lit_area = area;
-                            refine_stats_.classic_lit_ratio =
-                                area / static_cast<double>(roi.width * roi.height);
-                        }
-                    }
-                    // 经典状态分类（网络管召回、经典管状态）：圆心用当前估计的 R 标，
-                    // 轨道半径由**本片自己的靶面尺寸**反推（两者同一帧、尺度自洽）。
-                    // 注意不要用 hub_source_ / last_blade_* 这些"上一帧的"状态：
-                    // 那个量在 hub 不可用时退化成 8 px，ROI 变成靶心上的 12×12 小块，
-                    // lit_ratio 随之变成一个几乎恒定的假数（§46/§47 实测 0.23~0.29
-                    // 与真实状态无关）。
-                    {
-                        double plate_radius = 0.0;
-                        for (const int index : config_.plate_point_indices) {
-                            if (index < 0 || index >= static_cast<int>(candidate.keypoints.size())) {
-                                continue;
-                            }
-                            plate_radius +=
-                                cv::norm(candidate.keypoints[static_cast<std::size_t>(index)] -
-                                         candidate.center);
-                        }
-                        plate_radius /= 4.0;
-                        const double orbit =
-                            std::max(8.0,
-                                     plate_radius /
-                                         std::max(0.05, config_.blade_state.plate_orbit_ratio));
-                        // 灯臂采样要一个"朝圆心"的方向：优先用本片自己的 k2（同一帧、
-                        // 同一片），它在几何上不合理（塌到靶心 / 太远）时才退回上一帧
-                        // 的估计，最后才退回靶心本身（那时 arm 量会失效，只当参考）。
-                        cv::Point2f hub_hint = candidate.center;
-                        if (candidate.keypoints.size() >= 5) {
-                            const cv::Point2f k2 = candidate.keypoints[2];
-                            const double offset = cv::norm(k2 - candidate.center);
-                            if (offset > 0.5 * plate_radius && offset < 1.5 * orbit) {
-                                hub_hint = k2;
-                            } else if (cv::norm(last_blade_rmark_ - candidate.center) >
-                                       1.5 * plate_radius) {
-                                hub_hint = last_blade_rmark_;
-                            }
-                        }
-                        const auto state = blade_state_.classify(bgr_image, hub_hint,
-                                                                 candidate.center, orbit);
-                        frame_orbit_px_ = frame_orbit_px_ > 0.0
-                                              ? 0.5 * (frame_orbit_px_ + orbit)
-                                              : orbit;
-                        refine_stats_.state_lit_ratio = state.lit_ratio;
-                        refine_stats_.state_arm_ratio = state.arm_lit_ratio;
-                        refine_stats_.state_code = static_cast<int>(state.state);
-                        refine_stats_.state_orbit_px = state.orbit_px;
-                        refine_stats_.state_lit_area = state.lit_area;
-                        refine_stats_.state_roi_px = state.roi_px;
-                        if (std::getenv("ULTRA_VISION_RUNE_DEBUG")) {
-                            std::cerr << "[rune state] " << RuneBladeState::name(state.state)
-                                      << " orbit=" << state.orbit_px << " roi=" << state.roi_px
-                                      << " lit_area=" << state.lit_area
-                                      << " lit_ratio=" << state.lit_ratio
-                                      << " arm=" << state.arm_lit_ratio << " hub_src="
-                                      << static_cast<int>(hub_source_) << " hub=(" << hub_hint.x
-                                      << "," << hub_hint.y << ") blade=(" << candidate.center.x
-                                      << "," << candidate.center.y << ")" << std::endl;
-                        }
-                    }
                     points.push_back(candidate.center);
                     blades.emplace_back(points, candidate.center, Lit);
                     // 观测精修：轮廓几何 + 可用性闸门（config.refiner.enabled=false 时
@@ -978,7 +886,6 @@ namespace auto_aim::energy
         lifecycle_.noteAccepted(timestamp);
         last_eval_time_ = timestamp;
         last_powerrune_ = rune;
-        refine_stats_.pattern_pvd = target_pattern_pvd_;
         // 自适应画布缩放用的尺度：本帧由靶面尺寸反推的轨道半径。用 EMA 平滑，
         // 单帧的靶面抖动（角点噪声）不该让缩放系数来回跳。
         if (frame_orbit_px_ > 5.0) {

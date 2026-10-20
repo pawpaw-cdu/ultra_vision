@@ -132,19 +132,6 @@ rune:
     # 是否允许开火由独立的 RuneFireGate 根据“计划槽位 + 激活掩码 + 该槽类别”判定。
     # 我们自己的颜色：0=红（观测精修的颜色差掩膜看 R−B）1=蓝（看 B−R）。
     our_color: 0
-    # 扇叶状态分类（经典特征，华南虎/SCUT 的"点亮面积区间"思路；见
-    # src/auto_buff/rune_blade_state.hpp）。**默认阈值不可信**：2026-09-24 用
-    # 实拍标注帧上量到"未激活目标片 0.252"与
-    # "已激活片 0.180~0.283"几乎完全重叠（§47），所以先只写进 CSV 观察，
-    # 不要拿它当开火闸门，等有同帧同尺度的样本再标定。
-    blade_state:
-      red_minus_blue: 60.0
-      roi_half_ratio: 0.35
-      plate_orbit_ratio: 0.214   # 轨道半径 = 靶面半径 / 该值（实测 62.2 px ↔ 291 px）
-      unlit_below: 0.06
-      active_above: 0.22
-      arm_samples: 9
-      arm_lit_fraction: 0.5
     # 观测精修（来自深大 RP-26Rune 的"颜色差轮廓 → 语义分割 → 描述子可用性"
     # 思路，实现在 src/auto_buff/rune_refiner.{hpp,cpp}）：
     #   * 描述子闸门：灯臂轮廓实心度/长宽比、装甲板实心度、贴边 —— 判定
@@ -205,7 +192,6 @@ rune:
     # 观测软约束（A/B）：相位残差、置信度、靶面图案和锁定连续性。
     # 这里刻意不含类别代价；类别只属于独立火控闸门。
     soft_candidate_selection: false
-    soft_pattern_weight: 0.15
     soft_confidence_weight: 0.10
     soft_lock_weight: 0.25
     # 火控层：某个物理槽位出现 class0 证据后，允许在短暂漏检期间继续使用该证据。

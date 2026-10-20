@@ -17,8 +17,6 @@
 #include "auto_buff/rune_model.hpp"
 #include "auto_buff/rune_refiner.hpp"
 #include "auto_buff/rune_plate_refiner.hpp"
-#include "auto_buff/rune_plate_pattern.hpp"
-#include "auto_buff/rune_blade_state.hpp"
 #include "auto_buff/rune_track_lifecycle.hpp"
 #include "auto_buff/rune_types.hpp"
 
@@ -32,8 +30,6 @@ namespace auto_aim::energy
         RuneRefinerConfig refiner;
         /// 靶面几何精修（网络 ROI → 经典角点提取；见 rune_plate_refiner.hpp）
         RunePlateRefiner::Config plate_refiner;
-        /// 扇叶状态分类（经典特征；见 rune_blade_state.hpp）
-        RuneBladeState::Config blade_state;
         // 画布缩放的**自适应**（= 逐帧改 model.input_pad_scale）。
         //
         // 实测（2026-09-24，§47）：五点模型能不能出框，几乎只取决于"机关在
@@ -139,7 +135,6 @@ namespace auto_aim::energy
         // Soft candidate factors (A/B) combine phase, confidence, pattern and
         // lock continuity. They intentionally contain no class term.
         bool soft_candidate_selection = false;
-        double soft_pattern_weight = 0.15;
         double soft_confidence_weight = 0.10;
         double soft_lock_weight = 0.25;
         // Fire-side latch: how long positive inactive evidence for one physical
@@ -176,7 +171,6 @@ namespace auto_aim::energy
             cv::Point2f rmark{0.0f, 0.0f};
             bool has_rmark = false;
             bool has_plate = false;
-            double pattern_pvd = -1.0;
         };
         const std::vector<CandidateInfo>& lastCandidates() const { return last_candidates_; }
 
@@ -199,19 +193,6 @@ namespace auto_aim::energy
             int plate_refiner_tried = 0;
             double last_plate_area_ratio = -1.0;
             double last_plate_size_ratio = -1.0;
-            // SCUT 式经典状态特征（在锁定片的网络 ROI 内量）：点亮像素的**面积**
-            // 与占比 —— 他们就是用轮廓面积把"未激活/已激活"分开的（§46）。
-            double classic_lit_area = -1.0;
-            double classic_lit_ratio = -1.0;
-            // 状态分类（经典）：锁定片的归一化点亮面积、灯臂点亮比例、三态
-            double state_lit_ratio = -1.0;
-            double state_arm_ratio = -1.0;
-            int state_code = -1;
-            // 归一化用的轨道半径、ROI 边长、ROI 内点亮像素数（标定阈值要用）
-            double state_orbit_px = -1.0;
-            double state_lit_area = -1.0;
-            int state_roi_px = 0;
-            double pattern_pvd = -1.0;
         };
         const RefineStats& refineStats() const { return refine_stats_; }
 
@@ -251,7 +232,6 @@ namespace auto_aim::energy
         // 本帧**选中**那片扇叶的亮点分（与 bestBladeBrightness 比较即可判断
         // "是不是锁到了暗片"：仿真里打中非点亮扇叶会直接判本轮失败）。
         double pickedBladeBrightness() const { return picked_brightness_; }
-        double targetPatternPvd() const { return target_pattern_pvd_; }
         // 本帧**最亮**候选（按亮点判据，即"点亮的那片"）的靶心位置。
         // 与 lastBladeCenter()（实际锁定的那片）对比就能判断"是不是锁到暗片"。
         cv::Point2f lastLitBladeCenter() const { return lit_center_; }
@@ -288,7 +268,6 @@ namespace auto_aim::energy
         RuneModel model_;
         RuneRefiner refiner_;
         RunePlateRefiner plate_refiner_;
-        RuneBladeState blade_state_;
         RefineStats refine_stats_;
         HubSource hub_source_ = HubSource::RMarkKeypoint;
         // 自适应画布缩放的状态：上一帧的轨道半径（像素，EMA 平滑）、
@@ -330,7 +309,6 @@ namespace auto_aim::energy
         std::vector<CandidateInfo> last_candidates_;
         double best_brightness_ = 0.0;
         double picked_brightness_ = 0.0;
-        double target_pattern_pvd_ = -1.0;
         cv::Point2f lit_center_{0.0f, 0.0f};
         // 锁定状态：上一帧选中的靶心位置 + 换靶投票
         bool has_lock_ = false;

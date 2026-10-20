@@ -182,22 +182,8 @@ namespace auto_aim::energy
             config.detector.plate_refiner.max_angle_diff_deg =
                 plate["max_angle_diff_deg"].as<double>(25.0);
         }
-        // 扇叶状态分类（经典特征，华南虎/SCUT 的面积区间思路；见 rune_blade_state.hpp）。
-        // 阈值必须按实拍标注帧标定 —— 编译同一份 rune_blade_state.cpp 的路径量。
-        if (const YAML::Node state = detector["blade_state"]) {
-            auto& blade_state = config.detector.blade_state;
-            blade_state.red_minus_blue = state["red_minus_blue"].as<double>(60.0);
-            blade_state.roi_half_ratio = state["roi_half_ratio"].as<double>(0.35);
-            blade_state.plate_orbit_ratio = state["plate_orbit_ratio"].as<double>(0.214);
-            blade_state.unlit_below = state["unlit_below"].as<double>(0.06);
-            blade_state.active_above = state["active_above"].as<double>(0.22);
-            blade_state.arm_samples = state["arm_samples"].as<int>(9);
-            blade_state.arm_lit_fraction = state["arm_lit_fraction"].as<double>(0.5);
-        }
         config.detector.soft_candidate_selection =
             detector["soft_candidate_selection"].as<bool>(false);
-        config.detector.soft_pattern_weight =
-            detector["soft_pattern_weight"].as<double>(0.15);
         config.detector.soft_confidence_weight =
             detector["soft_confidence_weight"].as<double>(0.10);
         config.detector.soft_lock_weight =
@@ -240,16 +226,6 @@ namespace auto_aim::energy
             detector["zero_feedforward_on_step"].as<bool>(true);
         config.fire_block_on_hit_slot =
             detector["fire_block_on_hit_slot"].as<bool>(true);
-        // 帧差探针（差分法）：诊断/补充观测源。环境变量 ULTRA_VISION_RUNE_DIFF=1
-        // 可以免改配置直接打开（A/B 用）。
-        config.diff_probe.enabled =
-            detector["diff_probe_enable"].as<bool>(false) ||
-            (std::getenv("ULTRA_VISION_RUNE_DIFF") != nullptr &&
-             std::string(std::getenv("ULTRA_VISION_RUNE_DIFF")) != "0");
-        config.diff_probe.threshold = detector["diff_threshold"].as<double>(20.0);
-        config.diff_probe.min_area = detector["diff_min_area"].as<double>(6.0);
-        config.diff_probe.compensate_motion = detector["diff_compensate"].as<bool>(true);
-
         // 相位关联选片（见 RuneDetectorConfig::PhaseAssocConfig）。
         auto& assoc = config.detector.phase_assoc;
         assoc.enabled = detector["phase_assoc_enable"].as<bool>(true);

@@ -10,9 +10,6 @@ set(AUTO_BUFF_SOURCES
     rune_model.cpp
     rune_refiner.cpp
     rune_plate_refiner.cpp
-    rune_plate_pattern.cpp
-    rune_blade_state.cpp
-    rune_diff_probe.cpp
     rune_diag.cpp
     rune_input.cpp
     rune_slot_lattice.cpp
@@ -21,7 +18,6 @@ set(AUTO_BUFF_SOURCES
     rune_round_guard.cpp
     rune_aim_fallback.cpp
     rune_orbit_fit.cpp
-    rune_blade_finder.cpp
     rune_aim_bridge.cpp
     rune_runner.cpp
     rune_detector.cpp

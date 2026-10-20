@@ -325,10 +325,6 @@ namespace auto_aim::energy::rune_diag
         row.orbit_center = sources.orbit_center;
         row.sigma_dis_m = sources.sigma_dis_m;
         row.sigma_roll_deg = sources.sigma_roll_deg;
-        row.slot_scores = sources.slot_scores;
-        row.slot_present_mask = sources.slot_present_mask;
-        row.slot_found_count = sources.slot_found_count;
-        row.slot_found_centers = sources.slot_found_centers;
         // 靶面压扁程度：正方形靶面的两条对角线在正对时相等，侧视时其中一条被压缩。
         if (rune != nullptr && rune->target().points.size() >= 4) {
             const auto& points = rune->target().points;
@@ -349,14 +345,6 @@ namespace auto_aim::energy::rune_diag
         row.refine_usable = detector.refineStats().usable;
         row.refine_dropped = detector.refineStats().dropped;
         row.refine_fused = detector.refineStats().center_fused;
-        row.state_lit_ratio = detector.refineStats().state_lit_ratio;
-        row.state_arm_ratio = detector.refineStats().state_arm_ratio;
-        row.state_code = detector.refineStats().state_code;
-        row.state_orbit_px = detector.refineStats().state_orbit_px;
-        row.state_lit_area = detector.refineStats().state_lit_area;
-        row.state_roi_px = detector.refineStats().state_roi_px;
-        row.classic_lit_area = detector.refineStats().classic_lit_area;
-        row.classic_lit_ratio = detector.refineStats().classic_lit_ratio;
         row.plate_refined = detector.refineStats().plate_refined;
         row.plate_size_ratio = detector.refineStats().last_plate_size_ratio;
         row.armor_solidity = detector.refineStats().last_armor_solidity;
@@ -372,7 +360,6 @@ namespace auto_aim::energy::rune_diag
         row.target_valid = target.isUnsolvable() ? 0 : 1;
         row.blade_switch_obs = target.bladeSwitched() ? 1 : 0;
         row.picked_bright = detector.pickedBladeBrightness();
-        row.target_pattern_pvd = detector.targetPatternPvd();
         row.assoc_reject = detector.phaseAssocRejected() ? 1 : 0;
         row.assoc_residual_deg = detector.phaseAssocResidualRad() >= 0.0
                                      ? detector.phaseAssocResidualRad() * 180.0 / CV_PI
@@ -393,11 +380,6 @@ namespace auto_aim::energy::rune_diag
         row.blade_selected_confirmed = sources.blade_selected_confirmed ? 1 : 0;
         row.aim_err_yaw_deg = sources.aim_err_yaw_deg;
         row.aim_err_pitch_deg = sources.aim_err_pitch_deg;
-        row.diff_ok = sources.diff.ok;
-        row.diff_px = sources.diff.px;
-        row.diff_py = sources.diff.py;
-        row.diff_area = sources.diff.area;
-        row.diff_to_lit_px = sources.diff.to_lit_px;
         for (const auto& candidate : detector.lastCandidates()) {
             row.candidates += std::to_string(candidate.class_id) + ':' +
                               std::to_string(static_cast<int>(candidate.center.x)) + ':' +
@@ -418,17 +400,15 @@ namespace auto_aim::energy::rune_diag
                     "obs_phase_deg,pnp_roll_deg,sim_t,best_cls_score,buff_yaw_deg,slot_id,"
                     "slot_activated_mask,slot_votes,slot_centers,obs_slot_offset,orbit_ok,"
                     "orbit_a_px,orbit_cx,orbit_cy,orbit_n,orbit_ratio,sigma_dis_m,sigma_roll_deg,"
-                    "slot_present_mask,slot_scores,slot_found_n,slot_found,plate_aspect,aim_px,aim_py,"
+                    "plate_aspect,aim_px,aim_py,"
                     "aim_world_yaw_deg,"
                     "aim_world_pitch_deg,"
                     "aim_roll_deg,refine_n,refine_usable,refine_dropped,refine_fused,"
-                    "state_code,state_lit_ratio,state_arm_ratio,classic_lit_area,classic_lit_ratio,plate_refined,plate_size_ratio,armor_solidity,armor_area_ratio,armor_circularity,"
+                    "plate_refined,plate_size_ratio,armor_solidity,armor_area_ratio,armor_circularity,"
                     "refine_arm_solidity,refine_arm_aspect,refine_gap_px,k2_px,k2_py,hub_src,"
                     "hub_plate_dist_px,target_valid,blade_switch_obs,picked_bright,"
-                    "target_pattern_pvd,"
                     "assoc_reject,assoc_residual_deg,lit_px,lit_py,picked_px,picked_py,fired,"
-                    "aim_err_yaw_deg,aim_err_pitch_deg,diff_ok,diff_px,diff_py,diff_area,"
-                    "diff_to_lit_px,cands,state_orbit_px,state_lit_area,state_roi_px,"
+                    "aim_err_yaw_deg,aim_err_pitch_deg,cands,"
                     "gate_hold,gate_window_open,gate_engageable,"
                     "roi_active,roi_fallback,roi_x,roi_y,roi_w,roi_h,"
                     "model_letterbox_scale,gimbal_frozen,fire_slot,fire_slot_class,"
@@ -480,29 +460,20 @@ namespace auto_aim::energy::rune_diag
                  << static_cast<int>(row.slot_centers[4].y) << ',' << row.obs_slot_offset << ','
                  << row.orbit_ok << ',' << row.orbit_semi_major_px << ',' << row.orbit_center.x
                  << ',' << row.orbit_center.y << ',' << row.orbit_samples << ','
-                 << row.orbit_ratio << ',' << row.sigma_dis_m << ',' << row.sigma_roll_deg << ',' << row.slot_present_mask << ',' << row.slot_scores << ',' << row.slot_found_count << ','
-                 << static_cast<int>(row.slot_found_centers[0].x) << ':' << static_cast<int>(row.slot_found_centers[0].y) << '|'
-                 << static_cast<int>(row.slot_found_centers[1].x) << ':' << static_cast<int>(row.slot_found_centers[1].y) << '|'
-                 << static_cast<int>(row.slot_found_centers[2].x) << ':' << static_cast<int>(row.slot_found_centers[2].y) << '|'
-                 << static_cast<int>(row.slot_found_centers[3].x) << ':' << static_cast<int>(row.slot_found_centers[3].y) << '|'
-                 << static_cast<int>(row.slot_found_centers[4].x) << ':' << static_cast<int>(row.slot_found_centers[4].y) << ','
+                 << row.orbit_ratio << ',' << row.sigma_dis_m << ',' << row.sigma_roll_deg << ','
                  << row.plate_aspect << ','
                  << row.aim_pixel.x << ',' << row.aim_pixel.y << ',' << row.aim_world_yaw_deg
                  << ',' << row.aim_world_pitch_deg << ',' << row.aim_roll_deg << ','
                  << row.refine_n << ',' << row.refine_usable << ',' << row.refine_dropped << ','
-                 << row.refine_fused << ',' << row.state_code << ',' << row.state_lit_ratio << ',' << row.state_arm_ratio << ',' << row.classic_lit_area << ',' << row.classic_lit_ratio << ',' << row.plate_refined << ',' << row.plate_size_ratio << ',' << row.armor_solidity << ',' << row.armor_area_ratio
+                 << row.refine_fused << ',' << row.plate_refined << ',' << row.plate_size_ratio << ',' << row.armor_solidity << ',' << row.armor_area_ratio
                  << ',' << row.armor_circularity << ',' << row.refine_arm_solidity << ','
                  << row.refine_arm_aspect << ',' << row.refine_gap_px << ',' << row.k2_px.x << ','
                  << row.k2_px.y << ',' << row.hub_src << ',' << row.hub_plate_dist_px << ','
                  << row.target_valid << ',' << row.blade_switch_obs << ',' << row.picked_bright
-                 << ',' << row.target_pattern_pvd
                  << ',' << row.assoc_reject << ',' << row.assoc_residual_deg << ','
                  << row.lit_px.x << ',' << row.lit_px.y << ',' << row.picked_px.x << ','
                  << row.picked_px.y << ',' << row.fired << ',' << row.aim_err_yaw_deg << ','
-                 << row.aim_err_pitch_deg << ',' << row.diff_ok << ',' << row.diff_px << ','
-                 << row.diff_py << ',' << row.diff_area << ',' << row.diff_to_lit_px << ','
-                 << row.candidates << ',' << row.state_orbit_px << ',' << row.state_lit_area
-                 << ',' << row.state_roi_px << ',' << row.gate_hold << ','
+                 << row.aim_err_pitch_deg << ',' << row.candidates << ',' << row.gate_hold << ','
                  << row.gate_window_open << ',' << row.gate_engageable << ','
                  << row.roi_active << ','
                  << row.roi_fallback << ',' << row.roi_x << ',' << row.roi_y << ','
@@ -511,21 +482,6 @@ namespace auto_aim::energy::rune_diag
                  << ',' << row.fire_slot_activated << ',' << row.fire_latched << ','
                  << row.blade_searching << ',' << row.blade_selected_slot << ','
                  << row.blade_selected_class << ',' << row.blade_selected_confirmed << '\n';
-    }
-
-
-    DiffSample probeDiff(RuneDiffProbe& probe, const cv::Mat& frame, cv::Point2f hub_px,
-                         double orbit_px, cv::Point2f lit_px)
-    {
-        DiffSample sample;
-        if (const auto candidate = probe.update(frame, hub_px, orbit_px)) {
-            sample.ok = 1.0;
-            sample.px = candidate->center.x;
-            sample.py = candidate->center.y;
-            sample.area = candidate->area;
-            if (lit_px.x > 0.0f) sample.to_lit_px = cv::norm(candidate->center - lit_px);
-        }
-        return sample;
     }
 
     void consumeTelemetry(const std::vector<std::string>& lines, std::ofstream* ground_truth,

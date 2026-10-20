@@ -36,7 +36,6 @@
 #include "auto_buff/rune_round_guard.hpp"
 #include "auto_buff/rune_slot_lattice.hpp"
 #include "auto_buff/rune_timebase.hpp"
-#include "auto_buff/rune_blade_finder.hpp"
 #include "auto_buff/rune_config.hpp"
 #include "auto_buff/rune_detector.hpp"
 #include "auto_buff/rune_solver.hpp"
@@ -75,8 +74,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
     const bool show_display = std::getenv("ULTRA_VISION_NO_DISPLAY") == nullptr;
 
     std::unique_ptr<auto_aim::energy::RuneDetector> detector;
-    // 帧差探针（诊断用，默认关闭；ULTRA_VISION_RUNE_DIFF=1 打开）。
-    auto_aim::energy::RuneDiffProbe diff_probe(config.diff_probe);
     try {
         detector = std::make_unique<auto_aim::energy::RuneDetector>(config.detector);
     } catch (const std::exception& error) {
@@ -202,10 +199,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
     auto_aim::energy::RuneAimFallback fallback(
         auto_aim::energy::RuneAimFallback::Config{config.park_on_center_max_age_s,
                                                   config.recenter_after_frames});
-    static const bool dark_channel_enabled =
-        std::getenv("ULTRA_VISION_RUNE_DARK_CHANNEL") != nullptr &&
-        std::string(std::getenv("ULTRA_VISION_RUNE_DARK_CHANNEL")) != "0";
-    auto_aim::energy::RuneBladeFinder blade_finder;
     // ---- 扇叶槽位格点（1..5 号位的记账）------------------------------------
     // 状态与规则都在 rune_slot_lattice.{hpp,cpp}：单扇叶构建 5 槽、每帧重新
     // 对齐、丢帧不重锚、静默才复位。这里只负责喂输入、取快照。
@@ -918,23 +911,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             last_status = status;
         }
 
-        // 帧差探针（差分法，诊断）：圆心/轨道半径用状态估计投影到本帧图像得到，
-        // 具体差分/配准/连通域在诊断层（rune_diag::probeDiff）。
-        auto_aim::energy::rune_diag::DiffSample diff_sample;
-        if (config.diff_probe.enabled) {
-            cv::Point2f hub_px(-1.0f, -1.0f);
-            double orbit_px = 0.0;
-            if (!target.isUnsolvable()) {
-                const Eigen::Vector3d hub_world =
-                    target.pointBuffToWorld(Eigen::Vector3d::Zero());
-                hub_px = solver.projectToImage(hub_world);
-                const Eigen::Vector3d blade_world = target.pointBuffToWorld(
-                    Eigen::Vector3d(0.0, 0.0, config.aimer.target_radius_m));
-                orbit_px = cv::norm(solver.projectToImage(blade_world) - hub_px);
-            }
-            diff_sample = rune_diag::probeDiff(diff_probe, frame, hub_px, orbit_px,
-                                               detector->lastLitBladeCenter());
-        }
         if (recorder) {
             // 逐帧诊断行：本循环只把"来源"凑齐，列的搬运/格式化在诊断层
             // （rune_diag::makeRow，见 rune_diag.cpp）。
@@ -971,75 +947,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             sources.orbit_semi_major_px = orbit.semi_major_px;
             sources.orbit_center = orbit.center;
             sources.orbit_samples = orbit.samples;
-            // 暗片通道（默认关，ULTRA_VISION_RUNE_DARK_CHANNEL=1 打开）：
-            // §36 的崩溃排查 —— 先加输入守卫（槽位中心必须有效、轨道半径合理）。
-            if (dark_channel_enabled && slot_snapshot.slot_centers_valid &&
-                rune->r_center.x > 1.0f) {
-            // 有它之后，槽位归属不再依赖状态投影（信息更完备；rm_vision_core 那套
-            // 5 片配准的前提）。
-                std::array<double, 5> angles{};
-                const double hub_x = rune->r_center.x;
-                const double hub_y = rune->r_center.y;
-                for (int slot = 0; slot < 5; ++slot) {
-                    const cv::Point2f center = slot_snapshot.slot_centers[
-                        static_cast<std::size_t>(slot)];
-                    angles[static_cast<std::size_t>(slot)] =
-                        std::atan2(center.y - hub_y, center.x - hub_x);
-                }
-                const double orbit_px = cv::norm(slot_snapshot.slot_centers[0] - rune->r_center);
-                // 期望面积用**网络自己检出的靶面面积**（深大用相对误差而非绝对阈值）
-                double expected_area = 0.0;
-                if (rune->target().points.size() >= 4) {
-                    std::vector<cv::Point2f> quad(rune->target().points.begin(),
-                                                  rune->target().points.begin() + 4);
-                    expected_area = cv::contourArea(quad);
-                }
-                // 尺度基准：用**实测靶面半尺寸**（网络四点构成四边形 → 半边长）
-                const double plate_half_px = expected_area > 1.0 ? 0.5 * std::sqrt(expected_area)
-                                                                : 9.0;
-                const int search_px = std::max(3, static_cast<int>(std::lround(0.5 * plate_half_px)));
-                const auto blades = blade_finder.find(frame, rune->r_center, orbit_px, angles,
-                                                      expected_area, plate_half_px, search_px);
-                sources.slot_found_count = blades.count();
-                for (int slot = 0; slot < 5; ++slot) {
-                    sources.slot_found_centers[static_cast<std::size_t>(slot)] =
-                        blades.centers[static_cast<std::size_t>(slot)];
-                }
-            }
-            // 暗片通道（最小版）：在 5 个槽位方向量"靶面存在度"——靶面有内部纹路，
-            // 边缘密度显著高于背景；亮片由网络给出，暗片靠这一条补。
-            {
-                std::string scores;
-                int mask = 0;
-                for (int slot = 0; slot < 5; ++slot) {
-                    const cv::Point2f center = slot_snapshot.slot_centers[
-                        static_cast<std::size_t>(slot)];
-                    if (!slot_snapshot.slot_centers_valid || center.x <= 1.0f) {
-                        scores += "0|";
-                        continue;
-                    }
-                    constexpr int kHalf = 9;   // 6 m 处靶面约 14 px 半径
-                    cv::Rect roi(static_cast<int>(center.x) - kHalf,
-                                 static_cast<int>(center.y) - kHalf, 2 * kHalf, 2 * kHalf);
-                    roi &= cv::Rect(0, 0, frame.cols, frame.rows);
-                    double score = 0.0;
-                    if (roi.width > 4 && roi.height > 4) {
-                        cv::Mat gray;
-                        cv::cvtColor(frame(roi), gray, cv::COLOR_BGR2GRAY);
-                        cv::Mat lap;
-                        cv::Laplacian(gray, lap, CV_32F);
-                        cv::Scalar mean, stddev;
-                        cv::meanStdDev(lap, mean, stddev);
-                        score = stddev[0] * stddev[0];   // 拉普拉斯方差：纹理多则大
-                        if (score > 300.0) mask |= (1 << slot);
-                    }
-                    char buffer[16];
-                    std::snprintf(buffer, sizeof(buffer), "%.0f|", score);
-                    scores += buffer;
-                }
-                sources.slot_scores = scores;
-                sources.slot_present_mask = mask;
-            }
             sources.sigma_dis_m = target.distanceSigma();
             sources.sigma_roll_deg = target.phaseSigma() * 180.0 / CV_PI;
             sources.orbit_ratio = orbit.semi_major_px > 1e-6
@@ -1047,7 +954,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                                       : 0.0;
             sources.sim_offset_valid = telemetry_stats.sim_offset_valid;
             sources.sim_offset_s = telemetry_stats.sim_offset_s;
-            sources.diff = diff_sample;
             const auto stage_csv_start = std::chrono::steady_clock::now();
             auto_aim::energy::rune_diag::writeRow(
                 recorder, auto_aim::energy::rune_diag::makeRow(sources));

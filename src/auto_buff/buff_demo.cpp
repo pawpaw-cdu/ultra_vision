@@ -19,7 +19,6 @@
 //   ULTRA_VISION_RUNE_ROI_CENTER     1 = 数字变焦时按预测符心裁剪（需同时开自适应）
 //   ULTRA_VISION_RUNE_GIMBAL_FREEZE  now|activation = 冻结云台的观测隔离实验
 //   ULTRA_VISION_RUNE_BORESIGHT      "yaw_deg,pitch_deg" 静态试射模式
-//   ULTRA_VISION_RUNE_DIFF           1 = 打开帧差探针（诊断列 diff_*）
 //   ULTRA_VISION_RUNE_NO_DIAG        1 = 关掉诊断层（不写 CSV/不落帧）
 
 #include <fstream>

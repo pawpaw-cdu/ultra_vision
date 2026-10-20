@@ -20,7 +20,6 @@
 #include <opencv2/opencv.hpp>
 
 #include "auto_buff/rune_aimer.hpp"
-#include "auto_buff/rune_diff_probe.hpp"
 #include "auto_buff/rune_detector.hpp"
 #include "auto_buff/rune_solver.hpp"
 #include "auto_buff/rune_target.hpp"
@@ -109,10 +108,6 @@ namespace auto_aim::energy::rune_diag
         double sigma_dis_m = 0.0;
         double sigma_roll_deg = 0.0;
         double plate_aspect = 1.0;
-        std::string slot_scores;   // 5 个槽位方向的"靶面存在度"（暗片通道诊断）
-        int slot_present_mask = 0;
-        int slot_found_count = 0;  // 暗片通道实测到的靶面数
-        std::array<cv::Point2f, 5> slot_found_centers{};
 
         cv::Point2f aim_pixel{0.0f, 0.0f};
         double aim_world_yaw_deg = 0.0;
@@ -123,14 +118,6 @@ namespace auto_aim::energy::rune_diag
         int refine_usable = 0;
         int refine_dropped = 0;
         int refine_fused = 0;
-        double state_lit_ratio = -1.0;    // 经典状态分类：归一化点亮面积
-        double state_arm_ratio = -1.0;    // 灯臂点亮比例
-        int state_code = -1;              // 1=未点亮 2=未激活 3=已激活
-        double state_orbit_px = -1.0;     // 归一化用的轨道半径（像素）
-        double state_lit_area = -1.0;     // ROI 内点亮像素数
-        int state_roi_px = 0;             // ROI 边长（像素）
-        double classic_lit_area = -1.0;   // SCUT 式经典特征：点亮像素面积
-        double classic_lit_ratio = -1.0;  // 点亮像素占比
         int plate_refined = 0;             // 靶面精修是否采信（网络 ROI → 经典提取）
         double plate_size_ratio = -1.0;    // 精修后面积 / 网络面积
         double armor_solidity = -1.0;      // 装甲板轮廓实心度（精修）
@@ -146,7 +133,6 @@ namespace auto_aim::energy::rune_diag
         int target_valid = 0;
         int blade_switch_obs = 0;
         double picked_bright = 0.0;
-        double target_pattern_pvd = -1.0;
         int assoc_reject = 0;
         double assoc_residual_deg = -1.0;
         cv::Point2f lit_px{0.0f, 0.0f};
@@ -154,12 +140,6 @@ namespace auto_aim::energy::rune_diag
         int fired = 0;
         double aim_err_yaw_deg = -1.0;
         double aim_err_pitch_deg = -1.0;
-
-        double diff_ok = 0.0;
-        double diff_px = 0.0;
-        double diff_py = 0.0;
-        double diff_area = 0.0;
-        double diff_to_lit_px = -1.0;
 
         // 过滤前的全部候选，编码成 "class:x:y|class:x:y|…"（整数像素）。
         // 离线分析用：判断"同一片被几个框重复检出"、"已激活片落在哪个槽位"，
@@ -191,16 +171,6 @@ namespace auto_aim::energy::rune_diag
         /// @brief 覆盖指令：固定角 + 按间隔开火（绕过一切目标相关闸门），
         ///        并在开火时更新内部节流时间。
         void apply(RuneCommand& command, double now);
-    };
-
-    /// @brief 帧差探针（差分法）的诊断结果，对应 CSV 的 diff_* 列。
-    struct DiffSample
-    {
-        double ok = 0.0;
-        double px = 0.0;
-        double py = 0.0;
-        double area = 0.0;
-        double to_lit_px = -1.0;
     };
 
     /// @brief 跟踪状态的可读名（CSV status 列与终端打印共用）。
@@ -235,10 +205,6 @@ namespace auto_aim::energy::rune_diag
         int blade_selected_slot = -1;
         int blade_selected_class = -1;
         bool blade_selected_confirmed = false;
-        std::string slot_scores;           // 5 个槽位方向的"靶面存在度"（暗片通道）
-        int slot_present_mask = 0;
-        int slot_found_count = 0;          // 实测到的靶面数（暗片通道）
-        std::array<cv::Point2f, 5> slot_found_centers{};
         cv::Point2f aim_pixel{0.0f, 0.0f};
         Eigen::Vector3d aim_world = Eigen::Vector3d::Zero();
         double aim_roll_deg = 0.0;
@@ -256,7 +222,6 @@ namespace auto_aim::energy::rune_diag
         double sigma_roll_deg = 0.0;
         bool sim_offset_valid = false;
         double sim_offset_s = 0.0;
-        DiffSample diff;
     };
 
     RuneDiagRow makeRow(const RuneDiagSources& sources);
@@ -266,9 +231,6 @@ namespace auto_aim::energy::rune_diag
     void writeRow(std::ofstream& recorder, const RuneDiagRow& row);
 
     /// @brief 跑一次帧差探针：圆心/轨道半径由调用方按状态投影给出，
-    ///        lit_px 是当前"最亮候选"（点亮片）位置，用于算 diff_to_lit。
-    DiffSample probeDiff(RuneDiffProbe& probe, const cv::Mat& frame, cv::Point2f hub_px,
-                         double orbit_px, cv::Point2f lit_px);
 
     /// @brief 解析遥测行：更新统计、可选写 ground truth 原始行。
     void consumeTelemetry(const std::vector<std::string>& lines, std::ofstream* ground_truth,

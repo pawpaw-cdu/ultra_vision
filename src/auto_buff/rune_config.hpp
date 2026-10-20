@@ -14,7 +14,6 @@
 #include <string>
 
 #include "auto_buff/rune_aimer.hpp"
-#include "auto_buff/rune_diff_probe.hpp"
 #include "auto_buff/rune_detector.hpp"
 #include "auto_buff/rune_solver.hpp"
 #include "auto_buff/support/math.hpp"
@@ -28,7 +27,6 @@ namespace auto_aim::energy
         bool enabled = false;
         RuneMode mode = RuneMode::Small;
         RuneDetectorConfig detector;
-        RuneDiffProbeConfig diff_probe;
         RuneSolverConfig solver;
         RuneAimerConfig aimer;
         std::string simulator_config = "simulator.yaml";
