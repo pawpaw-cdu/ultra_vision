@@ -20,7 +20,6 @@
 #include "app/config_paths.hpp"
 #include "app/csv_sink.hpp"
 #include "app/pipeline_config.hpp"
-#include "dataset.hpp"
 #include "visualization/projection.hpp"
 #include "perception/detector.hpp"
 #include "perception/pnp_solver.hpp"
@@ -147,31 +146,6 @@ int auto_aim::app::RealRunner::run()
         (serial_file["serial"] ? serial_file["serial"]["yaw_sign"].as<double>(1.0) : 1.0) < 0.0
             ? -1.0
             : 1.0;
-    // ---- 实车数据集录制（可选）：ULTRA_VISION_RECORD=<目录> ----
-    // 录图像 + 每帧的输入（姿态/弹速/模式）+ 我们的输出，之后可以离线用
-    // 离线回放重新跑同一套流水线，改代码/改配置后对比效果。
-    //   ULTRA_VISION_RECORD_EVERY_N   每 N 帧录一帧（默认 3；相机 ~95fps → ~30fps）
-    //   ULTRA_VISION_RECORD_MAX_FRAMES 最多录多少帧（默认 0 = 不限，按需设防止写满盘）
-    //   ULTRA_VISION_RECORD_QUALITY   JPEG 质量（默认 85）
-    auto_aim::DatasetWriter dataset;
-    const char* record_dir = std::getenv("ULTRA_VISION_RECORD");
-    const bool recording = record_dir != nullptr && record_dir[0] != '\0';
-    if (recording) {
-        const int every_n = std::getenv("ULTRA_VISION_RECORD_EVERY_N")
-            ? std::atoi(std::getenv("ULTRA_VISION_RECORD_EVERY_N")) : 3;
-        const int max_frames = std::getenv("ULTRA_VISION_RECORD_MAX_FRAMES")
-            ? std::atoi(std::getenv("ULTRA_VISION_RECORD_MAX_FRAMES")) : 0;
-        const int quality = std::getenv("ULTRA_VISION_RECORD_QUALITY")
-            ? std::atoi(std::getenv("ULTRA_VISION_RECORD_QUALITY")) : 85;
-        if (!dataset.open(record_dir, every_n, max_frames, quality)) {
-            std::cerr << "[dataset] 打不开录制目录 " << record_dir << "，本次不录" << std::endl;
-        } else {
-            std::cout << "[dataset] 开始录制 → " << record_dir << "/meta.csv + {i}.jpg（每 "
-                      << every_n << " 帧一录，JPEG " << quality << "）" << std::endl;
-        }
-    }
-    const auto record_start = std::chrono::steady_clock::now();
-
     // ---- 共用的检测前端 + 瞄准流水线（和仿真入口同一份实现）----
     auto_aim::ArmorSourceConfig source_cfg;
     source_cfg.classical = det_cfg;
@@ -558,39 +532,6 @@ int auto_aim::app::RealRunner::run()
                                     camera_matrix.at<double>(1, 2));
     }
 
-    // 真机观测记录（可选）：与仿真同格式，便于离线对账"重投影残差多大、集中在哪"。
-    auto observation_recorder = std::make_unique<auto_aim::app::CsvSink>(
-        "ULTRA_VISION_OBSERVATION_CSV",
-        "x,y,z,rx,ry,rz,tracker_x,tracker_y,tracker_z,cmd_yaw,cmd_pitch,time_us,plate_id,state,"
-        "u0,v0,u1,v1,u2,v2,u3,v3,source_time_us,"
-        // armor_number = 检测网络给的**板面数字**（RP24 head 的 num_id，0=sentry…8=Bb）。
-        // 现场事实：同一台车的四块板印的是同一个数字。sp_vision_25 就是拿它做目标身份
-        // （Target::update 里按 armor.name 过滤），用它可以把"选哪块板/选谁的板"从
-        // 纯几何问题变成身份问题。这一列先只**记录**，不改任何行为 —— 有了实车数据
-        // 才能做离线 A/B（见 configs/tracker.yaml 注释）。
-        "armor_number\n");
-    // 底盘模型逐帧导出（ULTRA_VISION_MODEL_CSV=/tmp/model.csv 时才落盘）：
-    // 模型中心/四块板心（相机系）+ 车心(yaw/ω 世界系) + 观测板 PnP + 几何 + 指标。
-    // 用途：把"模型到底在哪、怎么动"整段拿出来看，而不是靠一行行 log 猜。
-    // 单位：米 / 弧度；时间戳为观测时刻（与 observation.csv 同一时间基）。
-    auto model_recorder = std::make_unique<auto_aim::app::CsvSink>(
-        "ULTRA_VISION_MODEL_CSV",
-        "time_us,obs_id,n_det,reproj,model_fit,trusted_fit,"
-        "cx,cy,cz,wx,wy,wz,yaw,omega,"
-        "p0x,p0y,p0z,p1x,p1y,p1z,p2x,p2y,p2z,p3x,p3y,p3z,"
-        "obs_x,obs_y,obs_z,R0,R1,R2,R3,H0,H1,H2,H3,alpha\n");
-
-    // **全部检测**逐帧落盘（ULTRA_VISION_DETECTIONS_CSV=/tmp/det.csv）：一行 = 一个检测。
-    // 为什么必须有它：真机是把本帧**所有**检测喂给 tracker 的，而 observation.csv 只记
-    // "最后被接受的那一块" —— 拿它离线回放时，模型对**另外几块板**的解释误差（也就是
-    // "底盘构造对不对"）根本量不出来（实车实测：静止单板 model_fit 0.9px，而同帧双板
-    // 27~50px）。有了这一份，离线回放才能复现真机口径并做 A/B。
-    // 角点顺序与 Points_2D 一致：u0,v0=左下 u1,v1=左上 u2,v2=右上 u3,v3=右下。
-    auto detection_recorder = std::make_unique<auto_aim::app::CsvSink>(
-        "ULTRA_VISION_DETECTIONS_CSV",
-        "time_us,cmd_yaw,cmd_pitch,idx,n_det,armor_number,armor_type,"
-        "u0,v0,u1,v1,u2,v2,u3,v3\n");
-
     cv::Mat frame;
     cv::Mat image;
 
@@ -716,19 +657,7 @@ int auto_aim::app::RealRunner::run()
         }
         if (frame.empty()) continue;
 
-        // ---- IO 层自检：确认海康给的是"正常图像"而不是黑帧/通道错 ----
-        // ULTRA_VISION_DUMP_FRAME=/tmp/frame.png 落一帧；每 30 帧打印通道均值。
-        // 正常室内画面 B/G/R 同量级；若 G 远高于 R/B（发绿）或 R/B 互换，
-        // 说明 Bayer 解码/像素格式不对（相机报 BayerRG8，我们请求转 BGR8_Packed）。
-        if (const char* dump_path = std::getenv("ULTRA_VISION_DUMP_FRAME")) {
-            static bool dumped = false;
-            if (!dumped) {
-                dumped = true;
-                cv::imwrite(dump_path, frame);
-                std::cout << "[io] dumped " << dump_path << " size=" << frame.cols << "x"
-                          << frame.rows << std::endl;
-            }
-        }
+        // IO 自检：B/G/R 通道均值应同量级，否则检查 Bayer 解码/像素格式。
         {
             static int probe_count = 0;
             if (++probe_count % 30 == 1) {
@@ -861,58 +790,6 @@ int auto_aim::app::RealRunner::run()
         frame_input.allow_control = allow_control_now;
         frame_input.fire_enabled = fire_enabled;
         const auto outcome = pipeline.update(frame_input);
-        // 全部检测落盘（见 detection_recorder 的注释）。
-        if (*detection_recorder && !frame_input.armors.empty()) {
-            auto& d = detection_recorder->stream();
-            const int n = static_cast<int>(frame_input.armors.size());
-            for (int i = 0; i < n; ++i) {
-                const auto& a = frame_input.armors[static_cast<std::size_t>(i)];
-                d << source_result.timestamp_us << ',' << std::fixed << std::setprecision(6)
-                  << gimbal_state.yaw << ',' << gimbal_state.pitch << ',' << i << ',' << n << ','
-                  << a.number << ','
-                  << (a.armor_type == auto_aim::large ? "large" : "small");
-                if (a.Points_2D.size() >= 4) {
-                    for (int k = 0; k < 4; ++k)
-                        d << std::fixed << std::setprecision(3) << ','
-                          << a.Points_2D[static_cast<std::size_t>(k)].x << ','
-                          << a.Points_2D[static_cast<std::size_t>(k)].y;
-                } else {
-                    for (int k = 0; k < 8; ++k) d << ",nan";
-                }
-                d << '\n';
-            }
-        } else if (*detection_recorder) {
-            // 本帧**没有检测**也要记一行（n_det=0）：离线回放靠它才知道"这一帧该滑行"。
-            // 实车实测 25% 的帧没有检测，而画面最难看的那几帧恰好都是这种滑行帧。
-            detection_recorder->stream() << source_result.timestamp_us << ',' << std::fixed
-                                         << std::setprecision(6) << gimbal_state.yaw << ','
-                                         << gimbal_state.pitch << ",-1,0,-1,-1";
-            for (int k = 0; k < 8; ++k) detection_recorder->stream() << ",nan";
-            detection_recorder->stream() << '\n';
-        }
-        // 观测记录（可选）：真机也落 observation.csv，离线即可对账重投影残差。
-        if (*observation_recorder && tracker.hasObservation() &&
-            !tracker.getLastObservedArmor().tvec.empty()) {
-            const auto& observed = tracker.getLastObservedArmor();
-            const cv::Mat center = tracker.getTargetCenter();
-            auto& s = observation_recorder->stream();
-            s << std::fixed << std::setprecision(6)
-              << observed.tvec.at<double>(0) << ',' << observed.tvec.at<double>(1) << ','
-              << observed.tvec.at<double>(2) << ',' << observed.rvec.at<double>(0) << ','
-              << observed.rvec.at<double>(1) << ',' << observed.rvec.at<double>(2) << ','
-              << center.at<double>(0) << ',' << center.at<double>(1) << ',' << center.at<double>(2)
-              << ',' << gimbal_state.yaw << ',' << gimbal_state.pitch << ','
-              << source_result.timestamp_us << ',' << tracker.getLastObservedPlateId() << ','
-              << static_cast<int>(tracker.getState());
-            if (observed.Points_2D.size() >= 4) {
-                for (int i = 0; i < 4; ++i)
-                    s << ',' << observed.Points_2D[static_cast<std::size_t>(i)].x << ','
-                      << observed.Points_2D[static_cast<std::size_t>(i)].y;
-            } else {
-                for (int i = 0; i < 8; ++i) s << ",nan";
-            }
-            s << ',' << source_result.timestamp_us << ',' << observed.number << '\n';
-        }
         last_decision = outcome.decision;
         aim_ready = outcome.aim_ready;
         aim_yaw_error = outcome.aim_yaw_error;
@@ -1508,36 +1385,6 @@ int auto_aim::app::RealRunner::run()
                 }
             }
 
-            // ---- 底盘模型逐帧落盘（ULTRA_VISION_MODEL_CSV）--------------------
-            if (*model_recorder && model.valid) {
-                const auto world_center = tracker.getTargetCenterWorldArray();
-                const auto& geom = tracker.chassisGeometry();
-                auto& s = model_recorder->stream();
-                s << std::fixed << std::setprecision(6)
-                  << static_cast<long long>(observation_time * 1e6) << ',' << observed_plate << ','
-                  << static_cast<int>(armors.size()) << ',' << reprojection_px << ','
-                  << (model_fit_n > 0 ? model_fit_sum / model_fit_n : -1.0) << ','
-                  << (trusted_fit_n > 0 ? trusted_fit_sum / trusted_fit_n : -1.0) << ','
-                  << model.center_camera[0] << ',' << model.center_camera[1] << ','
-                  << model.center_camera[2] << ',' << world_center[0] << ','
-                  << world_center[1] << ',' << world_center[2] << ',' << tracker.getYawWorld()
-                  << ',' << tracker.getOmega();
-                for (int plate = 0; plate < 4; ++plate) {
-                    s << ',' << model.poses[plate].center[0] << ','
-                      << model.poses[plate].center[1] << ',' << model.poses[plate].center[2];
-                }
-                if (has_observation && observed_armor.tvec.rows == 3) {
-                    s << ',' << observed_armor.tvec.at<double>(0) << ','
-                      << observed_armor.tvec.at<double>(1) << ','
-                      << observed_armor.tvec.at<double>(2);
-                } else {
-                    s << ",nan,nan,nan";
-                }
-                for (int plate = 0; plate < 4; ++plate) s << ',' << geom.distance(plate);
-                for (int plate = 0; plate < 4; ++plate) s << ',' << geom.height(plate);
-                s << ',' << geom.armor_pitch << '\n';
-            }
-
             // 红点 = 底盘中心，也画在外推后的时刻（和上面四块板同一个时刻）。
             const cv::Mat center_mat = (cv::Mat_<double>(3, 1) << model.center_camera[0],
                                         model.center_camera[1], model.center_camera[2]);
@@ -1600,31 +1447,6 @@ int auto_aim::app::RealRunner::run()
             }
         }
         key = show_display ? cv::waitKey(1) : 1;
-
-        // ------------------- 7.5 数据集录制 -------------------
-        // 每帧都调用，真正的抽帧交给 DatasetWriter（every_n），别放在 1Hz 的状态块里
-        if (recording) {
-            auto_aim::DatasetRow row;
-            row.frame = frame_sequence;
-            row.t = std::chrono::duration<double>(std::chrono::steady_clock::now() - record_start)
-                        .count();
-            row.yaw = gimbal_state.yaw;   // **原始**回传角（没做 yaw_sign 修正）
-            row.pitch = gimbal_state.pitch;
-            row.yaw_vel = gimbal_state.yaw_vel;
-            row.pitch_vel = gimbal_state.pitch_vel;
-            row.bullet_speed = gimbal_state.bullet_speed;
-            row.mode = static_cast<int>(gimbal.mode());
-            row.armors = static_cast<int>(armors.size());
-            row.pnp = pnp_count;
-            row.tracker_state = static_cast<int>(tracker.getState());
-            row.plate_id = outcome.decision.armor_id;
-            row.aim_yaw = outcome.decision.target_yaw;
-            row.aim_pitch = outcome.decision.target_pitch;
-            row.aim_yaw_error = outcome.aim_yaw_error;
-            row.aim_pitch_error = outcome.aim_pitch_error;
-            row.fire = outcome.fire ? 1 : 0;
-            dataset.write(row, image);
-        }
 
         // ------------------- 8. Status -------------------
         const auto now = std::chrono::steady_clock::now();
@@ -1761,12 +1583,5 @@ int auto_aim::app::RealRunner::run()
         }
     }
 
-    if (recording) {
-        dataset.close();
-        std::cout << "[dataset] 录制结束：" << dataset.written() << " 帧已写入 "
-                  << dataset.directory() << "（共处理 " << dataset.seen() << " 帧）" << std::endl;
-        std::cout << "[dataset] 离线回放：./build/replay_dataset " << dataset.directory()
-                  << " --config-dir configs" << std::endl;
-    }
     return 0;
 }

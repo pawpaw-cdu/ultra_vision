@@ -20,7 +20,6 @@
 #include "common/standard_clock.hpp"
 #include "config_loader.hpp"
 #include "app/config_paths.hpp"
-#include "app/csv_sink.hpp"
 #include "app/pipeline_config.hpp"
 #include "app/sim_detail.hpp"
 #include "visualization/projection.hpp"
@@ -196,13 +195,6 @@ namespace auto_aim
                     return receiver_->sendGimbalCommand(yaw, pitch);
                 });
 
-            estimate_recorder_ = std::make_unique<auto_aim::app::CsvSink>(
-                // 这是**重投影模型**（画面上那四个 E 框）的口径：输出状态按观测延迟外推
-                // 到当前帧时刻后的四块板心（相机系）。model_dt/yaw/omega/radius 是为了
-                // 让每行自描述 —— 想回放"不外推"的滤波器原始状态时用得到。
-                "ULTRA_VISION_ESTIMATE_CSV",
-                "x,y,z,color,distance,time_us,plate_id,model_dt,yaw,omega,radius\n");
-
             // 模型构造（重投影整车轮廓）用的装甲板安装倾角：仿真靶没有 15° 支架
             // （灯条在板坐标系里绝对竖直），所以默认 0。
             {
@@ -210,28 +202,6 @@ namespace auto_aim
                 const double tilt = tilt_env != nullptr ? std::atof(tilt_env) : 0.0;
                 pipeline_->tracker().setArmorTiltDeg(tilt);
             }
-
-            observation_recorder_ = std::make_unique<auto_aim::app::CsvSink>(
-                "ULTRA_VISION_OBSERVATION_CSV",
-                "x,y,z,rx,ry,rz,tracker_x,tracker_y,tracker_z,"
-                "cmd_yaw,cmd_pitch,time_us,plate_id,state,"
-                // 检测到的四个角点像素（lb, lt, rt, rb）。为了能**离线**重解 PnP /
-                // 重投影做标定（不必每次改尺寸都重跑仿真）。
-                "u0,v0,u1,v1,u2,v2,u3,v3,source_time_us\n");
-            selector_recorder_ = std::make_unique<auto_aim::app::CsvSink>(
-                "ULTRA_VISION_SELECTOR_CSV",
-                "time_us,center_x,center_y,center_z,yaw,omega,armor_id,"
-                "armor_x,armor_y,armor_z,target_yaw,target_pitch,lead,"
-                "target_yaw_velocity,target_pitch_velocity,gimbal_time,handoff,in_fire,"
-                // 提前量用的**平移速度**状态（世界系）。实测自旋时这一项抖到 ±3 m/s
-                // （真值 0），乘提前量就是瞄点甩飞的直接来源，所以单独落盘。
-                "vx,vy,vz\n");
-            detections_recorder_ = std::make_unique<auto_aim::app::CsvSink>(
-                "ULTRA_VISION_DETECTIONS_CSV",
-                // time_us = 本机到手时刻（主链路原来用的"观测时间"）；
-                // source_time_us = 仿真端曝光戳。两者之差就是网络+编码延迟，
-                // 用来离线判断"时间戳该用哪个"。
-                "time_us,source_time_us,idx,u_lt,v_lt,u_lb,v_lb,u_rt,v_rt,u_rb,v_rb,x,y,z\n");
 
             // 曝光→收到的延迟：每秒取中位，喂给选择器当"观测年龄"的固定附加项。
             // ULTRA_VISION_SOURCE_DELAY=0 可关掉（A/B 用）。
@@ -362,120 +332,6 @@ namespace auto_aim
             armor_count_ = static_cast<int>(source_result_.armors.size());
             pnp_count_ = source_result_.pnp_count;
 
-            // 可选：把本帧**全部**检测（每块板的左右两根灯条端点 + PnP 位置）落盘。
-            if (*detections_recorder_) {
-                detections_recorder_->stream() << std::fixed << std::setprecision(4);
-                int idx = 0;
-                for (const auto& a : source_result_.armors) {
-                    const bool has_tvec = a.solve_result && a.tvec.rows == 3;
-                    detections_recorder_->stream()
-                        << source_result_.timestamp_us << ','
-                        << frame_source_timestamp_us_ << ',' << idx++ << ','
-                        << a.left.top.x << ',' << a.left.top.y << ','
-                        << a.left.bottom.x << ',' << a.left.bottom.y << ','
-                        << a.right.top.x << ',' << a.right.top.y << ','
-                        << a.right.bottom.x << ',' << a.right.bottom.y << ','
-                        << (has_tvec ? a.tvec.at<double>(0) : std::nan("")) << ','
-                        << (has_tvec ? a.tvec.at<double>(1) : std::nan("")) << ','
-                        << (has_tvec ? a.tvec.at<double>(2) : std::nan("")) << '\n';
-                }
-            }
-
-            // 可选：把带检测框的原图落盘，供离线核对"检测角点 vs 真值投影"。
-            // ULTRA_VISION_DUMP_DIR=<dir> 时每 25 帧存一张（最多 24 张）。
-            if (const char* dump_dir = std::getenv("ULTRA_VISION_DUMP_DIR")) {
-                if (dump_counter_ % 25 == 0 && dump_counter_ < 600) {
-                    cv::Mat dbg = image_.clone();
-                    char name[512];
-                    std::snprintf(name, sizeof(name), "%s/frame_%04d_%lld.png", dump_dir,
-                                  dump_counter_,
-                                  static_cast<long long>(source_result_.timestamp_us));
-                    for (const auto& a : source_result_.armors) {
-                        const cv::Point2f pts[4] = {a.left.top, a.left.bottom, a.right.top,
-                                                    a.right.bottom};
-                        for (int i = 0; i < 4; ++i)
-                            cv::circle(dbg, pts[i], 4, cv::Scalar(0, 255, 0), 2);
-                        cv::line(dbg, a.left.top, a.left.bottom, cv::Scalar(0, 255, 0), 1);
-                        cv::line(dbg, a.right.top, a.right.bottom, cv::Scalar(0, 128, 255), 1);
-                    }
-                    cv::putText(dbg, "t_us=" + std::to_string(source_result_.timestamp_us),
-                                {10, 30},
-                                cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(255, 255, 255), 2);
-                    cv::imwrite(name, dbg);
-                }
-                ++dump_counter_;
-            }
-        }
-
-        void SimRunner::recordDetections()
-        {
-            auto_aim::Tracker& tracker = pipeline_->tracker();
-
-            if (*observation_recorder_ && tracker.hasObservation() &&
-                !tracker.getLastObservedArmor().tvec.empty()) {
-                const auto& observed = tracker.getLastObservedArmor();
-                const cv::Mat center = tracker.getTargetCenter();
-                observation_recorder_->stream() << std::fixed << std::setprecision(6)
-                    << observed.tvec.at<double>(0) << ','
-                    << observed.tvec.at<double>(1) << ','
-                    << observed.tvec.at<double>(2) << ','
-                    << observed.rvec.at<double>(0) << ','
-                    << observed.rvec.at<double>(1) << ','
-                    << observed.rvec.at<double>(2) << ','
-                    << center.at<double>(0) << ','
-                    << center.at<double>(1) << ','
-                    << center.at<double>(2) << ','
-                    << commanded_yaw_ << ',' << commanded_pitch_ << ','
-                    << frame_local_timestamp_us_ << ','
-                    << tracker.getLastObservedPlateId() << ','
-                    << static_cast<int>(tracker.getState());
-                if (observed.Points_2D.size() >= 4) {
-                    for (int i = 0; i < 4; ++i) {
-                        observation_recorder_->stream() << ','
-                            << observed.Points_2D[static_cast<std::size_t>(i)].x
-                            << ',' << observed.Points_2D[static_cast<std::size_t>(i)].y;
-                    }
-                } else {
-                    for (int i = 0; i < 8; ++i) observation_recorder_->stream() << ",nan";
-                }
-                observation_recorder_->stream() << ',' << frame_source_timestamp_us_ << '\n';
-            }
-
-            if (*estimate_recorder_ &&
-                tracker.getState() != auto_aim::TrackerState::LOST &&
-                tracker.getState() != auto_aim::TrackerState::DETECTING) {
-                // 落盘的是**重投影模型**（= 画面上看到的整车轮廓），所以要和画图同口径：
-                // 输出口径的状态 + 按观测延迟外推到当前帧时刻。这样"estimate.csv vs truth"
-                // 量出来的就是"操作员看到的模型离真车多远"，而不是"滤波器状态停留在哪个
-                // 过去的时刻"—— 后者会把几十~一百多 ms 的观测延迟算成模型误差。
-                // 外推到**被显示那一帧的曝光时刻**（不是"到手时刻"）：dt 与渲染姿态
-                // 都必须对应那张图，否则云台/目标在那段延迟里的运动会被算成模型误差。
-                const double model_dt = std::max(
-                    0.0, std::min(auto_aim::StandardClock::secondsFromUs(
-                                      frame_source_timestamp_us_) -
-                                      tracker.lastObservationTime(), 0.20));
-                auto_aim::CameraPose frame_pose;
-                frame_pose.valid = true;
-                frame_pose.yaw = frame_gimbal_yaw_;
-                frame_pose.pitch = frame_gimbal_pitch_;
-                const auto model = tracker.modelAt(model_dt, frame_pose);
-                if (model.valid) {
-                    estimate_recorder_->stream() << std::fixed << std::setprecision(6);
-                    for (int plate = 0; plate < 4; ++plate) {
-                        const auto& pose = model.poses[plate];
-                        const double x = pose.center[0];
-                        const double y = pose.center[1];
-                        const double z = pose.center[2];
-                        estimate_recorder_->stream() << x << ',' << y << ',' << z << ",0,"
-                                          << std::sqrt(x * x + y * y + z * z) << ','
-                                          << frame_local_timestamp_us_ << ',' << plate
-                                          // 自描述：外推用的 dt、当时的 yaw/ω、模型半径
-                                          << ',' << model_dt << ',' << model.world_yaw << ','
-                                          << model.omega << ',' << model.geometry.meanDistance()
-                                          << '\n';
-                    }
-                }
-            }
         }
 
         void SimRunner::runAim()
@@ -535,31 +391,6 @@ namespace auto_aim
             shooter_error_ = auto_aim::ShooterErrorReason::NONE;
             last_detection_time_ = observation_time;
 
-            // selector.csv：保留原口径（时间戳同样是**观测时刻**）
-            if (*selector_recorder_ && outcome.decision.valid) {
-                selector_recorder_->stream() << std::fixed << std::setprecision(6)
-                    << frame_local_timestamp_us_ << ','
-                    << tracker.getTargetCenterWorldArray()[0] << ','
-                    << tracker.getTargetCenterWorldArray()[1] << ','
-                    << tracker.getTargetCenterWorldArray()[2] << ','
-                    << tracker.getYawWorld() << ','
-                    << tracker.getOmega() << ','
-                    << outcome.decision.armor_id << ','
-                    << outcome.decision.armor_position[0] << ','
-                    << outcome.decision.armor_position[1] << ','
-                    << outcome.decision.armor_position[2] << ','
-                    << outcome.decision.target_yaw << ','
-                    << outcome.decision.target_pitch << ','
-                    << outcome.decision.lead_time << ','
-                    << outcome.decision.target_yaw_velocity << ','
-                    << outcome.decision.target_pitch_velocity << ','
-                    << outcome.decision.gimbal_time << ','
-                    << outcome.decision.handoff_gain << ','
-                    << static_cast<int>(outcome.decision.in_fire_window) << ','
-                    << tracker.getTargetVelocityWorld()[0] << ','
-                    << tracker.getTargetVelocityWorld()[1] << ','
-                    << tracker.getTargetVelocityWorld()[2] << '\n';
-            }
         }
 
         std::string SimRunner::shooterStatus() const

@@ -7,7 +7,7 @@
 //   · 能力层（detector / armor_source / aim_pipeline / tracker ...）负责算法；
 //   · 这里（app/sim_runner）负责把仿真专属的东西装起来 —— 配置、TCP 帧源、
 //     曝光→到手的时间基、三条 CSV、曲线 —— 并把一帧拆成命名清晰的几个阶段：
-//         fetchFrame → prepareFrame → recordDetections → runAim
+//         fetchFrame → prepareFrame → runAim
 //   · 入口 node_sim.cpp 只留"构造 + 一段可读的主循环 + 显示/上报"，是薄组合根。
 //
 // 主循环里"检测 → 记录 → 瞄准"的数据流由入口按顺序调用上面四个阶段表达；
@@ -28,7 +28,6 @@
 #include "control/target_selector.hpp"
 #include "perception/armor_source.hpp"
 #include "sim_receiver/vision_date_receiver.hpp"
-#include "app/csv_sink.hpp"
 
 namespace auto_aim
 {
@@ -52,10 +51,7 @@ namespace auto_aim
             /// @brief 时间基（指令快照）+ 处理尺寸缩放 + 内参 + 检测（含动态 ROI）。
             void prepareFrame();
 
-            /// @brief 落 observation.csv / estimate.csv（纯记录，不改状态）。
-            void recordDetections();
-
-            /// @brief 估计 → 选板 → 瞄准 → 开火（共用 AimPipeline）+ selector.csv。
+            /// @brief 估计 → 选板 → 瞄准 → 开火（共用 AimPipeline）。
             void runAim();
 
             // ---- 入口需要的组件 / 结果 / 循环控制 ----------------------------
@@ -85,14 +81,6 @@ namespace auto_aim
             std::unique_ptr<sim_receiver::VisionDateReceiver> receiver_;
             std::unique_ptr<ArmorSource> armor_source_;
             std::unique_ptr<AimPipeline> pipeline_;
-            std::unique_ptr<CsvSink> estimate_recorder_;
-            std::unique_ptr<CsvSink> observation_recorder_;
-            std::unique_ptr<CsvSink> selector_recorder_;
-            // 可选：记录**每一帧的全部检测**（每块板的左右两根灯条端点），供离线分析
-            // （如小陀螺灯条轨迹几何估计）。默认关（不设 ULTRA_VISION_DETECTIONS_CSV 就不开）。
-            std::unique_ptr<CsvSink> detections_recorder_;
-            int dump_counter_ = 0;   // ULTRA_VISION_DUMP_DIR 用的帧序号
-
             std::vector<double> source_delay_samples_us_;
             double observation_source_delay_ = 0.0;
 

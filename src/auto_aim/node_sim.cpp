@@ -40,7 +40,6 @@ int main(int argc, char** argv)
         }
 
         runner.prepareFrame();
-        runner.recordDetections();
         runner.runAim();
 
         ++frames;
