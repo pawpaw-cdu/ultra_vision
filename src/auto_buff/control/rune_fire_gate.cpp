@@ -1,4 +1,4 @@
-#include "auto_buff/rune_fire_gate.hpp"
+#include "auto_buff/control/rune_fire_gate.hpp"
 
 #include <algorithm>
 

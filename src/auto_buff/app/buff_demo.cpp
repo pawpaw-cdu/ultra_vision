@@ -4,8 +4,8 @@
 #include <iostream>
 #include <string>
 
-#include "auto_buff/rune_config.hpp"
-#include "auto_buff/rune_runner.hpp"
+#include "auto_buff/config/rune_config.hpp"
+#include "auto_buff/app/rune_runner.hpp"
 
 #ifndef ULTRA_VISION_CONFIG_DIR
 #define ULTRA_VISION_CONFIG_DIR "configs"

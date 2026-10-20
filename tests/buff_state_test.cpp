@@ -7,12 +7,12 @@
 #include <utility>
 #include <vector>
 
-#include "auto_buff/rune_round_guard.hpp"
-#include "auto_buff/rune_slot_lattice.hpp"
-#include "auto_buff/rune_aim_fallback.hpp"
-#include "auto_buff/rune_track_lifecycle.hpp"
-#include "auto_buff/rune_fire_gate.hpp"
-#include "auto_buff/rune_blade_selector.hpp"
+#include "auto_buff/control/rune_round_guard.hpp"
+#include "auto_buff/estimation/rune_slot_lattice.hpp"
+#include "auto_buff/control/rune_aim_fallback.hpp"
+#include "auto_buff/common/rune_track_lifecycle.hpp"
+#include "auto_buff/control/rune_fire_gate.hpp"
+#include "auto_buff/control/rune_blade_selector.hpp"
 #include "common/standard_clock.hpp"
 
 namespace

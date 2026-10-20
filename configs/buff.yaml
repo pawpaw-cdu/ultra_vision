@@ -119,7 +119,7 @@ rune:
     # 我们自己的颜色：0=红（观测精修的颜色差掩膜看 R−B）1=蓝（看 B−R）。
     our_color: 0
     # 观测精修（来自深大 RP-26Rune 的"颜色差轮廓 → 语义分割 → 描述子可用性"
-    # 思路，实现在 src/auto_buff/rune_refiner.{hpp,cpp}）：
+    # 思路，实现在 src/auto_buff/detection/rune_refiner.{hpp,cpp}）：
     #   * 描述子闸门：灯臂轮廓实心度/长宽比、装甲板实心度、贴边 —— 判定
     #     "这一帧的几何能不能信"；
     #   * 圆心融合：R 标轮廓的 fitEllipse 中心与网络 k2 加权平均（两者相差

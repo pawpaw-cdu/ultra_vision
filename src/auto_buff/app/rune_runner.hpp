@@ -6,7 +6,7 @@
 
 #include <string>
 
-#include "auto_buff/rune_config.hpp"
+#include "auto_buff/config/rune_config.hpp"
 
 namespace auto_aim::energy
 {

@@ -1,4 +1,4 @@
-#include "auto_buff/rune_slot_lattice.hpp"
+#include "auto_buff/estimation/rune_slot_lattice.hpp"
 
 #include <algorithm>
 #include <cmath>

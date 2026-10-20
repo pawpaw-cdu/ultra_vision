@@ -1,4 +1,4 @@
-#include "auto_buff/rune_refiner.hpp"
+#include "auto_buff/detection/rune_refiner.hpp"
 
 #include <algorithm>
 #include <cmath>

@@ -1,10 +1,10 @@
-#include "auto_buff/rune_aimer.hpp"
+#include "auto_buff/control/rune_aimer.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <iostream>
 
-#include "auto_buff/rune_target.hpp"
+#include "auto_buff/estimation/rune_target.hpp"
 #include "auto_buff/support/math.hpp"
 #include "auto_buff/support/trajectory.hpp"
 

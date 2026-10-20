@@ -18,7 +18,7 @@
 #include <optional>
 #include <vector>
 
-#include "auto_buff/rune_types.hpp"
+#include "auto_buff/common/rune_types.hpp"
 
 namespace auto_aim::energy
 {

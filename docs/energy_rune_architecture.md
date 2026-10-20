@@ -4,8 +4,9 @@
 > 数据来源：代码（`src/auto_buff/`、`src/auto_aim/control/`、`src/auto_aim/sim_receiver/`）
 > + 本机实测（`tools/rune_curve.py`、`tools/rune_sim_test.sh` 产出的曲线与日志）。
 > 注：本文件是 2026-09-24 早期排查的快照（`rune_activation` 当时还在）。它已删除，
-> 现在窗口/命中/保持归 `rune_round_guard.cpp`、槽位记账归 `rune_slot_lattice.cpp`、
-> 丢目标策略归 `rune_aim_fallback.cpp`；当前分层见 `src/auto_buff/README.md`，
+> 现在窗口/命中/保持归 `control/rune_round_guard.cpp`、槽位记账归
+> `estimation/rune_slot_lattice.cpp`、丢目标策略归 `control/rune_aim_fallback.cpp`；
+> 当前分层见 `src/auto_buff/README.md`，
 > 后续结论见 `docs/energy_rune_issue_audit.md` §7、§8。
 
 ## 1. 运行时拓扑
@@ -46,12 +47,12 @@
 
 | 级 | 代码 | 输入 → 输出 | 备注 |
 |---|---|---|---|
-| 解码 | `rune_model.cpp` | 640x480 BGR → 候选（5 点 + 3 类分） | 归一化 0~1；中心距 NMS 30 px |
-| 选靶 | `rune_detector.cpp` | 候选 → 一个扇叶（靶心/R 标） | 亮点判据 + 锁定滞回 + `require_inactive_class` 过滤 |
-| 解算 | `rune_solver.cpp` | 4 点 → 位姿（rvec/tvec） | IPPE 双解按"圆心反投影落在 R 标"选；深度用 `focal*0.7/像素偏移` 校正 |
-| 估计 | `rune_target.cpp` | 观测 → 状态 | 7/10 维 EKF；相位 = 几何相位（新） |
-| 瞄准 | `rune_aimer.cpp` | 状态 → yaw/pitch + 开火许可 | 两遍弹道解 + 瞄准角滤波；`fire_gap` 节流 |
-| 激活 | `rune_activation.cpp` | 图像相位 + 命中反馈 → 窗口/开火许可 | `gate_fire` 默认关 |
+| 解码 | `detection/rune_model.cpp` | 640x480 BGR → 候选（5 点 + 3 类分） | 归一化 0~1；中心距 NMS 30 px |
+| 选靶 | `detection/rune_detector.cpp` | 候选 → 一个扇叶（靶心/R 标） | 亮点判据 + 锁定滞回 |
+| 解算 | `estimation/rune_solver.cpp` | 4 点 → 位姿（rvec/tvec） | IPPE 双解选择 |
+| 估计 | `estimation/rune_target.cpp` | 观测 → 状态 | 7/10 维 EKF |
+| 瞄准 | `control/rune_aimer.cpp` | 状态 → yaw/pitch | 两遍弹道解 + 瞄准角滤波 |
+| 激活 | `estimation/rune_slot_lattice.cpp` | 槽位证据 → 激活掩码 | 与 `control/rune_fire_gate.cpp` 解耦 |
 | 指令 | `gimbal_controller.cpp` | 目标角 → 100 Hz 轨迹 → TCP | 视觉只更新目标角 |
 
 **"打哪一片、能不能打"的判定散落在 4 处**：检测器（锁定/亮度/类别）、节点（`aim_phase` + 激活窗口 + `post_hit_hold` + 类别闸门）、瞄准器（换叶判定 + 开火节流）、解算器（相位隐含在 PnP 选解里）。

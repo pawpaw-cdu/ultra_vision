@@ -1,4 +1,4 @@
-#include "auto_buff/rune_types.hpp"
+#include "auto_buff/common/rune_types.hpp"
 
 #include <algorithm>
 #include <cmath>

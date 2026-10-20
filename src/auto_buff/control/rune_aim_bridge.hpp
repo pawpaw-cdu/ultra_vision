@@ -21,9 +21,9 @@
 
 #include "control/aim_signal_filter.hpp"
 #include "control/gimbal_controller.hpp"
-#include "auto_buff/rune_aimer.hpp"
-#include "auto_buff/rune_config.hpp"
-#include "auto_buff/rune_target.hpp"
+#include "auto_buff/control/rune_aimer.hpp"
+#include "auto_buff/config/rune_config.hpp"
+#include "auto_buff/estimation/rune_target.hpp"
 
 namespace auto_aim::energy
 {

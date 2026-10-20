@@ -1,4 +1,4 @@
-#include "auto_buff/rune_detector.hpp"
+#include "auto_buff/detection/rune_detector.hpp"
 #include "auto_buff/support/math.hpp"
 
 #include <algorithm>

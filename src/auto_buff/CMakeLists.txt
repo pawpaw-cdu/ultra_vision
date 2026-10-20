@@ -1,27 +1,23 @@
-# 能量机关（auto_buff）任务：算法 + 薄入口。结构对齐 sp_vision 的 tasks/auto_buff/
-#   * auto_buff        —— OBJECT 算法库（感知/解算/估计/瞄准/火控判据 + 诊断），可被
-#                         任意入口或测试复用（sp_vision 也是这么拆的）；
-#   * auto_buff_demo   —— 薄入口：参数/环境 → 配置 → buff_runner（仿真器或视频）。
-# 算法本身不依赖具体入口，也不依赖 OpenVINO 之外的东西。
+# 能量机关任务：按 app/config/common/detection/estimation/control/support 分层。
 
 set(AUTO_BUFF_SOURCES
-    rune_types.cpp
-    rune_config.cpp
-    rune_model.cpp
-    rune_refiner.cpp
-    rune_plate_refiner.cpp
-    rune_input.cpp
-    rune_slot_lattice.cpp
-    rune_fire_gate.cpp
-    rune_blade_selector.cpp
-    rune_round_guard.cpp
-    rune_aim_fallback.cpp
-    rune_aim_bridge.cpp
-    rune_runner.cpp
-    rune_detector.cpp
-    rune_solver.cpp
-    rune_target.cpp
-    rune_aimer.cpp
+    common/rune_types.cpp
+    config/rune_config.cpp
+    detection/rune_model.cpp
+    detection/rune_refiner.cpp
+    detection/rune_plate_refiner.cpp
+    detection/rune_detector.cpp
+    estimation/rune_solver.cpp
+    estimation/rune_target.cpp
+    estimation/rune_slot_lattice.cpp
+    control/rune_aimer.cpp
+    control/rune_aim_bridge.cpp
+    control/rune_aim_fallback.cpp
+    control/rune_blade_selector.cpp
+    control/rune_fire_gate.cpp
+    control/rune_round_guard.cpp
+    app/rune_input.cpp
+    app/rune_runner.cpp
     # 云台轨迹生成与角度解算复用自瞄那一套（100 Hz、加加速度受限）
     ${CMAKE_SOURCE_DIR}/src/auto_aim/control/gimbal_aimer.cpp
     ${CMAKE_SOURCE_DIR}/src/auto_aim/control/gimbal_controller.cpp
@@ -53,6 +49,6 @@ target_link_libraries(auto_buff PUBLIC
     Threads::Threads
 )
 
-# 薄入口（与 auto_aim 的 node_sim.cpp 同构）：只做 参数/环境 → 配置 → runRune。
-add_executable(auto_buff_demo buff_demo.cpp $<TARGET_OBJECTS:auto_buff>)
+# 薄入口：参数/环境 → 配置 → runRune。
+add_executable(auto_buff_demo app/buff_demo.cpp $<TARGET_OBJECTS:auto_buff>)
 target_link_libraries(auto_buff_demo PRIVATE auto_buff)

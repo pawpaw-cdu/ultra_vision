@@ -5,9 +5,9 @@
 
 add_executable(buff_target_test
     buff_target_test.cpp
-    ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_types.cpp
-    ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_target.cpp
-    ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_aimer.cpp
+    ${CMAKE_SOURCE_DIR}/src/auto_buff/common/rune_types.cpp
+    ${CMAKE_SOURCE_DIR}/src/auto_buff/estimation/rune_target.cpp
+    ${CMAKE_SOURCE_DIR}/src/auto_buff/control/rune_aimer.cpp
 )
 target_include_directories(buff_target_test PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -20,11 +20,11 @@ add_test(NAME buff_target_test COMMAND buff_target_test)
 
 add_executable(buff_state_test
     buff_state_test.cpp
-    ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_aim_fallback.cpp
-    ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_round_guard.cpp
-    ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_slot_lattice.cpp
-    ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_fire_gate.cpp
-    ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_blade_selector.cpp
+    ${CMAKE_SOURCE_DIR}/src/auto_buff/control/rune_aim_fallback.cpp
+    ${CMAKE_SOURCE_DIR}/src/auto_buff/control/rune_round_guard.cpp
+    ${CMAKE_SOURCE_DIR}/src/auto_buff/estimation/rune_slot_lattice.cpp
+    ${CMAKE_SOURCE_DIR}/src/auto_buff/control/rune_fire_gate.cpp
+    ${CMAKE_SOURCE_DIR}/src/auto_buff/control/rune_blade_selector.cpp
 )
 target_include_directories(buff_state_test PRIVATE
     ${CMAKE_SOURCE_DIR}/src

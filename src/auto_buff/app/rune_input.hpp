@@ -15,7 +15,7 @@
 
 #include <opencv2/opencv.hpp>
 
-#include "auto_buff/rune_config.hpp"
+#include "auto_buff/config/rune_config.hpp"
 
 namespace sim_receiver
 {

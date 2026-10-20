@@ -14,11 +14,11 @@
 #include <string>
 #include <vector>
 
-#include "auto_buff/rune_model.hpp"
-#include "auto_buff/rune_refiner.hpp"
-#include "auto_buff/rune_plate_refiner.hpp"
-#include "auto_buff/rune_track_lifecycle.hpp"
-#include "auto_buff/rune_types.hpp"
+#include "auto_buff/detection/rune_model.hpp"
+#include "auto_buff/detection/rune_refiner.hpp"
+#include "auto_buff/detection/rune_plate_refiner.hpp"
+#include "auto_buff/common/rune_track_lifecycle.hpp"
+#include "auto_buff/common/rune_types.hpp"
 
 namespace auto_aim::energy
 {

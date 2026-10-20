@@ -13,9 +13,9 @@
 
 #include <string>
 
-#include "auto_buff/rune_aimer.hpp"
-#include "auto_buff/rune_detector.hpp"
-#include "auto_buff/rune_solver.hpp"
+#include "auto_buff/control/rune_aimer.hpp"
+#include "auto_buff/detection/rune_detector.hpp"
+#include "auto_buff/estimation/rune_solver.hpp"
 #include "auto_buff/support/math.hpp"
 #include "control/aim_signal_filter.hpp"
 #include "control/gimbal_aimer.hpp"

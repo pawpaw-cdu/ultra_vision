@@ -3,10 +3,17 @@
 > 2026-09-24 重构：**与自瞄拆成两个平行任务**，结构对齐 sp_vision：
 >
 > ```
-> src/auto_aim/      自瞄（原样保留）
-> src/auto_buff/     能量机关：buff_demo（薄入口）+ rune_*（算法）+ support/
-> tests/             单元测试（buff_target_test / buff_state_test），不进算法目录
-> tools/             sim（仿真相机预设）
+> src/auto_aim/      自瞄
+> src/auto_buff/
+>   app/             入口、输入源、Runner
+>   config/          buff.yaml -> RuneConfig
+>   common/          公共数据类型、跟踪生命周期
+>   detection/       模型、检测器、观测/靶面精修
+>   estimation/      PnP 解算、目标 EKF、槽位格点
+>   control/         瞄准、桥接、扇叶选择、开火门、回合/兜底状态
+>   support/         无 IO 的数学与滤波工具
+> tests/             单元测试，不进算法目录
+> tools/sim/         仿真相机预设
 > ```
 >
 > 构建目标（对齐 sp_vision 的 `tasks/auto_buff`：算法是 **OBJECT 库**、入口是薄 executable）：
@@ -52,19 +59,26 @@
 
 | 文件 | 职责 | 关键点 |
 |---|---|---|
-| `rune_model.*` | OpenVINO 推理 + 解码（`[1,18,6300]`：3 类分 + 5×(x,y,conf)） | 归一化 0~1；坐标映射回原图；中心距 NMS 30 px；`lastBestScore()` 供诊断 |
-| `rune_types.*` | `FanBlade`（四点+靶心+R 标）/ `PowerRune`（5 个 72° 格点、相位观测） | `phase_rad` = 平面内"圆心→靶心"向量角 |
-| `rune_detector.*` | 候选 → 一个扇叶：亮点判据（小窗峰值−大窗均值）+ 锁定滞回 + 类别过滤 | 输出 `litBladeCenters()`、`classCounts()`、`targetClass()` |
-| `rune_solver.*` | 靶面四点 PnP（IPPE）→ 世界系圆心/姿态/球坐标 | 双解按"圆心反投影落在 R 标上"选；深度用 `focal·0.7/像素偏移` 校正 |
-| `rune_target.*` | EKF：小符 7 维（yaw/pitch/dis/roll/ω…）、大符 10 维（正弦 ω 模型） | 两条测量：①圆心+相位 ②靶心位置；含野值门（距离/圆心跳变） |
-| `rune_aimer.*` | 两遍弹道解 + 瞄准角滤波 → `yaw/pitch/fly_time/shoot` | `predict_time` + `fire_gap_time` 节流；换靶时重置节流 |
-| `rune_round_guard.*` | 一轮记账：窗口（`round_window_s`）、类别命中（class0→class1/2）、命中后保持 | 输入图像相位 + 命中反馈；输出 `blade_lit/round_age/hold/class_hit` |
-| `rune_slot_lattice.*` | 槽位格点：单扇叶锚定 + 每帧重新对齐 + 已激活记账（丢帧不重锚） | 输出 `slot_id` 与 5 位 `activated` 掩码（进 CSV） |
-| `rune_aim_fallback.*` | 丢目标策略：停最后已知符心 → 兜底回标定位姿 + 复位估计器 | `park_on_center_max_age_s`、`recenter_after_frames` |
-| `rune_aim_bridge.*` | 帧循环 ↔ 100 Hz 控制线程的瞄准桥 | 帧循环只发布状态；开火请求由控制线程判定并回取 |
-| `rune_config.hpp` | `configs/buff.yaml` → 各结构体 | 见 §6 |
-| `rune_node.cpp` | 入口：仿真 TCP 或离线视频；CSV/调试/可视化 | 见 §7 环境变量 |
-| `support/` | EKF、正弦拟合、球坐标、弹道等纯数学 | 无 IO，可单测 |
+| `detection/rune_model.*` | OpenVINO 推理 + 五点解码 | 坐标映射；中心距 NMS |
+| `detection/rune_detector.*` | 候选选择、亮度判据、锁定滞回、观测精修 | 输出类别、亮点和候选几何 |
+| `detection/rune_refiner.*` | 颜色轮廓描述子与 R 标融合 | 观测级几何精修 |
+| `detection/rune_plate_refiner.*` | 网络 ROI → 经典靶面中心精修 | 只修中心，保持网络尺度 |
+| `estimation/rune_solver.*` | 四点 PnP、世界系几何、相位观测 | IPPE 双解选择 |
+| `estimation/rune_target.*` | 小/大符 EKF 与预测 | 圆心、相位和角速度状态 |
+| `estimation/rune_slot_lattice.*` | 五槽位锚定和激活记账 | 输出槽号与激活掩码 |
+| `control/rune_aimer.*` | 弹道解算和瞄准角生成 | 预测飞行时间与节流 |
+| `control/rune_aim_bridge.*` | 帧循环 ↔ 100 Hz 控制线程 | 发布最新目标状态 |
+| `control/rune_blade_selector.*` | 命中后选择下一片 | 排除命中片和已激活片 |
+| `control/rune_fire_gate.*` | 计划槽位开火准入 | 与观测/建模解耦 |
+| `control/rune_round_guard.*` | 回合窗口、命中保持 | 输入相位与命中反馈 |
+| `control/rune_aim_fallback.*` | 丢目标停靠与回中策略 | 最后符心优先 |
+| `config/rune_config.*` | `configs/buff.yaml` → 各结构体 | 集中读取配置 |
+| `common/rune_types.*` | `FanBlade` / `PowerRune` 数据契约 | 世界系几何与相位 |
+| `common/rune_track_lifecycle.hpp` | 检测状态时间滞回 | TRACK/LOST |
+| `app/rune_runner.*` | 观测→建模→选片→控制→火控主循环 | 薄编排 |
+| `app/rune_input.*` | 仿真/视频输入、遥测、指令输出 | IO 与算法隔离 |
+| `app/buff_demo.cpp` | 参数和环境 → Runner | 薄入口 |
+| `support/` | EKF、正弦拟合、球坐标、弹道数学 | 无 IO |
 
 ## 4. 数据流（逐级）
 

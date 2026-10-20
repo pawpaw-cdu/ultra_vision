@@ -19,7 +19,7 @@
 #include <optional>
 #include <string>
 
-#include "auto_buff/rune_types.hpp"
+#include "auto_buff/common/rune_types.hpp"
 #include "auto_buff/support/math.hpp"
 #include "auto_buff/support/ekf.hpp"
 #include "auto_buff/support/sine_fitter.hpp"

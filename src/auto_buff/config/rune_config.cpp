@@ -1,6 +1,6 @@
 // YAML → RuneConfig 的实现（结构定义在 rune_config.hpp，这里只放"怎么读"）。
 
-#include "auto_buff/rune_config.hpp"
+#include "auto_buff/config/rune_config.hpp"
 
 #include <yaml-cpp/yaml.h>
 

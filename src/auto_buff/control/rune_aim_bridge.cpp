@@ -1,4 +1,4 @@
-#include "auto_buff/rune_aim_bridge.hpp"
+#include "auto_buff/control/rune_aim_bridge.hpp"
 
 #include <algorithm>
 #include <iostream>

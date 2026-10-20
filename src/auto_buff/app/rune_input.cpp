@@ -1,4 +1,4 @@
-#include "auto_buff/rune_input.hpp"
+#include "auto_buff/app/rune_input.hpp"
 
 #include <cstdlib>
 #include <iostream>

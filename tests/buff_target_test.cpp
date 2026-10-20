@@ -5,9 +5,9 @@
 #include <string>
 #include <vector>
 
-#include "auto_buff/rune_aimer.hpp"
-#include "auto_buff/rune_target.hpp"
-#include "auto_buff/rune_types.hpp"
+#include "auto_buff/control/rune_aimer.hpp"
+#include "auto_buff/estimation/rune_target.hpp"
+#include "auto_buff/common/rune_types.hpp"
 #include "auto_buff/support/math.hpp"
 
 namespace
