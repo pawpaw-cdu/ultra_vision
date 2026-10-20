@@ -10,7 +10,6 @@ set(AUTO_BUFF_SOURCES
     rune_model.cpp
     rune_refiner.cpp
     rune_plate_refiner.cpp
-    rune_diag.cpp
     rune_input.cpp
     rune_slot_lattice.cpp
     rune_fire_gate.cpp

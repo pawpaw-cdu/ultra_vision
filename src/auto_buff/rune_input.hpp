@@ -9,7 +9,6 @@
 // 算法单测也不需要起仿真器。
 
 #include <cstdint>
-#include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -62,20 +61,11 @@ namespace auto_aim::energy
         bool sendFire();
         bool sendReset();
 
-        /// @brief 录制帧用的目录（ULTRA_VISION_RUNE_FRAME_DIR）；为空表示不录。
-        const std::string& frameDir() const { return frame_dir_; }
-        /// @brief 遥测真值写盘流（ULTRA_VISION_RUNE_GT_CSV）；未打开则为空。
-        std::ofstream* groundTruth() { return ground_truth_.is_open() ? &ground_truth_ : nullptr; }
-        std::ofstream* labelDump() { return label_dump_.is_open() ? &label_dump_ : nullptr; }
-
     private:
         bool video_mode_ = false;
         cv::VideoCapture capture_;
         std::unique_ptr<sim_receiver::VisionDateRecevier> receiver_;
         std::unique_ptr<sim_receiver::TelemetryReceiver> telemetry_;
-        std::ofstream ground_truth_;
-        std::ofstream label_dump_;
-        std::string frame_dir_;
     };
 } // namespace auto_aim::energy
 

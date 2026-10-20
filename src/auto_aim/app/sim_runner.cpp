@@ -25,7 +25,6 @@
 #include "app/perf_stats.hpp"
 #include "app/sim_detail.hpp"
 #include "visualization/projection.hpp"
-#include "visualization/curve_plotter.hpp"
 #include "control/aim_pipeline.hpp"
 #include "perception/armor_source.hpp"
 #include "control/gimbal_aimer.hpp"
@@ -256,23 +255,6 @@ namespace auto_aim
             loop_start_time_ = std::chrono::steady_clock::now();
             fps_start_ = std::chrono::steady_clock::now();
 
-            // 实时曲线（可视化调试）：不设 ULTRA_VISION_CURVES → 有窗口/要落 CSV 才采；
-            // ULTRA_VISION_CURVES=1/0 → 强制开/关。采一条 ~1 ms/帧，回归里没必要白给。
-            const char* curves_env = std::getenv("ULTRA_VISION_CURVES");
-            curves_enabled_ = curves_env != nullptr
-                ? std::string(curves_env) != "0"
-                : (show_display_ || std::getenv("ULTRA_VISION_CURVE_CSV") != nullptr);
-            // panel 号决定"哪两条画在同一个坐标系里比较"：同 panel 共用纵轴。
-            curves_.addCurve("aim_yaw_cmd [deg]", cv::Scalar(80, 220, 255), 90.0, 0);
-            curves_.addCurve("armor_yaw_obs [deg]", cv::Scalar(80, 255, 80), 90.0, 0);
-            curves_.addCurve("aim_pitch_cmd [deg]", cv::Scalar(255, 180, 80), 60.0, 1);
-            curves_.addCurve("armor_pitch_obs [deg]", cv::Scalar(80, 180, 255), 60.0, 1);
-            curves_.addCurve("aim_px_err [px]", cv::Scalar(255, 80, 255), 120.0, 2);
-            curves_.addCurve("est_dist [m]", cv::Scalar(200, 200, 200), 12.0, 3);
-            curves_.addCurve("obs_dist [m]", cv::Scalar(120, 120, 255), 12.0, 3);
-            if (const char* curve_csv = std::getenv("ULTRA_VISION_CURVE_CSV")) {
-                curves_.openCsv(curve_csv);
-            }
             return true;
         }
 
@@ -581,7 +563,6 @@ namespace auto_aim
             shooter_state_ = outcome.fire ? auto_aim::ShooterState::FIRING
                                           : auto_aim::ShooterState::IDLE;
             shooter_error_ = auto_aim::ShooterErrorReason::NONE;
-            aim_snapshots_for_curves_ = outcome;
             last_detection_time_ = observation_time;
 
             // selector.csv：保留原口径（时间戳同样是**观测时刻**）
@@ -614,44 +595,6 @@ namespace auto_aim
         std::string SimRunner::shooterStatus() const
         {
             return shooterStatusName(shooter_state_, shooter_error_);
-        }
-
-        void SimRunner::pushCurves(const cv::Mat& camera_matrix, const cv::Mat& dist_coeffs)
-        {
-            if (!curves_enabled_) return;
-            // ---- 实时数学曲线：装甲板位姿 vs 瞄准方向（sp_vision 式的调试习惯）--------
-            // 图像只能说明"这一帧对上了"；滞后/超前/跳变/偏置只在时间序列上看得见。
-            // 四条量：命令角 vs 观测角（yaw、pitch）、瞄点像素误差、距离（观测 vs 估计）。
-            auto_aim::Tracker& tracker = pipeline_->tracker();
-            const auto& observed_armor = tracker.getLastObservedArmor();
-            double observed_yaw = std::nan("");
-            double observed_pitch = std::nan("");
-            double observed_distance = std::nan("");
-            double aim_pixel_error = std::nan("");
-            if (observed_armor.solve_result && observed_armor.tvec.rows == 3) {
-                const double x = observed_armor.tvec.at<double>(0);
-                const double y = observed_armor.tvec.at<double>(1);
-                const double z = observed_armor.tvec.at<double>(2);
-                observed_yaw = std::atan2(x, z) * 180.0 / CV_PI;
-                observed_pitch = std::atan2(-y, std::hypot(x, z)) * 180.0 / CV_PI;
-                observed_distance = std::sqrt(x * x + y * y + z * z);
-                if (observed_armor.Points_2D.size() >= 4 && camera_matrix.rows == 3) {
-                    cv::Point2f center(0.0f, 0.0f);
-                    for (const cv::Point2f& point : observed_armor.Points_2D) center += point;
-                    center *= 0.25f;
-                    const cv::Mat estimated_center = tracker.getTargetCenter();
-                    cv::Point2f aim_pixel;
-                    if (auto_aim::projectPoint(estimated_center, camera_matrix, dist_coeffs,
-                                               aim_pixel)) {
-                        aim_pixel_error = cv::norm(aim_pixel - center);
-                    }
-                }
-            }
-            const cv::Mat estimated_center = tracker.getTargetCenter();
-            const double estimated_distance = cv::norm(estimated_center);
-            curves_.pushAll({commanded_yaw_ * 180.0 / CV_PI, observed_yaw,
-                             commanded_pitch_ * 180.0 / CV_PI, observed_pitch, aim_pixel_error,
-                             estimated_distance, observed_distance});
         }
 
         bool SimRunner::testSecondsExpired() const

@@ -25,7 +25,6 @@
 #include "control/aim_pipeline.hpp"
 #include "perception/armor_source.hpp"
 #include "sim_receiver/vision_date_receiver.hpp"
-#include "visualization/curve_plotter.hpp"
 
 int main(int argc, char** argv)
 {
@@ -39,7 +38,6 @@ int main(int argc, char** argv)
     //   ULTRA_VISION_TEST_SECONDS → 跑 N 秒后干净退出；ESC / e 键随时退出。
     // 组件引用（只是给下面循环少写几次 runner.xxx()，不改变所有权）。
     auto_aim::app::PerfStats& stats = runner.stats();
-    auto_aim::visualization::CurvePlotter& curves = runner.curves();
     sim_receiver::VisionDateReceiver& receiver = runner.receiver();
     auto_aim::ArmorSource& armor_source = runner.armorSource();
     auto_aim::AimPipeline& pipeline = runner.pipeline();
@@ -149,16 +147,10 @@ int main(int argc, char** argv)
         lap(6);
         const auto before_display = std::chrono::steady_clock::now();
 
-        // 实时数学曲线：装甲板位姿 vs 瞄准方向（滞后/超前/跳变只在时间序列上看得见）。
-        runner.pushCurves(camera_matrix, dist_coeffs);
         // HighGUI 比整条处理链还贵（实测 ~15 ms/帧 vs ~0.9 ms），机器人上也没有显示器。
-        // 检测图与曲线合成**一个**窗口（竖直：图在上、曲线在下），无显示时用 1ms 节流。
+        // 无显示时用 1 ms 节流。
         if (runner.showDisplay()) {
-            const cv::Mat display = runner.curvesEnabled()
-                                        ? curves.renderStacked(
-                                              image, static_cast<int>(900 * gui_scale))
-                                        : image;
-            cv::imshow("Ultra Vision", display);
+            cv::imshow("Ultra Vision", image);
             runner.setKey(cv::waitKey(1));
         } else {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));

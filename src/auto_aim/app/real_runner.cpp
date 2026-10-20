@@ -22,7 +22,6 @@
 #include "app/pipeline_config.hpp"
 #include "dataset.hpp"
 #include "visualization/projection.hpp"
-#include "visualization/curve_plotter.hpp"
 #include "perception/detector.hpp"
 #include "perception/pnp_solver.hpp"
 #include "Kalman/tracker.hpp"
@@ -696,25 +695,9 @@ int auto_aim::app::RealRunner::run()
                      "（无头运行；要用窗口请在有图形界面的终端里跑，或设 DISPLAY）"
                   << std::endl;
     }
-    const char* curves_env = std::getenv("ULTRA_VISION_CURVES");
-    const bool curves_enabled = curves_env != nullptr
-        ? std::string(curves_env) != "0"
-        : (std::getenv("ULTRA_VISION_CURVE_CSV") != nullptr || windows_usable);
-    auto_aim::visualization::CurvePlotter curves(600);
-    const auto curve_start = std::chrono::steady_clock::now();
-    curves.addCurve("mcu_yaw [deg]", cv::Scalar(80, 220, 255), 90.0, 0);
-    curves.addCurve("cmd_yaw [deg]", cv::Scalar(80, 255, 80), 90.0, 0);
-    curves.addCurve("mcu_pitch [deg]", cv::Scalar(80, 180, 255), 45.0, 1);
-    curves.addCurve("cmd_pitch [deg]", cv::Scalar(255, 180, 80), 45.0, 1);
-    curves.addCurve("plate_az [deg]", cv::Scalar(255, 80, 255), 30.0, 2);
-    curves.addCurve("plate_el [deg]", cv::Scalar(200, 200, 200), 30.0, 2);
-    curves.addCurve("off_yaw [deg]", cv::Scalar(0, 200, 255), 15.0, 3);
-    curves.addCurve("off_pitch [deg]", cv::Scalar(255, 120, 120), 15.0, 3);
     // 下位机回传的**陀螺角速度**（pitch 那一路正是它速度环的反馈量）。加进来是为了
     // 量"我们发一个角增量，它到底往哪边、以多快动"：如果回传角与陀螺符号在某个模式下
     // 反号，光看角度是看不出来的。
-    curves.addCurve("mcu_yaw_gyro [deg/s]", cv::Scalar(120, 255, 200), 200.0, 4);
-    curves.addCurve("mcu_pitch_gyro [deg/s]", cv::Scalar(255, 200, 120), 200.0, 4);
     // 只落 CSV 的诊断列（不画图，避免不同量纲的线挤在一格里）：
     //   ctrl        我们发的是 mode=1 控制帧 还是 mode=0 心跳（"突然不收敛"最常见的原因）
     //   state       tracker 状态（0 LOST / 1 DETECTING / 2 TEMP_LOST / 3 TRACKING）
@@ -722,17 +705,6 @@ int auto_aim::app::RealRunner::run()
     //   dist_m      PnP 距离（现场反馈"距离一远就扰动"——得有距离这一列才能验证）
     //   box_h_px    识别框高度（像素，
     //               量测质量/角噪声的量度，远距离调增益时用）
-    curves.addLogColumn("ctrl");
-    curves.addLogColumn("state");
-    curves.addLogColumn("obs_age_ms");
-    curves.addLogColumn("dist_m");
-    curves.addLogColumn("box_h_px");
-    if (const char* curve_csv = std::getenv("ULTRA_VISION_CURVE_CSV")) {
-        // 第一列写时间戳（秒）：离线要能把曲线和 1Hz 状态行、真值对齐，光有帧号对不上。
-        if (curves.openCsv(curve_csv, /*with_time=*/true)) {
-            std::cout << "[curve] CSV → " << curve_csv << "（第一列 t，单位 s）" << std::endl;
-        }
-    }
     const bool show_display = windows_usable;
     int key = -1;
 
@@ -1604,44 +1576,15 @@ int auto_aim::app::RealRunner::run()
                         cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
         }
 
-        // ---- 曲线采样 + 合成显示 --------------------------------------------
-        // 曲线画在**同一幅图的下面**（竖直组合，和仿真一致的排法）：同宽展开，
-        // 命令/回传两条线的高低差一眼可见，不用再来回切窗口。
-        if (curves_enabled) {
-            const double curve_t = std::chrono::duration<double>(
-                std::chrono::steady_clock::now() - curve_start).count();
-            curves.pushAll({gimbal_state.yaw * 180.0 / CV_PI,
-                            sent_yaw_now.load(std::memory_order_relaxed) * 180.0 / CV_PI,
-                            gimbal_state.pitch * 180.0 / CV_PI,
-                            sent_pitch_now.load(std::memory_order_relaxed) * 180.0 / CV_PI,
-                            curve_az_deg, curve_el_deg,
-                            curve_off_yaw_deg, curve_off_pitch_deg,
-                            gimbal_state.yaw_vel * 180.0 / CV_PI,
-                            gimbal_state.pitch_vel * 180.0 / CV_PI},
-                           curve_t);
-            // 诊断列（见 addLogColumn 的注释）
-            const double box_h_px = has_observation
-                ? cv::norm(observed_armor.left.top - observed_armor.left.bottom)
-                : 0.0;
-            const double dist_m = has_observation ? cv::norm(observed_armor.tvec) : 0.0;
-            curves.pushLog({allow_control_now ? 1.0 : 0.0,
-                            static_cast<double>(static_cast<int>(tracker.getState())),
-                            observation_age * 1000.0, dist_m, box_h_px});
-        }
         if (show_display) {
             cv::Mat display = image;
-            // 1440x1080 原图 + 4 条曲线会高过笔记本屏幕，显示前先等比缩小（只影响显示，
-            // 不影响任何标定/PnP —— 那用的是原始帧和内参）。
+            // 1440x1080 原图显示前先等比缩小，只影响显示，不影响任何标定/PnP。
             constexpr int kDisplayMaxRows = 600;
             if (display.rows > kDisplayMaxRows) {
                 const double scale = static_cast<double>(kDisplayMaxRows) / display.rows;
                 cv::Mat resized;
                 cv::resize(display, resized, cv::Size(), scale, scale, cv::INTER_AREA);
                 display = resized;
-            }
-            if (curves_enabled) {
-                const cv::Mat merged = curves.renderStacked(display, 1000);
-                if (!merged.empty()) display = merged;
             }
             // 双保险：即便有 DISPLAY，后端也可能失败（驱动/权限），任何异常都降级无头，
             // 不能让一个画图异常把整条自瞄链路 terminate 掉。

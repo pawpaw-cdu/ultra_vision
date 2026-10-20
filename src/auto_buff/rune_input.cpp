@@ -1,7 +1,6 @@
 #include "auto_buff/rune_input.hpp"
 
 #include <cstdlib>
-#include <filesystem>
 #include <iostream>
 
 #include <sim_receiver/telemetry_receiver.hpp>
@@ -59,16 +58,6 @@ namespace auto_aim::energy
             telemetry_->connect();
         }
 
-        if (const char* dir = std::getenv("ULTRA_VISION_RUNE_FRAME_DIR")) {
-            frame_dir_ = dir;
-            std::filesystem::create_directories(frame_dir_);
-            label_dump_.open(frame_dir_ + "/labels.txt", std::ios::out | std::ios::trunc);
-            std::cout << "recording frames to " << frame_dir_ << std::endl;
-        }
-        if (const char* path = std::getenv("ULTRA_VISION_RUNE_GT_CSV")) {
-            ground_truth_.open(path, std::ios::out | std::ios::trunc);
-            if (ground_truth_) ground_truth_ << "local_time_us,line\n";
-        }
         if (const char* reset = std::getenv("ULTRA_VISION_SIM_RESET")) {
             if (std::string(reset) != "0") receiver_->sendResetCommand();
         }

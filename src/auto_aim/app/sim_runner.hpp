@@ -27,7 +27,6 @@
 #include "control/target_selector.hpp"
 #include "perception/armor_source.hpp"
 #include "sim_receiver/vision_date_receiver.hpp"
-#include "visualization/curve_plotter.hpp"
 #include "app/csv_sink.hpp"
 #include "app/perf_stats.hpp"
 
@@ -59,15 +58,11 @@ namespace auto_aim
             /// @brief 估计 → 选板 → 瞄准 → 开火（共用 AimPipeline）+ selector.csv。
             void runAim();
 
-            /// @brief 采样一条实时曲线（无显示/无曲线 CSV 时内部自行跳过）。
-            void pushCurves(const cv::Mat& camera_matrix, const cv::Mat& dist_coeffs);
-
             // ---- 入口需要的组件 / 结果 / 循环控制 ----------------------------
             sim_receiver::VisionDateReceiver& receiver() { return *receiver_; }
             ArmorSource& armorSource() { return *armor_source_; }
             AimPipeline& pipeline() { return *pipeline_; }
             Tracker& tracker() { return pipeline_->tracker(); }
-            visualization::CurvePlotter& curves() { return curves_; }
             PerfStats& stats() { return stats_; }
             cv::Mat& image() { return image_; }
             const cv::Mat& cameraMatrix() const { return camera_matrix_; }
@@ -83,7 +78,6 @@ namespace auto_aim
             std::chrono::steady_clock::time_point& fpsStart() { return fps_start_; }
 
             bool showDisplay() const { return show_display_; }
-            bool curvesEnabled() const { return curves_enabled_; }
             bool sourceDelayEnabled() const { return source_delay_enabled_; }
             bool profStages() const { return prof_stages_; }
             double aimJumpLimit() const { return aim_jump_limit_; }
@@ -108,7 +102,6 @@ namespace auto_aim
             std::unique_ptr<CsvSink> detections_recorder_;
             int dump_counter_ = 0;   // ULTRA_VISION_DUMP_DIR 用的帧序号
 
-            visualization::CurvePlotter curves_{300};
             PerfStats stats_;
 
             // 配置派生（initialize 里赋值）
@@ -117,7 +110,6 @@ namespace auto_aim
             int max_processing_width_ = 960;
             bool fire_enabled_ = true;
             bool show_display_ = true;
-            bool curves_enabled_ = false;
             bool source_delay_enabled_ = true;
             double aim_jump_limit_ = 30.0 * CV_PI / 180.0;
             bool prof_stages_ = false;
@@ -154,7 +146,6 @@ namespace auto_aim
             int key_ = -1;
             GimbalControllerSnapshot last_gimbal_command_{};
             TargetDecision last_decision_{};
-            AimPipeline::Outcome aim_snapshots_for_curves_{};
             ShooterState shooter_state_ = ShooterState::IDLE;
             ShooterErrorReason shooter_error_ = ShooterErrorReason::NONE;
         };

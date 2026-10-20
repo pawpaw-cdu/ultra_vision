@@ -15,10 +15,11 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
-#include <fstream>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <thread>
+#include <vector>
 
 #include <opencv2/opencv.hpp>
 
@@ -28,7 +29,6 @@
 #include "auto_buff/rune_aimer.hpp"
 #include "auto_buff/rune_blade_selector.hpp"
 #include "auto_buff/rune_aim_bridge.hpp"
-#include "auto_buff/rune_diag.hpp"
 #include "auto_buff/rune_fire_gate.hpp"
 #include "auto_buff/rune_input.hpp"
 #include "auto_buff/rune_runner.hpp"
@@ -46,10 +46,16 @@
 #define ULTRA_VISION_CONFIG_DIR "configs"
 #endif
 
-namespace rune_diag = auto_aim::energy::rune_diag;
-
 namespace
 {
+    struct Telemetry
+    {
+        int hits = 0;
+        int scored = 0;
+        int activations = 0;
+        double first_activation_s = -1.0;
+    };
+
     // Pulls one `key=value` field out of a simulator telemetry line.
     std::string telemetryField(const std::string& line, const std::string& key)
     {
@@ -61,6 +67,39 @@ namespace
         return line.substr(start, end == std::string::npos ? std::string::npos : end - start);
     }
 
+    void consumeTelemetry(const std::vector<std::string>& lines, const std::string& rune_mode,
+                          Telemetry& telemetry, bool& scored_hit_this_frame)
+    {
+        scored_hit_this_frame = false;
+        for (const std::string& line : lines) {
+            if (telemetryField(line, "mode") != rune_mode) continue;
+            const std::string event = telemetryField(line, "event");
+            if (event == "hit") {
+                if (telemetryField(line, "accurate") == "1") ++telemetry.hits;
+                if (telemetryField(line, "scored") == "1") {
+                    ++telemetry.scored;
+                    scored_hit_this_frame = true;
+                }
+            }
+            if (event == "activated" || telemetryField(line, "change") == "1") {
+                ++telemetry.activations;
+                if (telemetry.first_activation_s < 0.0) {
+                    telemetry.first_activation_s = std::atof(telemetryField(line, "t").c_str());
+                }
+            }
+        }
+    }
+
+    const char* statusName(auto_aim::energy::RuneTrackStatus status)
+    {
+        switch (status) {
+        case auto_aim::energy::RuneTrackStatus::Track: return "TRACK";
+        case auto_aim::energy::RuneTrackStatus::TemporaryLost: return "TEMP_LOST";
+        case auto_aim::energy::RuneTrackStatus::Lost: return "LOST";
+        }
+        return "UNKNOWN";
+    }
+
 } // namespace
 
 int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
@@ -68,9 +107,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
 {
     const bool video_mode = !video_path.empty();
     const bool fire_enabled = std::getenv("ULTRA_VISION_DISABLE_FIRE") == nullptr;
-
-    auto bore_sight = auto_aim::energy::rune_diag::BoreSight::fromEnvironment();
-    const bool show_display = std::getenv("ULTRA_VISION_NO_DISPLAY") == nullptr;
 
     std::unique_ptr<auto_aim::energy::RuneDetector> detector;
     try {
@@ -91,12 +127,10 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
     // 试射模式下必须关掉"控制线程算瞄准"，否则 provider 会用目标角覆盖试射角。
     const bool aim_in_control =
         (std::getenv("ULTRA_VISION_RUNE_AIM_IN_CONTROL") == nullptr ||
-         std::string(std::getenv("ULTRA_VISION_RUNE_AIM_IN_CONTROL")) != "0") &&
-        !bore_sight.enabled;
+         std::string(std::getenv("ULTRA_VISION_RUNE_AIM_IN_CONTROL")) != "0");
     // 输入层：仿真器/视频统一成一个接口，下面只管"取帧、取遥测、发指令"。
     auto_aim::energy::RuneInputSource input;
     if (!input.open(config, config_dir, video_path)) return -1;
-    const std::string& frame_dir = input.frameDir();
 
     // 观测隔离实验：保持物理相机不动，避免云台闭环把目标在画面里来回拖动。
     //   now              = 从启动开始冻结在初始/指定姿态
@@ -115,17 +149,12 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
     double frozen_yaw = 0.0;
     double frozen_pitch = 0.0;
 
-    // 云台由 100 Hz 轨迹生成器驱动：视觉只发布目标角与目标角速度，轨迹生成器
-    // 负责加加速度受限的平滑运动和高频下发。
-    // 记录真正下发出去的高频指令，用于量化平滑度（每帧 CSV 看不到 100 Hz 细节）。
-    auto_aim::energy::rune_diag::GimbalTrace trace;
+    // 云台由 100 Hz 轨迹生成器驱动：视觉只发布目标角与目标角速度。
     auto_aim::GimbalController gimbal_controller(
         config.gimbal,
-        [&input, &trace, &gimbal_frozen, &frozen_yaw,
-         &frozen_pitch](double yaw, double pitch) {
+        [&input, &gimbal_frozen, &frozen_yaw, &frozen_pitch](double yaw, double pitch) {
             const double sent_yaw = gimbal_frozen ? frozen_yaw : yaw;
             const double sent_pitch = gimbal_frozen ? frozen_pitch : pitch;
-            trace.record(sent_yaw, sent_pitch, auto_aim::StandardClock::nowSeconds());
             return input.sendGimbal(sent_yaw, sent_pitch);
         },
         config.gimbal_command_rate_hz);
@@ -135,14 +164,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
     if (aim_in_control) {
         std::cout << "Energy rune: 瞄准解算在控制线程（100 Hz，to_now 预测）" << std::endl;
         aim_bridge.install(gimbal_controller, aim_filter, fire_enabled, {});
-    }
-
-    // 逐帧诊断 CSV（列定义在诊断层 rune_diag.cpp；未设置路径则完全不写）。
-    std::ofstream recorder;
-    if (const char* path = std::getenv("ULTRA_VISION_RUNE_CSV")) {
-        if (!auto_aim::energy::rune_diag::openRecorder(recorder, path)) {
-            std::cerr << "Failed to open rune CSV: " << path << std::endl;
-        }
     }
 
     double commanded_yaw = 0.0;
@@ -164,15 +185,10 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
     cv::Mat frame;
     auto_aim::energy::RuneInputSource::Frame rune_input_frame;
     int frames = 0;
-    int saved_frames = 0;
     int missing_frames = 0;
     int last_status = -1;
     // Scoring counters, filled from the simulator's ground-truth channel.
     int shots_fired = 0;
-    bool fired_this_frame = false;
-    // 发火/瞄准时轨迹生成器的到位误差（度），-1 表示无快照
-    double aim_err_yaw_deg = -1.0;
-    double aim_err_pitch_deg = -1.0;
     // 目标角阶跃检测（清零前馈用）：上一帧发布的目标角。
     double previous_target_yaw = 0.0;
     bool have_previous_target = false;
@@ -208,16 +224,7 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         lattice_config, std::getenv("ULTRA_VISION_RUNE_DEBUG") != nullptr);
     int fired_slot_id = -1;                  // 命中瞬间开火的那个槽位（喂回格点）
     cv::Point2f last_fired_center{0.0f, 0.0f};
-    auto_aim::energy::rune_diag::RuneTelemetry telemetry_stats;
-    // 本地时钟 - 仿真时钟（见遥测解析处），用于把 CSV 的时间轴对齐到仿真。
-
-    // 阶段计时（ULTRA_VISION_RUNE_PROFILE=1）：分出"推理之外的时间花在哪"。
-    rune_diag::StageProfiler profiler(std::getenv("ULTRA_VISION_RUNE_PROFILE") != nullptr);
-    const auto stage_ms = [](const auto& start) {
-        return std::chrono::duration<double, std::milli>(
-                   std::chrono::steady_clock::now() - start)
-            .count();
-    };
+    Telemetry telemetry_stats;
     const bool rune_is_small =
         config.mode == auto_aim::energy::RuneMode::Small;
     const char* rune_mode_name = rune_is_small ? "small" : "large";
@@ -228,11 +235,9 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
     auto fps_start = std::chrono::steady_clock::now();
     // 仿真帧序号：用来量"我们跳过了多少帧"（是仿真给得慢，还是我们处理不过来）。
     uint64_t last_source_sequence = 0;
-    long long dropped_frames = 0;
     long long dropped_since_print = 0;
-    int key = -1;
 
-    while (key != 27 && key != 'e' && key != 'E') {
+    while (true) {
         const double wall_seconds =
             std::chrono::duration<double>(std::chrono::steady_clock::now() - run_start).count();
         if (test_seconds > 0.0 && wall_seconds >= test_seconds) {
@@ -242,10 +247,8 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         }
 
         if (!video_mode) {
-            // 遥测（仿真真值）：命中/计分/激活 + 仿真时钟偏移，全部交给诊断层。
-            auto_aim::energy::rune_diag::consumeTelemetry(
-                input.pollTelemetry(), input.groundTruth(), rune_mode_name,
-                telemetry_stats, &scored_hit_this_frame);
+            consumeTelemetry(input.pollTelemetry(), rune_mode_name, telemetry_stats,
+                             scored_hit_this_frame);
             if (freeze_mode == GimbalFreezeMode::AfterActivation && !gimbal_frozen &&
                 telemetry_stats.scored > 0) {
                 gimbal_frozen = true;
@@ -262,17 +265,15 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         }
 
         rune_input_frame = {};
-        const auto stage_read_start = std::chrono::steady_clock::now();
         if (!input.readFrame(rune_input_frame)) {
             if (video_mode) break;
             ++missing_frames;
             if (missing_frames == 1 || missing_frames % 60 == 0) {
                 std::cerr << "Waiting for simulator frames..." << std::endl;
             }
-            key = cv::waitKey(1);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
             continue;
         }
-        profiler.add("read", stage_ms(stage_read_start));
         if (rune_input_frame.sequence > 0 && last_source_sequence > 0 &&
             rune_input_frame.sequence > last_source_sequence + 1) {
             dropped_since_print += static_cast<long long>(rune_input_frame.sequence -
@@ -308,19 +309,15 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         // calibrated in; feed the current absolute gimbal angles.
         solver.setCameraPose(commanded_yaw, commanded_pitch);
 
-        const auto stage_detect_start = std::chrono::steady_clock::now();
         std::optional<auto_aim::energy::PowerRune> rune =
             config.detector.multi_candidate ? detector->detect(frame, timestamp)
                                             : detector->detectBest(frame, timestamp);
-        profiler.add("detect", stage_ms(stage_detect_start));
         // 采样时刻放在**推理之后**：`now` 要参与瞄准的提前量计算
         //   detection_age = now - timestamp(曝光时刻)
         // 现在它包含"传输 + 排队 + 推理(实测 p50 41 ms)"的全部延迟，云台锁上新片
         // 的那几帧才不会系统性滞后（现场反馈：归中后重新锁片时总差一点、抖动大）。
         const double now = auto_aim::StandardClock::nowSeconds();
-        const auto stage_solve_start = std::chrono::steady_clock::now();
         solver.solve(rune);
-        profiler.add("solve", stage_ms(stage_solve_start));
         // ---- 扇叶 ID：把当帧观测喂给槽位格点，取出 1..5 号位的记账 ----------
         // **必须在喂估计器之前**：格点同时给出"本帧锁定的那片相对跟踪槽位偏了几个
         // 槽位"，观测到已激活片时估计器要靠它把观测折算回跟踪槽位（不然瞄点会整跳
@@ -388,7 +385,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             rune->slot_offset = slot_snapshot.observed_offset;
             rune->slot_offset_valid = true;
         }
-        const auto stage_target_start = std::chrono::steady_clock::now();
         // 把网络给的像素直接注入估计器：同一刚体的每一片都提供一组几何约束。
         if (rune.has_value() && rune->solved) {
             auto_aim::energy::RunePixelModel pixel_model;
@@ -435,7 +431,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             target.clearPixelModel();
         }
         target.getTarget(rune, timestamp);
-        profiler.add("target+lattice", stage_ms(stage_target_start));
         // 换叶信号：估计器确认"观测接管"时才认为换叶（见 RuneTarget::bladeSwitched）。
         // 检测层的相位关联在换叶后必须重新捕获（否则方向/相位残留会挡掉新靶）。
         aimer.setObservedBladeSwitch(target.bladeSwitched());
@@ -528,7 +523,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             fire_frame.activated = slot_activation;
         }
         fire_gate.update(fire_frame, now);
-        const auto fire_snapshot = fire_gate.snapshot();
         const bool fire_engageable = fire_gate.engageable();
         // 提前量用的"帧到瞄准延迟"：优先用曝光时刻做主时钟；瞬时值抖动大，做 EMA。
         if (config.aimer.frame_time_from_exposure) {
@@ -546,15 +540,12 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         //      稳得多，也不会被解缠影响。
         constexpr double kSlot = 2.0 * CV_PI / 5.0;
         double aim_phase = std::numeric_limits<double>::quiet_NaN();
-        double aim_phase_full = std::numeric_limits<double>::quiet_NaN();
         if (rune.has_value() && rune->solved) {
             const cv::Point2f center = rune->r_center;
             const cv::Point2f aim = rune->target().center;
             const double aim_angle = std::atan2(aim.y - center.y, aim.x - center.x);
             aim_phase = std::fmod(aim_angle, kSlot);
             if (aim_phase < 0.0) aim_phase += kSlot;
-            aim_phase_full = std::fmod(aim_angle * 180.0 / CV_PI, 360.0);
-            if (aim_phase_full < 0.0) aim_phase_full += 360.0;
         }
         {
             auto_aim::energy::RuneRoundGuard::Frame round_frame;
@@ -581,9 +572,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         }
         const auto round_snapshot = round_guard.snapshot();
         scored_hit_this_frame = false;
-        fired_this_frame = false;
-        aim_err_yaw_deg = -1.0;
-        aim_err_pitch_deg = -1.0;
 
         // 瞄准解算：aim_in_control=true 时由控制线程按 100 Hz 用"当前时刻"重算
         // （sp_vision 的 commandgener 结构），这里只发布状态、并取回它算出的指令。
@@ -623,22 +611,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             command = (observation_fresh && !round_snapshot.hold)
                           ? aimer.aim(predicted, timestamp, now, smoothed_lead_latency_s)
                           : aimer.aimCenter(predicted, timestamp, now, smoothed_lead_latency_s);
-        }
-
-        // 静态瞄点试射（判决实验）：固定角度 + 固定间隔开火，绕过目标相关闸门。
-        // 用来分离"弹道/发射模型对不对"和"动态瞄准（提前量/云台到位）好不好"：
-        // 瞄在轨道上（半径 0.7 m ≈ ±6.6°）应能稳定打中；0°（符心）打不到。
-        bore_sight.apply(command, now);
-
-        // 瞄准点（命中时刻的预测靶心）反投影到图像：用于曲线/误差归因。
-        cv::Point2f aim_pixel(0.0f, 0.0f);
-        Eigen::Vector3d aim_world = Eigen::Vector3d::Zero();
-        double aim_roll_deg = 0.0;
-        if (command.control && predicted.ekfX().size() > 5) {
-            const double radius = observation_fresh ? config.aimer.target_radius_m : 0.0;
-            aim_world = predicted.pointBuffToWorld(Eigen::Vector3d(0.0, 0.0, radius));
-            aim_pixel = solver.projectToImage(aim_world);
-            aim_roll_deg = predicted.ekfX()[5] * 180.0 / CV_PI;
         }
 
         const bool window_open = round_guard.windowOpen(command.fly_time);
@@ -702,35 +674,23 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                 // **击发时刻云台是否真的到了瞄点**。这里用轨迹生成器的
                 // 状态快照（含期望角与误差）作判据，fire_thresh 是容差。
                 const auto aim_snapshot = gimbal_controller.snapshot();
-                if (aim_snapshot.valid) {
-                    aim_err_yaw_deg = aim_snapshot.yaw_error * 180.0 / CV_PI;
-                    aim_err_pitch_deg = aim_snapshot.pitch_error * 180.0 / CV_PI;
-                }
                 const double fire_thresh = config.fire_thresh_deg * CV_PI / 180.0;
                 const bool aim_ready =
                     aim_snapshot.valid && std::abs(aim_snapshot.yaw_error) <= fire_thresh &&
                     std::abs(aim_snapshot.pitch_error) <= fire_thresh;
                 // 火控闸门只来自 RuneFireGate；“帧级”和“控制线程”共用同一结果。
                 const bool blade_engageable = fire_engageable;
-                if (rune_diag::debugEnabled()) {
-                    // 开火被哪个闸门挡住，是调"每轮命中节奏"的关键信息。
-                    rune_diag::printFireGateDebug({command.shoot, command.blade_switched,
-                                                   aim_ready, round_snapshot.hold,
-                                                   blade_engageable, window_open});
-                }
                 const bool fire_request = aim_in_control && aim_bridge.consumeFireRequest();
                 // aim_in_control 模式下开火判据已经在控制线程里用"同一时刻"的三个
                 // 条件判过（见 provider），这里只负责真正发火，不再用 30 Hz 的采样值
                 // 二次裁决（否则会把已经判好的火又挡掉）。
                 const bool fire_ok =
-                    bore_sight.enabled
-                        ? (command.shoot && fire_enabled && !gimbal_frozen)
-                        : (aim_in_control
-                               ? (fire_request && fire_enabled && !gimbal_frozen &&
-                                  blade_engageable)
-                               : (command.shoot && fire_enabled && !gimbal_frozen &&
-                                  !command.blade_switched &&
-                                  aim_ready && (!round_snapshot.hold) && blade_engageable));
+                    aim_in_control
+                        ? (fire_request && fire_enabled && !gimbal_frozen &&
+                           blade_engageable)
+                        : (command.shoot && fire_enabled && !gimbal_frozen &&
+                           !command.blade_switched && aim_ready &&
+                           (!round_snapshot.hold) && blade_engageable);
                 if (fire_ok) {
                     input.sendFire();
                     ++shots_fired;
@@ -746,8 +706,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                     } else if (rune.has_value()) {
                         last_fired_center = rune->target().center;
                     }
-                    // 记录"真的发了这一发"，供离线归因（CSV 列 fired）。
-                    fired_this_frame = true;
                 } else if (command.shoot && fire_enabled && !window_open) {
                     ++shots_held_for_window;
                 }
@@ -819,99 +777,49 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                           << std::endl;
             }
         }
-        if (command.shoot && !fire_enabled) {
-            rune_diag::printFireSuppressed(command);
-        }
-
         ++frames;
-        if (rune_diag::debugEnabled()) {
-            // 逐帧状态轨迹（排查"跟丢/云台跑偏"只能靠它），格式在诊断层。
-            rune_diag::printFrameDebug(
-                {frames, *detector, rune.has_value() ? &rune.value() : nullptr,
-                 commanded_yaw, commanded_pitch, command});
-        }
-        rune_diag::dumpFrame(frame_dir, frame, frames, saved_frames);
 
         const int status = static_cast<int>(detector->status());
         if (status != last_status) {
-            std::cout << "rune status -> " << rune_diag::runeStatusName(detector->status())
+            std::cout << "rune status -> " << statusName(detector->status())
                       << std::endl;
             last_status = status;
         }
 
-        if (recorder) {
-            // 逐帧诊断行：本循环只把"来源"凑齐，列的搬运/格式化在诊断层
-            // （rune_diag::makeRow，见 rune_diag.cpp）。
-            auto_aim::energy::rune_diag::RuneDiagSources sources{
-                *detector, target, rune.has_value() ? &rune.value() : nullptr, command};
-            sources.local_time_us = frame_local_timestamp_us;
-            sources.sent_yaw = commanded_yaw;
-            sources.sent_pitch = commanded_pitch;
-            sources.aim_phase_deg = aim_phase_full;
-            sources.aim_err_yaw_deg = aim_err_yaw_deg;
-            sources.aim_err_pitch_deg = aim_err_pitch_deg;
-            sources.fired = fired_this_frame;
-            sources.gate_hold = round_snapshot.hold;
-            sources.gate_window_open = window_open;
-            sources.gate_engageable = fire_engageable;
-            sources.fire_slot = fire_snapshot.planned_slot;
-            sources.fire_slot_class = fire_snapshot.planned_slot_class;
-            sources.fire_slot_activated = fire_snapshot.slot_activated;
-            sources.fire_latched = fire_snapshot.latched;
-            sources.blade_searching = blade_selection.searching;
-            sources.blade_selected_slot = blade_selection.planned_slot;
-            sources.blade_selected_class = blade_selection.target_class;
-            sources.blade_selected_confirmed = blade_selection.confirmed;
-            sources.aim_pixel = aim_pixel;
-            sources.aim_world = aim_world;
-            sources.aim_roll_deg = aim_roll_deg;
-            sources.slot_id = slot_snapshot.slot_id;
-            sources.slot_activated = slot_snapshot.activated;
-            sources.slot_votes = slot_snapshot.votes;
-            sources.slot_centers = slot_snapshot.slot_centers;
-            sources.gimbal_frozen = gimbal_frozen;
-            sources.sigma_dis_m = target.distanceSigma();
-            sources.sigma_roll_deg = target.phaseSigma() * 180.0 / CV_PI;
-            sources.sim_offset_valid = telemetry_stats.sim_offset_valid;
-            sources.sim_offset_s = telemetry_stats.sim_offset_s;
-            const auto stage_csv_start = std::chrono::steady_clock::now();
-            auto_aim::energy::rune_diag::writeRow(
-                recorder, auto_aim::energy::rune_diag::makeRow(sources));
-            profiler.add("csv", stage_ms(stage_csv_start));
-        }
-
-        const char* dump_setting = std::getenv("ULTRA_VISION_RUNE_DUMP");
-        const bool dump_enabled = dump_setting != nullptr;
-        // 叠加显示 / 落盘 PNG / imshow 全在诊断层（rune_diag::presentFrame）；
-        // 两者都关掉时它只让出 1 ms，保持原来的帧节奏。
-        auto_aim::energy::rune_diag::RuneOverlayInput overlay{
-            *detector, target, solver, command, predicted,
-            rune.has_value() ? &rune.value() : nullptr, config.mode, fire_enabled};
-        key = rune_diag::presentFrame(frame, overlay, show_display, dump_setting, dump_enabled);
-
         const auto now_steady = std::chrono::steady_clock::now();
         const double elapsed = std::chrono::duration<double>(now_steady - fps_start).count();
         if (elapsed >= 1.0) {
-            rune_diag::printFpsLine(frames / elapsed, *detector, target, command,
-                                    dropped_since_print);
-            dropped_frames += dropped_since_print;
+            std::cout << "Energy rune FPS: " << frames / elapsed
+                      << ", nn_ms: " << detector->latencyMs()
+                      << ", lost: " << detector->lostCount()
+                      << ", solvable: " << !target.isUnsolvable()
+                      << ", control: " << command.control
+                      << ", fire: " << command.shoot;
+            if (dropped_since_print > 0) std::cout << ", dropped: " << dropped_since_print;
+            std::cout << std::endl;
             dropped_since_print = 0;
-            profiler.flushAndReset();
             fps_start = now_steady;
             frames = 0;
         }
     }
-
-    cv::destroyAllWindows();
 
     // 退出顺序：必须先停控制线程，再让它引用的对象析构。aim_bridge 是后构造的
     // （先析构），而控制线程的 provider 会回调 aim_bridge 的互斥量；不显式 join
     // 的话线程会去锁一个已经析构的 mutex（实测退出时 abort）。
     gimbal_controller.stop();
 
-    rune_diag::printSummary(shots_fired, telemetry_stats, shots_held_for_window,
-                            fallback.parkedFrames(), fallback.recenterCount(),
-                            trace.stepsDeg(), trace.ratesDegPerSec());
+    std::cout << "=== rune run summary (simulator ground truth) ===" << std::endl
+              << "  shots fired     : " << shots_fired << std::endl
+              << "  hits on target  : " << telemetry_stats.hits << std::endl
+              << "  scored hits     : " << telemetry_stats.scored << std::endl
+              << "  activations     : " << telemetry_stats.activations << std::endl
+              << "  shots held back : " << shots_held_for_window << std::endl
+              << "  parked frames   : " << fallback.parkedFrames() << std::endl
+              << "  recenter count  : " << fallback.recenterCount() << std::endl;
+    if (telemetry_stats.first_activation_s >= 0.0) {
+        std::cout << "  activation at   : " << telemetry_stats.first_activation_s
+                  << " s (sim clock)" << std::endl;
+    }
 
     return 0;
 }
