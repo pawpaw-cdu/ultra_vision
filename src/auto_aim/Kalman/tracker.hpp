@@ -50,7 +50,6 @@ namespace auto_aim
         double watchdog_max_position_cov = 25.0;   // P 的位置对角 m²
         double watchdog_max_frame_gap = 0.20;      // 帧间隔上限 s
         int watchdog_min_converge_updates = 3;
-        bool hard_plate_constraint = true;
         double plate_lock_margin = 1.35;
         int min_detect_frames = 3;
         int max_lost_frames = 15;
@@ -101,7 +100,6 @@ namespace auto_aim
         double range_gate_sigma = 2.0;
         double range_gate_max = 1.00;         // m
         double angle_match_weight = 0.08;
-        double pnp_yaw_trust_deg = 25.0;
         bool geometry_learn = true;
         double geometry_learn_gain = 0.05;        // 每帧最多修 5%
         double geometry_learn_max_step = 0.004;   // 单帧最大 4 mm
@@ -110,24 +108,15 @@ namespace auto_aim
         double geometry_learn_max_omega = 1.0;    // rad/s；<=0 表示不限
         bool geometry_learn_height = false;
 
-        bool nearest_plate_constraint = true;
         bool reanchor_yaw_on_plate_switch = true;
 
-
-        bool joint_solve = true;
-        double joint_solve_max_residual = 0.06;   // 联立残差 > 6cm 视为不可信，不喂
-        double joint_solve_yaw_noise = 0.0004;    // (rad²) ≈ 1.1°
-        double joint_solve_center_noise = 0.0004; // (m²) ≈ 2cm
         double distance_noise_scale = 1.0;
         double armor_angle_noise_base = 0.09;
         double graze_gate_deg = 75.0;
         double graze_noise_scale = 100.0;  // 距离噪声放大倍数
-        double nearest_plate_margin_m = 0.05;   // 明显违反才翻（防抖）
         double position_nis_threshold = 7.815;
         double angle_nis_threshold = 3.841;
         bool soft_nis_gate = true;
-        bool mahalanobis_matching = false;
-        double association_chi2 = 9.488;   // χ²(4, 95%)
         std::array<double, 4> armor_y_offsets{{0.0, 0.0, 0.0, 0.0}};
 
     };
@@ -211,19 +200,7 @@ namespace auto_aim
         bool hasRotationRate() const { return rotation_rate_estimator_.valid(); }
         double getArmorRadius() const { return cfg_.armor_radius; }
         double getLastMeasurementWeight() const { return last_measurement_weight_; }
-        /// @brief "构造板一定最近"硬约束把 yaw 翻回来的累计次数（诊断用）。
-        int nearestPlateFlips() const { return nearest_plate_flips_; }
         double lastViewDeg() const { return last_view_deg_; }
-
-        /// @brief 同帧多板联立解 (车心, yaw)（home 系）。返回是否成功（残差 < limit）。
-        ///        几何用当前慢层的逐板半径；只解 1 个 yaw 自由度（1D 高斯-牛顿），
-        ///        车心由各板反推取平均。板对接近正对/相反（信息矩阵退化）时返回 false。
-        bool solveChassisFromPlates(const std::vector<std::pair<int, Vec<3>>>& plates,
-                                    Vec<3>& center_out, double& yaw_out,
-                                    double& residual_out) const;
-        int jointSolveCount() const { return joint_solves_; }
-        double jointSolveResidual() const { return joint_solve_residual_; }
-        double jointSolveYaw() const { return joint_solve_yaw_; }
 
         /// @brief 收敛看门狗统计：触发次数 / 当前拒绝比例 / 是否收敛。
         struct WatchdogStats
@@ -259,13 +236,6 @@ namespace auto_aim
         ArmorEKF ekf_;
         /// 底盘慢层几何（唯一模型来源；由 config / 观测慢收敛更新）。
         ChassisGeometry geometry_;
-        /// "最近板硬约束"把 yaw 翻回来的次数（诊断：正常应长期为 0，只有翻解时才动）。
-        int nearest_plate_flips_ = 0;
-        /// 连续多少帧处在"观测板落到远半侧"（两条确认才翻，防单帧异常）。
-        int nearest_plate_violation_frames_ = 0;
-        int joint_solves_ = 0;
-        double joint_solve_residual_ = -1.0;
-        double joint_solve_yaw_ = 0.0;
         int previous_plate_id_ = -1;
         double last_view_deg_ = -1.0;
 

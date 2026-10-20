@@ -232,38 +232,6 @@ public:
         return updateYpdBatch(observations, nis_threshold);
     }
 
-    /// @brief YPD 观测的**马氏距离平方** d² = rᵀ·S⁻¹·r，S = H·P·Hᵀ + R。
-    /// 返回 +inf 表示未初始化 / plate_id 非法 / S 不可逆（调用方应放弃这一对）。
-    double ypdMahalanobisSquared(const YpdObservation& observation) const {
-        const double inf = std::numeric_limits<double>::infinity();
-        if (!initialized_) return inf;
-        if (observation.plate_id < 0 || observation.plate_id >= 4) return inf;
-        const YpdObservation predicted = predictYpd(observation.plate_id);
-        const Vec<4> residual = ypdResidual(observation, predicted);
-        const Matrix<4, kStateDim> jacobian = ypdJacobian(observation.plate_id);
-
-        Matrix<4, 4> noise;
-        noise(0, 0) = std::max(observation.yaw_noise, 1e-8);
-        noise(1, 1) = std::max(observation.pitch_noise, 1e-8);
-        noise(2, 2) = std::max(observation.distance_noise, 1e-8);
-        noise(3, 3) = std::max(observation.armor_yaw_noise, 1e-8);
-
-        const Matrix<4, 4> innovation =
-            jacobian * P_ * jacobian.transpose() + noise;
-        Matrix<4, 4> innovation_inverse;
-        if (!Matrix<4, 4>::invert(innovation, innovation_inverse)) return inf;
-
-        double squared = 0.0;
-        for (int row = 0; row < 4; ++row) {
-            for (int column = 0; column < 4; ++column) {
-                squared += residual(row, 0) * innovation_inverse(row, column) *
-                    residual(column, 0);
-            }
-        }
-        if (!std::isfinite(squared)) return inf;
-        return std::max(0.0, squared);
-    }
-
     double updateYpdBatch(
         const std::vector<YpdObservation>& observations,
         double nis_threshold = std::numeric_limits<double>::infinity()) {

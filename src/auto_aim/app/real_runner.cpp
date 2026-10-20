@@ -1699,10 +1699,6 @@ int auto_aim::app::RealRunner::run()
                                     tracker.chassisGeometry().distance(3))
                       // view=被选中那块板的视视角（度）：>graze_gate_deg 时该板的
                       // PnP 径向/距离会被降权（只信 bearing）。调门限就看这个数。
-                      // joint=同帧多板联立解 (车心,yaw) 的次数 + 最近一次残差(m)。
-                      // res 很小(<2cm) 说明两块板都被模型解释；n 不涨说明同帧没两块可信板。
-                      << " joint=" << tracker.jointSolveCount() << " jres="
-                      << tracker.jointSolveResidual()
                       << " view=" << tracker.lastViewDeg()
                       // 逐板高度（cm，向上为正）——默认应恒为 0.0/0.0/0.0/0.0；
                       // 若它在漂，就是"高度学习"在随机游走（默认已关）。
@@ -1712,7 +1708,6 @@ int auto_aim::app::RealRunner::run()
                                     tracker.chassisGeometry().height(1) * 100.0,
                                     tracker.chassisGeometry().height(2) * 100.0,
                                     tracker.chassisGeometry().height(3) * 100.0)
-                      << ", np_flip=" << tracker.nearestPlateFlips()
                       << ", R=" << tracker.getArmorRadius()
                       << ", model_age=" << observation_age * 1000.0 << "ms"
                       << ", send=" << sent_yaw_now.load(std::memory_order_relaxed) * 180.0 / CV_PI

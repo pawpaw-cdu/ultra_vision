@@ -30,7 +30,7 @@ serial:
   #   2026-10-10 实车 A/B（云台不动、只观察）：
   #     pitch_sign=+1 → 重投影模型"越远的板画得越靠下"，底盘前后关系反了，model_fit 几十 px；
   #     pitch_sign=-1 → 模型四块板与底盘对得上，model_fit 掉到 ~10 px 量级。
-  #   注：被 hard_plate_constraint 钉住的那块板两种符号下都贴得住（自洽），只有另外三块能暴露。
+  #   注：单块观测板对两种符号都可能自洽，只有其余三块能暴露符号错误。
   #   现场复测：ULTRA_VISION_PITCH_SIGN=±1 覆盖本值，比 model_fit 取小者。
   pitch_sign: -1.0
 

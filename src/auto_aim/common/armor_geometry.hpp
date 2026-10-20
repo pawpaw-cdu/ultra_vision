@@ -75,8 +75,7 @@ namespace auto_aim
     ///     端点深度不同）被错误配对，产生系统性重投影偏差。
     ///
     /// 数学与 `perception/pnp_solver.cpp` 原先的局部 `armorBasis` **逐位一致**，
-    /// 提取到这里是为了让刚体几何与 `refineArmorYaw` 共用同一份约定
-    /// （ψ 的含义必须完全相同，否则"拟合器给的 yaw"接不进 2D 优化）。
+    /// 提取到这里是为了让所有刚体几何共用同一份 ψ 约定。
     ///
     /// @param psi   板法向在相机 x-z 平面内的方位角（rad），`atan2(n_z, n_x)`
     /// @param pitch 机械俯仰（RM 规范 ≈15°）

@@ -404,31 +404,6 @@ int main()
         }
     }
 
-    // ---- 构造板一定最近（硬约束）----------------------------------------------
-    {
-        // 硬约束"观测板一定离相机最近"：干净（物理）观测流不该误触发，
-        //    且车心必须始终在观测板**后面**（画面上更靠上）。
-        auto_aim::Tracker nearest_tracker(tracker_config);
-        constexpr double kSpin = 3.0;
-        for (int frame = 0; frame <= 60; ++frame) {
-            const double time = frame * tracker_dt;
-            const int visible = nearestPlate(0.0, kSpin, time);
-            auto armor = makeTrackerArmor(tracker_center_z, 0.0, kSpin, time, visible, radius);
-            nearest_tracker.update(std::vector<auto_aim::Armor>{armor}, time);
-            if (frame < 20) continue;
-            // 相机在原点（本用例没有姿态）：车心到相机 > 板到相机
-            const double plate_d = std::sqrt(
-                armor.tvec.at<double>(0) * armor.tvec.at<double>(0) +
-                armor.tvec.at<double>(2) * armor.tvec.at<double>(2));
-            const auto center = nearest_tracker.getTargetCenterArray();
-            const double center_d = std::sqrt(center[0] * center[0] + center[2] * center[2]);
-            passed &= expect(center_d > plate_d - 0.02,
-                             "chassis center must stay behind the nearest observed plate");
-        }
-        passed &= expect(nearest_tracker.nearestPlateFlips() == 0,
-                         "a clean nearest-plate stream must not trip the hard constraint");
-    }
-
     // ---- l/h 状态（sp_vision_25 的分组长短轴）：能否在线收敛 ------------------
     // 造一个"矩形底盘 + 前后板更高"的靶：{0,2} 组 R=0.20/h=0，{1,3} 组 R=0.25/h=+3cm。
     // 真值 l=+0.05 m、h=+0.03 m。滤波器从 l=h=0 出发，应能在几十帧内收敛到真值。
@@ -461,9 +436,6 @@ int main()
 
         auto_aim::TrackerConfig geo_cfg = tracker_config;
         geo_cfg.geometry_learn = false;   // 只看滤波器状态能不能收敛（不靠慢层学习）
-        // 硬钉会把"观测板的位置残差"整个平移进车心 → l/h 拿不到信息（这也是
-        // sp_vision 不需要硬钉的原因：它的状态本身能解释几何）。这里关掉硬钉。
-        geo_cfg.hard_plate_constraint = false;
         auto_aim::Tracker geo_tracker(geo_cfg);
         // 注意：l 的信息来自"观测板绕中心的轨迹是圆还是圆角方"（偏心量 ≈ l/2 = 2.5cm，
         // 与位置噪声同量级）→ 必须转过**整圈以上**才收敛。取 2 rad/s × 8s ≈ 2.5 圈。
@@ -499,54 +471,6 @@ int main()
                   << " (true " << kH1 << ")" << std::endl;
     }
 
-    // ---- 同帧多板联立解 (车心, yaw) -----------------------------------------
-    // 两块板 90° 同现时，用**位置**解 (车心, yaw)；即使初始 yaw 差 25° 也必须收敛，
-    // 而且模型的两块板都要落在观测上（这是联合解存在的意义）。
-    {
-        auto_aim::TrackerConfig joint_cfg = tracker_config;
-        joint_cfg.joint_solve = true;
-        auto_aim::Tracker joint_tracker(joint_cfg);
-        constexpr double kCenterZ = 4.0;
-        constexpr double kTrueYaw = 0.6;
-        constexpr double kR = 0.22;
-        // 两块相邻板（id 2 与 id 3），位置按真值造
-        std::vector<auto_aim::Armor> armors;
-        for (int plate : {2, 3}) {
-            armors.push_back(makeTrackerArmor(kCenterZ, kTrueYaw, 0.0, 0.0, plate, kR));
-        }
-        // 先用一帧建立状态（初始 yaw 会由第一块板决定，故意偏 25°）
-        double t = 0.0;
-        for (int frame = 0; frame < 40; ++frame) {
-            t = frame * tracker_dt;
-            std::vector<auto_aim::Armor> obs;
-            for (int plate : {2, 3})
-                obs.push_back(makeTrackerArmor(kCenterZ, kTrueYaw, 0.0, t, plate, kR));
-            joint_tracker.update(obs, t);
-        }
-        // 注意：四块板 90° 对称 ⇒ "yaw" 只在**模 90°** 意义下有定义（整体差 90°
-        // 是等价解，画出来完全一样）。所以按模 90° 比较，并按"板位置集合"比较。
-        const double yaw_err = std::abs(std::remainder(
-            joint_tracker.getYawWorld() - kTrueYaw, 0.5 * kPi));
-        passed &= expect(yaw_err < 0.05,
-                         "two-plate joint solve must pin the chassis phase (mod 90 deg, ~3deg)");
-        passed &= expect(joint_tracker.jointSolveCount() > 0,
-                         "joint solve must actually run when two plates are seen");
-        // 两块板都要贴合（**无标签**比较：每块观测板到最近模型板的距离）
-        const auto model = joint_tracker.modelAt(0.0);
-        for (int plate : {2, 3}) {
-            const double phase = kTrueYaw + auto_aim::ArmorEKF::angleForPlate(plate);
-            const cv::Vec3d truth(kR * std::cos(phase), 0.0, kCenterZ + kR * std::sin(phase));
-            double best = 1e9;
-            for (int m = 0; m < 4; ++m)
-                best = std::min(best, cv::norm(model.poses[m].center - truth));
-            passed &= expect(best < 0.03,
-                             "joint solve must place BOTH observed plates on their detections");
-        }
-        std::cout << "joint solve: yaw_err(mod90)=" << yaw_err * 180.0 / kPi
-                  << "deg residual=" << joint_tracker.jointSolveResidual()
-                  << "m count=" << joint_tracker.jointSolveCount() << std::endl;
-    }
-
     // ---- PnP yaw 翻解保护（pnp_yaw_trust_deg）-------------------------------
     // 平面靶 IPPE 有两个解：同一块板的 yaw 会跳（实测 ±12°，极端镜像）。位置（bearing）
     // 是良态的，所以位置对、yaw 被翻的观测流必须：① 仍然选对板；② 不把整车模型带歪；
@@ -573,9 +497,8 @@ int main()
             double omega_error = 0.0;
             int wrong_plate_frames = 0;
         };
-        auto run = [&](double trust_deg) {
+        auto run = [&]() {
             auto_aim::TrackerConfig cfg = tracker_config;
-            cfg.pnp_yaw_trust_deg = trust_deg;
             auto_aim::Tracker tracker(cfg);
             constexpr double kCenterZ = 4.0;
             constexpr double kOmega = 2.0;
@@ -616,22 +539,17 @@ int main()
             return out;
         };
 
-        const YawFlipResult guarded = run(25.0);
-        const YawFlipResult naive = run(0.0);     // 老行为：yaw 无门控
+        const YawFlipResult result = run();
         // 断言只钉"门控到底治了什么"：**差分测速**不该被翻解污染。
         // （模型/板号的绝对正确性在"构造板一定最近"的硬约束与关联用例里验；
         //  单板 + yaw 完全不可用时，相位本身就有 90° 不确定性，不该在这里断言。）
         // 注意：自从差分测速改喂"底盘 yaw"（灯条径向角 − 该板相位偏移）之后，
         // 翻解对 ω 的污染本身就小多了 —— 两条路都能守住 ω。所以这里只断言
         // "ω 不被翻解带坏"，不再要求 naive 更差（那条旧断言已不成立）。
-        passed &= expect(guarded.omega_error < 0.30 && naive.omega_error < 0.30,
+        passed &= expect(result.omega_error < 0.30,
                          "differenced omega must stay clean under flipped PnP yaw (chassis-yaw input)");
-        std::cout << "yaw-flip: guarded med/max_plate_err=" << guarded.median_plate_error << "/"
-                  << guarded.max_plate_error
-                  << " omega_err=" << guarded.omega_error
-                  << " | naive med/max_plate_err=" << naive.median_plate_error << "/"
-                  << naive.max_plate_error
-                  << " omega_err=" << naive.omega_error << std::endl;
+        std::cout << "yaw-flip: med/max_plate_err=" << result.median_plate_error << "/"
+                  << result.max_plate_error << " omega_err=" << result.omega_error << std::endl;
     }
 
     // ---- 装甲板模型（双模型低速档，上科大 2026 §9.4.4）----------------------
@@ -763,14 +681,10 @@ int main()
     // 这里喂确定性观测流（单板可见、可见板号随旋转切换、带 PnP 噪声）做 A/B：
     // adaptive_association_gate + soft_nis_gate 打开能收敛，关闭（旧行为）不能。
     {
-        const auto spin_omega = [&](bool adaptive, bool soft, bool mahalanobis,
-                                    double yaw_trust_deg = 25.0) {
+        const auto spin_omega = [&](bool adaptive, bool soft) {
             auto_aim::TrackerConfig spin_config = tracker_config;
             spin_config.adaptive_association_gate = adaptive;
             spin_config.soft_nis_gate = soft;
-            spin_config.mahalanobis_matching = mahalanobis;
-            // 0 = 老的 yaw 硬门限关联（A/B 用；见 pnp_yaw_trust_deg）
-            spin_config.pnp_yaw_trust_deg = yaw_trust_deg;
             auto_aim::Tracker spin_tracker(spin_config);
             std::mt19937 rng(20261005u);
             constexpr double spin_rate = 5.0;
@@ -804,15 +718,11 @@ int main()
             }
             return spin_tracker.getOmega();
         };
-        const double spin_maha = spin_omega(true, true, true);
-        const double spin_new = spin_omega(true, true, false);
+        const double spin_new = spin_omega(true, true);
         // legacy = 老的 yaw 硬门限关联（把 pnp_yaw_trust_deg 设 0 才等价于旧行为）
-        const double spin_old = spin_omega(false, false, false, /*yaw_trust_deg=*/0.0);
-        std::cout << "5rad/s deterministic: mahalanobis=" << spin_maha
-                  << " adaptive_gate=" << spin_new
+        const double spin_old = spin_omega(false, false);
+        std::cout << "5rad/s deterministic: adaptive_gate=" << spin_new
                   << " legacy=" << spin_old << std::endl;
-        passed &= expect(std::abs(spin_maha - 5.0) < 1.0,
-                         "5 rad/s must converge with Mahalanobis association");
         passed &= expect(std::abs(spin_new - 5.0) < 1.0,
                          "5 rad/s must converge with the adaptive association gate");
         passed &= expect(std::abs(spin_old - 5.0) > 1.0,

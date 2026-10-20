@@ -38,15 +38,6 @@ namespace auto_aim
         }
         const auto observation = armorYpdObservation(armor, plate_id, cfg_);
         if (observation) {
-            // 马氏距离关联：代价 = d²，门限 = χ²(4,95%)。
-            // S 已按逐维度噪声归一化，所以不需要再手调"角度多少度算换板"。
-            if (cfg_.mahalanobis_matching && ekf_.isInit()) {
-                const double squared = ekf_.ypdMahalanobisSquared(*observation);
-                if (!std::isfinite(squared) || squared > cfg_.association_chi2) {
-                    return std::numeric_limits<double>::infinity();
-                }
-                return std::sqrt(squared);
-            }
             const YpdObservation predicted = ekf_.predictYpd(plate_id);
             const double yaw_error = ArmorEKF::normalizeAngle(
                 observation->yaw - predicted.yaw);
@@ -55,10 +46,6 @@ namespace auto_aim
             const double range_error = observation->distance - predicted.distance;
             const double armor_angle_error = std::abs(ArmorEKF::normalizeAngle(
                 observation->armor_yaw - predicted.armor_yaw));
-            const double yaw_trust = cfg_.pnp_yaw_trust_deg * M_PI / 180.0;
-            const bool yaw_usable = (cfg_.pnp_yaw_trust_deg <= 0.0)
-                ? true
-                : (armor_angle_error <= yaw_trust);
             double range_gate = cfg_.max_match_distance;
             if (cfg_.adaptive_association_gate && ekf_.isInit()) {
                 const double range = std::max(0.5, predicted.distance);
@@ -68,30 +55,17 @@ namespace auto_aim
                                       cfg_.max_match_distance +
                                           cfg_.range_gate_sigma * sigma_range);
             }
-            const double bearing_distance = predicted.distance *
-                std::hypot(yaw_error, pitch_error);
-            double bearing_gate = cfg_.max_match_distance;
-            if (cfg_.adaptive_association_gate && ekf_.isInit()) {
-                // 滤波器自己的 yaw 不确定度 → 预测距离处的横向位置不确定度（米）。
-                bearing_gate = std::min(
-                    cfg_.range_gate_max,
-                    cfg_.max_match_distance +
-                        cfg_.association_gate_sigma * ekf_.yawStd() * predicted.distance);
-            }
             if (std::abs(range_error) > range_gate) {
                 return std::numeric_limits<double>::infinity();
             }
-            if (cfg_.pnp_yaw_trust_deg <= 0.0) {
-                if (armor_angle_error > angle_gate) {
-                    return std::numeric_limits<double>::infinity();
-                }
-            } else if (bearing_distance > bearing_gate) {
-                // 只用**位置**（bearing 距离）当门限；yaw 只做弱项（见上）。
+            if (armor_angle_error > angle_gate) {
                 return std::numeric_limits<double>::infinity();
             }
 
+            const double bearing_distance =
+                predicted.distance * std::hypot(yaw_error, pitch_error);
             return bearing_distance + std::abs(range_error) +
-                (yaw_usable ? cfg_.angle_match_weight * armor_angle_error : 0.0);
+                cfg_.angle_match_weight * armor_angle_error;
         }
 
         const double position_distance = distanceToPlate(armor.tvec, plate_id);

@@ -169,13 +169,6 @@ namespace auto_aim
             geometry.small_width = pnp["small_width"].as<float>(geometry.small_width);
             geometry.large_width = pnp["large_width"].as<float>(geometry.large_width);
             geometry.height = pnp["height"].as<float>(geometry.height);
-            geometry.yaw_refine = pnp["yaw_refine"].as<bool>(geometry.yaw_refine);
-            geometry.yaw_refine_span_deg =
-                pnp["yaw_refine_span_deg"].as<float>(geometry.yaw_refine_span_deg);
-            geometry.yaw_refine_coarse_deg =
-                pnp["yaw_refine_coarse_deg"].as<float>(geometry.yaw_refine_coarse_deg);
-            geometry.armor_pitch_deg =
-                pnp["armor_pitch_deg"].as<float>(geometry.armor_pitch_deg);
         }
         return geometry;
     }

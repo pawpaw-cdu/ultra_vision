@@ -214,20 +214,6 @@ if(ULTRA_VISION_BUILD_TESTS)
   target_link_libraries(armor_ekf_test PRIVATE ${OpenCV_LIBS})
   add_test(NAME armor_ekf_test COMMAND armor_ekf_test)
 
-  # PnP 降自由度（fit_single）自检：注入角点噪声，比较 IPPE 与 1D yaw 精修的
-  # 径向角误差。径向角是 EKF 估 ω / 关联板号的关键观测量。
-  add_executable(pnp_yaw_refine_test
-      test/pnp_yaw_refine_test.cpp
-      perception/pnp_solver.cpp
-  )
-  target_include_directories(pnp_yaw_refine_test PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}
-      ${CMAKE_SOURCE_DIR}
-      ${OpenCV_INCLUDE_DIRS}
-  )
-  target_link_libraries(pnp_yaw_refine_test PRIVATE ${OpenCV_LIBS})
-  add_test(NAME pnp_yaw_refine_test COMMAND pnp_yaw_refine_test)
-
   # 模型构造（整车轮廓重投影）的几何自检：装甲板刚体姿态 + 15° 安装倾角。
   # 把模型构造的车辆系几何钉成恒等式，并回归掉历史三个坑
   # （世界系 yaw 造切向 / 观测板 rvec 当竖直 / 丢 tangent.y）。纯头文件，无额外依赖。

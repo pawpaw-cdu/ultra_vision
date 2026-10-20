@@ -73,14 +73,6 @@ namespace auto_aim
         bool yaw_trusted = true;
         if (ypd_observation) {
             YpdObservation observation = *ypd_observation;
-            if (cfg_.pnp_yaw_trust_deg > 0.0 && ekf_.isInit()) {
-                const double error = std::abs(ArmorEKF::normalizeAngle(
-                    observation.armor_yaw - ekf_.getPlateAngle(plate_id_)));
-                if (error > cfg_.pnp_yaw_trust_deg * M_PI / 180.0) {
-                    observation.armor_yaw_noise = 1e3;
-                    yaw_trusted = false;
-                }
-            }
             measurement_weight = ekf_.updateYpd(
                 observation,
                 effectiveNisThreshold(cfg_.soft_nis_gate, cfg_.ypd_nis_threshold));
@@ -310,14 +302,6 @@ namespace auto_aim
                     yaw_trusted = false;
                 }
             }
-            if (cfg_.pnp_yaw_trust_deg > 0.0 && ekf_.isInit()) {
-                const double error = std::abs(ArmorEKF::normalizeAngle(
-                    accepted.armor_yaw - ekf_.getPlateAngle(candidate.plate_id)));
-                if (error > cfg_.pnp_yaw_trust_deg * M_PI / 180.0) {
-                    accepted.armor_yaw_noise = 1e3;
-                    yaw_trusted = false;
-                }
-            }
             armor_used[candidate.armor_index] = true;
             plate_used[candidate.plate_id] = true;
             ypd_observations.push_back(accepted);
@@ -429,66 +413,6 @@ namespace auto_aim
                         anchor - cfg_.geometry_learn_range, anchor + cfg_.geometry_learn_range);
                 syncGeometryToEkf();
             }
-        }
-        if (cfg_.nearest_plate_constraint && ekf_.isInit() && camera_pose_.valid) {
-            const Matrix<3, 3> camera_to_home =
-                tracker_detail::cameraToWorldRotation(camera_pose_);
-            Vec<3> forward;                      // 相机光轴（+z）在 home 系里的方向
-            for (int i = 0; i < 3; ++i) forward(i, 0) = camera_to_home(i, 2);
-            const Vec<3> camera_home = tracker_detail::pointToWorld(camera_pose_, Vec<3>());
-            const Vec<3> observed = toVec(valid_pairs[best_armor_index].home.tvec);
-            const Vec<3> center = ekf_.getCenter();
-            const auto depth = [&](const Vec<3>& point) {
-                return (point(0, 0) - camera_home(0, 0)) * forward(0, 0) +
-                    (point(1, 0) - camera_home(1, 0)) * forward(1, 0) +
-                    (point(2, 0) - camera_home(2, 0)) * forward(2, 0);
-            };
-            if (depth(observed) > depth(center) + cfg_.nearest_plate_margin_m) {
-                if (++nearest_plate_violation_frames_ >= 2) {
-                    ekf_.flipChassisYaw();
-                    ++nearest_plate_flips_;
-                    nearest_plate_violation_frames_ = 0;
-                }
-            } else {
-                nearest_plate_violation_frames_ = 0;
-            }
-        } else {
-            nearest_plate_violation_frames_ = 0;
-        }
-        if (cfg_.joint_solve && ekf_.isInit() && accepted_pairs.size() >= 2) {
-            std::vector<std::pair<int, Vec<3>>> plates;
-            plates.reserve(accepted_pairs.size());
-            for (const auto& entry : accepted_pairs)
-                plates.emplace_back(entry.first, toVec(valid_pairs[entry.second].home.tvec));
-            Vec<3> center_solved;
-            double yaw_solved = 0.0;
-            double residual = 0.0;
-            if (solveChassisFromPlates(plates, center_solved, yaw_solved, residual) &&
-                residual <= cfg_.joint_solve_max_residual) {
-                ekf_.updateAngle(
-                    ArmorEKF::normalizeAngle(yaw_solved + ArmorEKF::angleForPlate(0)), 0,
-                    cfg_.joint_solve_yaw_noise,
-                    std::numeric_limits<double>::infinity());
-                ekf_.updateCenter(center_solved, cfg_.joint_solve_center_noise,
-                                  cfg_.y_noise_mult,
-                                  std::numeric_limits<double>::infinity());
-                ++joint_solves_;
-                joint_solve_residual_ = residual;
-                joint_solve_yaw_ = yaw_solved;
-            }
-        }
-
-        if (cfg_.hard_plate_constraint) {
-            const Vec<3> observed = toVec(valid_pairs[best_armor_index].home.tvec);
-            const Vec<3> predicted = ekf_.armorPosition(plate_id_);
-            if (std::getenv("ULTRA_VISION_CONSTRAINT_DEBUG") != nullptr) {
-                const Vec<3> error = observed - predicted;
-                const double mm = std::sqrt(error(0, 0) * error(0, 0) + error(1, 0) * error(1, 0) +
-                                            error(2, 0) * error(2, 0)) * 1000.0;
-                std::printf("[constraint] id=%d 约束前 |obs-pred| = %.1f mm（约束后按定义 = 0）\n",
-                            plate_id_, mm);
-            }
-            ekf_.shiftCenter(observed - predicted);
         }
         updateRotationRate(valid_pairs[best_armor_index].home, timestamp, best_yaw_trusted,
                            plate_id_);

@@ -110,7 +110,7 @@ namespace auto_aim
             result.fresh = true;
             result.armors = std::move(nn_result.armors);
             for (auto& armor : result.armors) {
-                // 传完整 PnpGeometry：yaml 里的 yaw_refine_* 精修参数才会生效。
+                // 传完整 PnpGeometry：尺寸与 PnP 保持同源。
                 armor.solve_result = solveArmorPnP(
                     armor, camera_matrix_, dist_coeffs_, config_.pnp);
                 if (armor.solve_result) ++result.pnp_count;

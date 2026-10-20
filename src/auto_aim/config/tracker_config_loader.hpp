@@ -51,8 +51,6 @@ namespace auto_aim
                                                 .as<int>(cfg.watchdog_min_converge_updates);
 
         // 把识别到的装甲板当硬约束（默认开）
-        cfg.hard_plate_constraint =
-            tracker["hard_plate_constraint"].as<bool>(cfg.hard_plate_constraint);
         cfg.plate_lock_margin =
             tracker["plate_lock_margin"].as<double>(cfg.plate_lock_margin);
 
@@ -132,26 +130,12 @@ namespace auto_aim
                 kalman["range_gate_sigma"].as<double>(cfg.range_gate_sigma);
             cfg.range_gate_max =
                 kalman["range_gate_max"].as<double>(cfg.range_gate_max);
-            cfg.mahalanobis_matching =
-                kalman["mahalanobis_matching"].as<bool>(cfg.mahalanobis_matching);
-            cfg.association_chi2 =
-                kalman["association_chi2"].as<double>(cfg.association_chi2);
             cfg.ypd_distance_sigma_coeff = kalman["ypd_distance_sigma_coeff"]
                                                .as<double>(cfg.ypd_distance_sigma_coeff);
             cfg.soft_nis_gate =
                 kalman["soft_nis_gate"].as<bool>(cfg.soft_nis_gate);
             cfg.angle_match_weight =
                 kalman["angle_match_weight"].as<double>(cfg.angle_match_weight);
-            // PnP 平面解 yaw 的可信门限（度）；0 = 关闭门控（见 TrackerConfig 注释）。
-            cfg.pnp_yaw_trust_deg =
-                kalman["pnp_yaw_trust_deg"].as<double>(cfg.pnp_yaw_trust_deg);
-            cfg.joint_solve = kalman["joint_solve"].as<bool>(cfg.joint_solve);
-            cfg.joint_solve_max_residual =
-                kalman["joint_solve_max_residual"].as<double>(cfg.joint_solve_max_residual);
-            cfg.joint_solve_yaw_noise =
-                kalman["joint_solve_yaw_noise"].as<double>(cfg.joint_solve_yaw_noise);
-            cfg.joint_solve_center_noise =
-                kalman["joint_solve_center_noise"].as<double>(cfg.joint_solve_center_noise);
             cfg.reanchor_yaw_on_plate_switch =
                 kalman["reanchor_yaw_on_plate_switch"].as<bool>(
                     cfg.reanchor_yaw_on_plate_switch);
@@ -162,10 +146,6 @@ namespace auto_aim
             cfg.graze_gate_deg = kalman["graze_gate_deg"].as<double>(cfg.graze_gate_deg);
             cfg.graze_noise_scale =
                 kalman["graze_noise_scale"].as<double>(cfg.graze_noise_scale);
-            cfg.nearest_plate_constraint =
-                kalman["nearest_plate_constraint"].as<bool>(cfg.nearest_plate_constraint);
-            cfg.nearest_plate_margin_m =
-                kalman["nearest_plate_margin_m"].as<double>(cfg.nearest_plate_margin_m);
             cfg.geometry_learn = kalman["geometry_learn"].as<bool>(cfg.geometry_learn);
             cfg.geometry_learn_gain =
                 kalman["geometry_learn_gain"].as<double>(cfg.geometry_learn_gain);
