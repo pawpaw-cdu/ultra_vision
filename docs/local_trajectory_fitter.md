@@ -9,7 +9,7 @@
 **绝对 yaw + 角速度**，作为 EKF 的强时序观测，并保留 α、R 作慢变量在线收敛。
 
 **默认关闭**（`configs/tracker.yaml` 的 `tracker.local_fit.enabled: false`）。与
-`spin_geometry_estimator` 一样是**可选组件**：单独成库，不改变 `auto_aim_sim/real` 的
+局部拟合器是**可选组件**：单独成库，不改变 `auto_aim_sim/real` 的
 默认依赖与行为。
 
 ## 2. 分层与依赖

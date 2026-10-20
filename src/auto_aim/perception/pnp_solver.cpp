@@ -11,7 +11,7 @@ namespace auto_aim
         constexpr double kPi = 3.14159265358979323846;
 
         // 基向量已提取到 common/armor_geometry.hpp 的 armorKeypointBasis()：
-        // `pose_2d_solver` 也要用**同一份** ψ 约定，不能各写一份
+        // refineArmorYaw 与刚体几何使用同一份 ψ 约定。
         // （历史上"整车模型在三个地方各写一套、各错一点"就是这么来的）。
         using auto_aim::armorKeypointBasis;
 

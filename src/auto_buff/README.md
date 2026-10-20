@@ -6,7 +6,7 @@
 > src/auto_aim/      自瞄（原样保留）
 > src/auto_buff/     能量机关：buff_demo（薄入口）+ rune_*（算法）+ support/
 > tests/             单元测试（buff_target_test / buff_state_test），不进算法目录
-> tools/             rp26_sim（外部对照仿真）+ sim（仿真相机预设）
+> tools/             sim（仿真相机预设）
 > ```
 >
 > 构建目标（对齐 sp_vision 的 `tasks/auto_buff`：算法是 **OBJECT 库**、入口是薄 executable）：

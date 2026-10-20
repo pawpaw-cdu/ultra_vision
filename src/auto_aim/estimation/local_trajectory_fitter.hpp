@@ -9,7 +9,7 @@
 //   · 慢层：固定快层最优参数，只放开 α、R 做一小步（确定性 Gauss-Newton，
 //     输出 JᵀJ 对角信息量），带遗忘/门控交给调用方（SlowCalib）融合。
 //
-// 依赖：Eigen3 + Ceres（可选组件，与 spin_geometry_estimator 同款：
+// 依赖：Eigen3 + Ceres（可选组件：
 //       只有找到 Ceres 时才编译，不链接进 auto_aim_core）。
 // 实测结论见 experiments/local_fitter/README.md：单板短窗 R 不可辨识，
 // 四板联合后 α 收敛到 15±1、R 进入 ±0.02。

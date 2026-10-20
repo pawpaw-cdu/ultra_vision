@@ -16,7 +16,6 @@ set(AUTO_AIM_CORE_SOURCES
     control/shooter.cpp
     control/target_selector.cpp
     estimation/rotation_rate_estimator.cpp
-    estimation/pose_2d_solver.cpp
     perception/detector.cpp
     perception/pnp_solver.cpp
     perception/armor_source.cpp
@@ -113,7 +112,7 @@ endif()
 
 # ---- 局部拟合器（运行组件；只要找到 Ceres 就编译，与是否构建测试无关）----------
 # 定位：EKF 弱点的补强（正面 Yaw/Omega + 旋转中心），异步低频、可注入、默认不接管主链路。
-# 与 spin_geometry 一样单独成库、不进 auto_aim_core；Tracker 通过 setLocalFitter 注入。
+# 单独成库、不进 auto_aim_core；Tracker 通过 setLocalFitter 注入。
 # 注意：这是**运行组件**，不能藏在 ULTRA_VISION_BUILD_TESTS 里——真机构建 tests=OFF，
 # 那样 auto_aim_real 根本编不出拟合器（2026-10-10 发现）。
 find_package(Ceres QUIET)
@@ -137,43 +136,13 @@ else()
 endif()
 
 if(ULTRA_VISION_BUILD_TESTS)
-  # ---- 小陀螺灯条轨迹几何估计器（可选组件：仅当找到 Ceres 时编译）----------
-  # 定位：异步架构里的"低频全局几何先验/初始化器"，默认**不接管主链路**，
-  # 因此单独成库、不进 auto_aim_core（不改变 auto_aim_sim/real 的依赖）。
-  find_package(Ceres QUIET)
-  if(Ceres_FOUND)
-    find_package(Eigen3 REQUIRED)
-    add_library(auto_aim_spin_geometry STATIC estimation/spin_geometry_estimator.cpp)
-    target_include_directories(auto_aim_spin_geometry PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${Eigen3_INCLUDE_DIRS}
-    )
-    target_link_libraries(auto_aim_spin_geometry PUBLIC Eigen3::Eigen Ceres::ceres)
-    message(STATUS "auto_aim_spin_geometry: 启用（Ceres ${Ceres_VERSION}）")
-
-    add_executable(spin_geometry_estimator_test
-        test/spin_geometry_estimator_test.cpp
-    )
-    target_link_libraries(spin_geometry_estimator_test PRIVATE auto_aim_spin_geometry)
-    add_test(NAME spin_geometry_estimator_test COMMAND spin_geometry_estimator_test)
-
-
-    # 局部拟合器的离线工具与单测（库本身已在上面按"是否找到 Ceres"创建）。
-    if(TARGET auto_aim_local_fit)
-      # 因子图离线原型（第 1 步：每帧独立板位姿）。见 docs/fgo_probe.md。
-      add_executable(fgo_probe ${CMAKE_SOURCE_DIR}/tools/fgo_probe.cpp)
-      target_include_directories(fgo_probe PRIVATE ${YAML_CPP_INCLUDE_DIRS})
-      target_link_libraries(fgo_probe PRIVATE Eigen3::Eigen Ceres::ceres ${OpenCV_LIBS}
-          ${YAML_CPP_LDFLAGS})
-      add_executable(local_trajectory_fitter_test
-          test/local_trajectory_fitter_test.cpp)
-      target_include_directories(local_trajectory_fitter_test PRIVATE
-          ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR})
-      target_link_libraries(local_trajectory_fitter_test PRIVATE auto_aim_local_fit)
-      add_test(NAME local_trajectory_fitter_test COMMAND local_trajectory_fitter_test)
-    endif()
-  else()
-    message(STATUS "auto_aim_spin_geometry: 跳过（未找到 Ceres；见 docs/spin_geometry_estimator.md）")
+  if(TARGET auto_aim_local_fit)
+    add_executable(local_trajectory_fitter_test
+        test/local_trajectory_fitter_test.cpp)
+    target_include_directories(local_trajectory_fitter_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR})
+    target_link_libraries(local_trajectory_fitter_test PRIVATE auto_aim_local_fit)
+    add_test(NAME local_trajectory_fitter_test COMMAND local_trajectory_fitter_test)
   endif()
 
   add_executable(standard_clock_test
@@ -321,22 +290,6 @@ if(ULTRA_VISION_BUILD_TESTS)
   )
   target_link_libraries(armor_ekf_angle_test PRIVATE ${OpenCV_LIBS})
   add_test(NAME armor_ekf_angle_test COMMAND armor_ekf_angle_test)
-
-  # 2D 位姿求解器（6D→4D→2D 的最后一环）自检：拟合器刚体解 → 角点 → 解回来。
-  # 只需 pose_2d_solver.cpp + pnp_solver.cpp（要 getArmor3DPoints 的物点定义），
-  # 不依赖 Ceres/YAML/相机。
-  add_executable(pose_2d_solver_test
-      test/pose_2d_solver_test.cpp
-      estimation/pose_2d_solver.cpp
-      perception/pnp_solver.cpp
-  )
-  target_include_directories(pose_2d_solver_test PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}
-      ${CMAKE_SOURCE_DIR}
-      ${OpenCV_INCLUDE_DIRS}
-  )
-  target_link_libraries(pose_2d_solver_test PRIVATE ${OpenCV_LIBS})
-  add_test(NAME pose_2d_solver_test COMMAND pose_2d_solver_test)
 
   # 局部拟合 yaw 质量门（实测分层：rmse<3px→σ_ψ≈0.6°，8~16px→22.6°，而 ω 各档都稳）。
   # 纯头文件（estimation/local_fit_gate.hpp），无额外依赖。
