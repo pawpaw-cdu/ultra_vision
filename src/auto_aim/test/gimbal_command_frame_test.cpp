@@ -42,7 +42,6 @@ int main()
     bool passed = true;
 
     // Δ=0（期望姿态 == 当前姿态）时，命令必须**正好等于当前反馈**：
-    // 这就是"保持不动"的性质（hold 测试在实车上量到 0.2~0.9°）。
     const double yaws[] = {0.0, 0.35, 1.5, -2.2};
     const double pitches[] = {-0.25, 0.0, 0.30, 0.62};
     for (double yaw : yaws) {

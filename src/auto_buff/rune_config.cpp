@@ -48,7 +48,6 @@ namespace auto_aim::energy
         const YAML::Node rune = file["rune"] ? file["rune"] : file;
         RuneConfig config;
 
-        config.enabled = rune["enabled"].as<bool>(true);
         const std::string mode = rune["mode"].as<std::string>("small");
         config.mode = (mode == "large") ? RuneMode::Large : RuneMode::Small;
 
@@ -206,10 +205,6 @@ namespace auto_aim::energy
         config.recenter_after_frames = detector["recenter_after_frames"].as<int>(15);
         config.max_target_velocity_deg_s =
             detector["max_target_velocity_deg_s"].as<double>(200.0);
-        config.zero_feedforward_on_step =
-            detector["zero_feedforward_on_step"].as<bool>(true);
-        config.fire_block_on_hit_slot =
-            detector["fire_block_on_hit_slot"].as<bool>(true);
         // 相位关联选片（见 RuneDetectorConfig::PhaseAssocConfig）。
         auto& assoc = config.detector.phase_assoc;
         assoc.enabled = detector["phase_assoc_enable"].as<bool>(true);
@@ -274,7 +269,6 @@ namespace auto_aim::energy
         config.aimer.low_speed_delay = aimer["low_speed_delay"].as<double>(0.06);
         config.aimer.high_speed_delay = aimer["high_speed_delay"].as<double>(0.13);
         config.fire_thresh_deg = aimer["fire_thresh_degrees"].as<double>(1.5);
-        config.max_slew_deg_per_frame = aimer["max_slew_deg_per_frame"].as<double>(8.0);
         config.aim_yaw_limit_deg = aimer["aim_yaw_limit_deg"].as<double>(50.0);
         config.aim_pitch_limit_deg = aimer["aim_pitch_limit_deg"].as<double>(35.0);
         config.round_window_s = aimer["round_window_s"].as<double>(2.5);
@@ -289,11 +283,8 @@ namespace auto_aim::energy
         config.post_hit_switch_phase_rad =
             aimer["post_hit_switch_phase_rad"].as<double>(0.30);
         config.post_hit_hold_max_s = aimer["post_hit_hold_max_s"].as<double>(1.2);
-        config.post_hit_require_active_witness =
-            aimer["post_hit_require_active_witness"].as<bool>(false);
 
         // 云台轨迹参数：与 configs/tracker.yaml 的 tracker.gimbal 同义，默认取
-        // 自瞄那套（左右 360°/s、俯仰 180°/s、加加速度受限、100 Hz 下发）。
         if (const YAML::Node gimbal = rune["gimbal"]) {
             auto read_deg = [&](const char* key, double fallback_deg) {
                 return gimbal[key].as<double>(fallback_deg) * kPi / 180.0;
@@ -329,7 +320,6 @@ namespace auto_aim::energy
         }
 
         // 瞄准角递归滤波：抑制单帧抖动、并在换靶时给出干净的过渡，
-        // 参数含义与 configs/tracker.yaml 的 tracker.aim_filter 一致。
         if (const YAML::Node filter = rune["aim_filter"]) {
             config.aim_filter.enabled = filter["enabled"].as<bool>(true);
             config.aim_filter.process_noise_acceleration =
@@ -345,7 +335,6 @@ namespace auto_aim::energy
         }
 
         config.simulator_config = rune["simulator_config"].as<std::string>("simulator.yaml");
-        config.visualize = rune["visualize"].as<bool>(true);
         return config;
     }
 } // namespace auto_aim::energy

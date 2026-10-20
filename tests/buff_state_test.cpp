@@ -1,7 +1,4 @@
 // Self-checking tests for the two pure state classes extracted out of the frame
-// loop: RuneRoundGuard (round / hold / fire window) and RuneSlotLattice
-// (1..5 slot booking). No image, no simulator, no OpenVINO — they are fed
-// synthetic per-frame inputs, which is exactly why they were split out.
 
 #include <array>
 #include <cmath>
@@ -167,7 +164,6 @@ namespace
         guard.update(solvedFrame(blade, 0.60, 1), 2.1);
         check(guard.snapshot().hold, "hold: small phase drift keeps the gate closed");
         // 相位漂移超过 0.30 rad 也**不**解禁：符在转，漂移自己就会走到阈值，
-        // 那样会在 0.3 s 后无条件放行、把刚打过的片再打一遍（实测 66% 的命中如此）。
         guard.update(solvedFrame(blade, 0.95, 1), 2.2);
         check(guard.snapshot().hold, "hold: a phase drift alone no longer releases");
 
@@ -332,8 +328,6 @@ namespace
     }
 
     /// 换片 = "刚才还在瞄的那片不再被点亮" ⇒ 它已经激活。这是新模型（只给未激活
-    /// 目标片）下**唯一**不依赖网络类别、也不依赖命中反馈的激活证据，所以要有单测
-    /// 钉住两件事：(1) 被换下的片被记账；(2) 槽位号是**物理片号**，换片不改变它。
     void testLatticeRetiredSlotBooksActivation()
     {
         RuneSlotLattice::Config config;

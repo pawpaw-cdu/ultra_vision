@@ -42,9 +42,6 @@ int main()
                      "a single phase outlier must not create an angular-rate jump");
 
     // ---- 阶跃（装甲板翻面）不能被当成转速 ---------------------------------
-    // 实车实测：位置被硬约束钉住时，对称装甲板的 PnP 姿态会在 ±90° 上翻面
-    // （1.57 rad 的单步跳变），窗口内的中位斜率会变成 1.57/窗口 ≈ 0.8 rad/s
-    // （44°/s），乘 386 ms 提前量就是瞄点甩 5°。见 rotation_rate_estimator.hpp。
     {
         auto_aim::RotationRateEstimator stepped(config);
         for (int frame = 0; frame < 60; ++frame) {

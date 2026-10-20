@@ -1,25 +1,4 @@
 // Golden-frame regression test for the armor detectors.
-//
-// Both blocking detector bugs found during the simulator joint testing were
-// invisible before this test existed:
-//   * the light-bar tilt formula used acos(dir . vertical), which scores a
-//     perfectly vertical bar as either 0 or 180 degrees, so the |tilt| filter
-//     silently dropped about half of all bars;
-//   * Light::color was never assigned while find_armors compared it against
-//     enemy_color, i.e. the pairing filter read uninitialised memory.
-// Neither showed up in any unit test because nothing ever asserted on detector
-// output. This test pins the behaviour of both detectors on recorded frames.
-//
-// Expectations live in assets/detector_expectations.csv:
-//   frame,min_lights,min_armors,nn_labels
-// nn_labels is a ';'-separated list of model-agnostic labels ("colour/name/size")
-// that must all be detected by the network (empty = not checked). Comparing
-// labels instead of raw class ids keeps the expectations valid when the
-// detection head changes, e.g. from the YOLO11 export to the lighter RP24 one.
-//
-// The classical detector is checked with "at least" semantics because contour
-// geometry is not bit-exact across OpenCV versions; the network classes are
-// checked exactly, because a wrong class silently feeds PnP the wrong plate.
 
 #include <algorithm>
 #include <fstream>

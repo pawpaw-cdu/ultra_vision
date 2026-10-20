@@ -1,29 +1,4 @@
 // 相机 → 云台外参标定（hand-eye），针对「C 板回传**编码器绝对角**」的情况重写。
-//
-// 与上一版的区别（上一版是为了应付"陀螺积分 yaw 一直漂"的临时状态）：
-//   1) 不再需要任何漂移补偿（ZUPT / settle / 拟合 β）——编码器角不漂；
-//   2) 编码器绝对角会在 ±180° 折返，所以样本先**解缠**，跨度判据按解缠后的值算；
-//   3) 新增 yaw/pitch **标度自标定**（--fit-yaw-scale / --fit-pitch-scale）：C 板那边的角
-//      如果有减速比/单位/符号问题，解出来的 κ 会直接告诉你差多少倍（κ=0.5 就是差 2 倍，
-//      κ<0 就是符号反了）；
-//   4) 新增**半分交叉验证**：一半样本拟合、另一半检验，检验残差必须和拟合残差同量级才允许
-//      写盘（防"残差很小但换一半样本就崩"的过拟合解）；
-//   5) 新增**平移可辨识度 σt**：由残差 + 雅可比算平移三轴 1σ，>0.1 m 说明该方向没有信息量
-//      （转动范围不够），直接提示，而不是给一个乱跑的 |t|。
-//
-// 用法：
-//   hand_eye_calibrate --auto                 自动采样（推荐）
-//   hand_eye_calibrate <样本目录>              离线复算 + 交叉验证
-//   hand_eye_calibrate --selftest             合成数据自检（含 ±180 折返与标度错误）
-//
-// 选项：--config-dir configs --out hand_eye.yaml --min-samples 20 --min-step 3
-//       --yaw-span 25 --pitch-span 12 --save-frames <目录>
-//       --fit-yaw-scale --fit-pitch-scale
-//
-// 模型（与 tracker 的 cameraToBaseRotation 完全一致）：
-//   p_base = Ry(yaw)·Rx(pitch) · (R_camera2gimbal · p_cam + t_camera2gimbal)
-// 标定物静止时，各组样本的 p_base 应重合成一点 → 最小化这个"离散度"。
-// 残差 = 板心投回底盘系后到中位点的平均距离（mm），<10 mm 可用。
 
 #include <yaml-cpp/yaml.h>
 
@@ -86,7 +61,6 @@ namespace
 
 #if defined(ULTRA_VISION_USE_HIK_CAMERA) || defined(ULTRA_VISION_USE_GALAXY_CAMERA)
     /// @brief 带时间戳取图。海康驱动有该重载（时间戳在采集线程取图返回时打）；
-    ///        其它驱动没有，就退化成"取图后就地打戳"（仍比处理完再打准）。
     bool getImageTimed(CameraType& camera, cv::Mat& image, FrameTime& timestamp, int timeout_ms)
     {
 #if defined(ULTRA_VISION_USE_HIK_CAMERA)
@@ -108,17 +82,12 @@ namespace
         std::string frame_dir;
         double yaw_scale_fixed = 1.0;   // --yaw-scale：给回传 yaw 乘一个固定标度（含符号）
         /// @brief --pitch-scale：给回传 pitch 乘一个固定标度（含符号）。
-        ///        用来**验证 pitch 符号**：+1 与 −1 都跑一遍比残差，残差小的那个才是
-        ///        与观测一致的约定（pitch 跨度不够大时两者可能都拟合得不错，那种情况
-        ///        残差不会相差数量级，就别用它下结论）。
         double pitch_scale_fixed = 1.0;
         double max_rms = 0.8;           // --max-rms：单帧板重投影 rms 上限（px）
         FitOptions fit;
     };
 
     /// @brief 从 configs/serial.yaml 读 yaw 符号（+1/-1）。C 板编码器 yaw 的正方向如果和
-    ///        tracker 约定（正 yaw = 右转）相反，就在这里填 -1 —— 工具和 tracker 共用这一项，
-    ///        免得两边各拍一个符号、谁也说不清。
     double loadYawSign(const std::string& config_dir)
     {
         std::ifstream probe(config_dir + "/serial.yaml");
@@ -183,7 +152,6 @@ namespace
         double yaw = 0.0;       // 解缠 + 符号修正后的 yaw（rad，用于求解）
         double yaw_raw = 0.0;   // **原始**回传 yaw（解缠后，未做符号修正）——存盘用这个，
                                 // 离线复算再按 configs/serial.yaml 的 yaw_sign 应用一次，
-                                // 避免"采集时取了反、存盘又取反"的双重取反
         double pitch = 0.0;
         bool have_pose = false;
     };
@@ -455,7 +423,6 @@ namespace
             options.fit_yaw_scale = true;
             if (!solve(samples, options, fit)) return 1;
             // 注意语义：解出来的是**修正系数** κ（gimbalToBase(κ·回传角)）。回传侧少乘了 0.8，
-            // 所以修正系数应当 ≈ 1/0.8 = 1.25；换成"回传侧实际标度"就是 1/κ ≈ 0.80。
             std::printf("自检(c) 回传 yaw 标度 0.8：修正系数解出 %.3f（=回传标度 %.3f），残差 %.2f mm\n",
                         fit.yaw_scale, 1.0 / fit.yaw_scale, fit.residual_mm);
             if (std::abs(fit.yaw_scale - 1.25) > 0.05 || fit.residual_mm > 1.0) {
@@ -591,7 +558,6 @@ int main(int argc, char* argv[])
     }
     {
         // 样本的姿态跨度：pitch 跨度太小的话，"pitch 符号"这件事在标定里是**测不出来**的，
-        // 必须明说，免得拿一版拟合很好的外参去现场发现竖直方向是镜像的。
         double yaw_min = 1e9, yaw_max = -1e9, pitch_min = 1e9, pitch_max = -1e9;
         for (const auto& sample : samples) {
             yaw_min = std::min(yaw_min, sample.yaw);

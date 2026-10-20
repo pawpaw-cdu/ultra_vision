@@ -35,7 +35,6 @@ namespace auto_aim::energy
         } else if (last_powerrune.has_value() &&
                    light_num == last_powerrune->light_num) {
             // The same blades are still lit: the target is the one closest to
-            // the previous target.
             const cv::Point2f last_target_center = last_powerrune->fanblades[0].center;
             auto best = blades.begin();
             float best_distance = cv::norm(blades[0].center - last_target_center);
@@ -51,7 +50,6 @@ namespace auto_aim::energy
         } else if (last_powerrune.has_value() &&
                    light_num == last_powerrune->light_num + 1) {
             // A blade just lit up: it is the one farthest from every blade that
-            // was already lit.
             const auto& last_blades = last_powerrune->fanblades;
             auto best = blades.begin();
             float best_min_distance = -1.0f;

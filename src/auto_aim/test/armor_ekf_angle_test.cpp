@@ -1,12 +1,4 @@
 // ArmorEKF 相位观测 updateAngle 的回归自检。
-//
-// 为什么单独钉这一组：`updateAngle` 的雅可比一度写成"旋转之后"的 (cos(θ+p),
-// −sin(θ+p))，而不是状态自己的 (cosθ, −sinθ)。结果是——
-//   · plate 0 / 2 → 更新增益恰好为 0（yaw 完全不动）
-//   · plate 3     → 增益 −1（把 yaw 往反方向推，正反馈）
-//   · plate 1     → 正确（唯一一个 angleForPlate == 0 的板）
-// 判据（对每个 plate_id）：告诉滤波器"这块板的相位比预测大 5°"，
-// 底盘 yaw 必须**朝同方向**移动，且增益接近 1（K = P/(P+R) 不会正好 1）。
 
 #include "Kalman/armor_ekf.hpp"
 

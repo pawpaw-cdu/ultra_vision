@@ -78,7 +78,6 @@ namespace
     }
 
     /// @brief 与 makeTrackerArmor 同源，但给板心位置和径向角都加高斯噪声 ——
-    ///        用来复现"5 rad/s 小陀螺 + PnP/角点噪声"的观测流（确定性种子）。
     auto_aim::Armor makeNoisyTrackerArmor(
         double center_z,
         double yaw,
@@ -201,8 +200,6 @@ int main()
                      "EKF must project calibrated y offsets onto other armor plates");
 
     // A batch can contain repeated detections of the same physical plate. The
-    // fixed-size update buffer accepts at most four unique plate IDs, so
-    // duplicates must collapse to one observation instead of aliasing rows.
     {
         auto_aim::ArmorEKF batch_ekf;
         auto_aim::ArmorEKF single_ekf;
@@ -278,7 +275,6 @@ int main()
                      "EKF must preserve the rotating chassis range");
 
     // 真实系统里检测到的**一定是离相机最近的那块板**（现场事实）。合成观测流必须照这个
-    // 前提造，否则"构造板一定最近"的硬约束会正确地把它当成翻解（测试自身不合格）。
     const auto nearestPlate = [](double yaw, double omega, double time) {
         int best = 0;
         double most_front = 1e9;
@@ -405,8 +401,6 @@ int main()
     }
 
     // ---- l/h 状态（sp_vision_25 的分组长短轴）：能否在线收敛 ------------------
-    // 造一个"矩形底盘 + 前后板更高"的靶：{0,2} 组 R=0.20/h=0，{1,3} 组 R=0.25/h=+3cm。
-    // 真值 l=+0.05 m、h=+0.03 m。滤波器从 l=h=0 出发，应能在几十帧内收敛到真值。
     {
         constexpr double kR0 = 0.20, kR1 = 0.25;    // 左右组 / 前后组半径
         constexpr double kH1 = 0.03;                // 前后组比左右组高 3cm
@@ -438,7 +432,6 @@ int main()
         geo_cfg.geometry_learn = false;   // 只看滤波器状态能不能收敛（不靠慢层学习）
         auto_aim::Tracker geo_tracker(geo_cfg);
         // 注意：l 的信息来自"观测板绕中心的轨迹是圆还是圆角方"（偏心量 ≈ l/2 = 2.5cm，
-        // 与位置噪声同量级）→ 必须转过**整圈以上**才收敛。取 2 rad/s × 8s ≈ 2.5 圈。
         constexpr double kOmega = 2.0;
         const double dt = 1.0 / 100.0;
         for (int frame = 0; frame <= 800; ++frame) {
@@ -472,9 +465,6 @@ int main()
     }
 
     // ---- PnP yaw 翻解保护（pnp_yaw_trust_deg）-------------------------------
-    // 平面靶 IPPE 有两个解：同一块板的 yaw 会跳（实测 ±12°，极端镜像）。位置（bearing）
-    // 是良态的，所以位置对、yaw 被翻的观测流必须：① 仍然选对板；② 不把整车模型带歪；
-    // ③ 不把假的 yaw 喂给差分测速器（那正是"模型突然转/崩"的来源）。
     {
         auto makeFlippedArmor = [](double center_z, double yaw, double omega, double time,
                                    int plate_id, double radius, double yaw_error) {
@@ -507,10 +497,6 @@ int main()
             for (int frame = 0; frame <= 80; ++frame) {
                 const double time = frame * tracker_dt;
                 // 交替翻解（±40°）—— 差分测速器最怕这种：常值偏置它还能抵消，交替就是假 ω。
-                // 幅度取 40°（> 25° 门限）：模拟"翻到另一个平面解"的粗错。
-                // ±12° 那种小抖动本来就在可信门限内，两种配置行为一致（门控不该动它）。
-                // 每帧都翻、且交替符号：单板 yaw 彻底不可用（差分最怕这种）。
-                // 门控的作用就是把这种坏流挡在"yaw / 差分测速"之外。
                 const double flip = (frame % 2 == 0) ? 0.7 : -0.7;
                 const int visible = nearestPlate(0.0, kOmega, time);
                 tracker.update(std::vector<auto_aim::Armor>{
@@ -541,11 +527,6 @@ int main()
 
         const YawFlipResult result = run();
         // 断言只钉"门控到底治了什么"：**差分测速**不该被翻解污染。
-        // （模型/板号的绝对正确性在"构造板一定最近"的硬约束与关联用例里验；
-        //  单板 + yaw 完全不可用时，相位本身就有 90° 不确定性，不该在这里断言。）
-        // 注意：自从差分测速改喂"底盘 yaw"（灯条径向角 − 该板相位偏移）之后，
-        // 翻解对 ω 的污染本身就小多了 —— 两条路都能守住 ω。所以这里只断言
-        // "ω 不被翻解带坏"，不再要求 naive 更差（那条旧断言已不成立）。
         passed &= expect(result.omega_error < 0.30,
                          "differenced omega must stay clean under flipped PnP yaw (chassis-yaw input)");
         std::cout << "yaw-flip: med/max_plate_err=" << result.median_plate_error << "/"
@@ -555,10 +536,6 @@ int main()
     // ---- 装甲板模型（双模型低速档，上科大 2026 §9.4.4）----------------------
     {
         // ---- 底盘模型：慢层几何 + 输出口径 + 外推 + 渲染姿态 ----------------
-        // 这组断言盯的正是真机上"四块板高度不统一/底盘不对"的三个来源：
-        //   · 半径（配置 0.25 / 实测 0.20~0.21）与逐板几何；
-        //   · 矩形底盘（前后距离 ≠ 左右距离）+ 四块板**同一高度** + 15° 安装倾角；
-        //   · 重投影必须外推到"被显示那一帧"（观测延迟在 3 rad/s 上是 10~30°）。
         auto_aim::Tracker online_tracker(tracker_config);
         // 初值（还没喂任何观测、几何慢收敛还没动过）
         passed &= expect(std::abs(online_tracker.chassisGeometry().meanDistance() -
@@ -610,8 +587,6 @@ int main()
         }
 
         // ---- 矩形底盘 + 同一高度 + 板面带 15° 倾角 --------------------------
-        // 真车不是"四块板在一个圆上"：前后距离 ≠ 左右距离，板心同一高度。
-        // 这条是最小回归：每块板必须落在自己那条半径/高度上，姿态绕自身切线倾 α。
         auto_aim::ChassisGeometry rect;
         rect.plate_distance = {{0.28, 0.22, 0.28, 0.22}};
         rect.plate_height = {{0.01, 0.01, 0.01, 0.01}};
@@ -676,10 +651,6 @@ int main()
     }
 
     // ---- 5 rad/s（小陀螺）通用性：关联门限必须随 yaw 不确定度自适应 ----------
-    // 旧行为用固定的 20° 角门限：5 rad/s 下 ω 估计还没建立，预测每帧落后
-    // ω·dt≈10°，两三帧就顶穿门限 → 关联返回 inf → 观测被拒 → ω 永远学不到。
-    // 这里喂确定性观测流（单板可见、可见板号随旋转切换、带 PnP 噪声）做 A/B：
-    // adaptive_association_gate + soft_nis_gate 打开能收敛，关闭（旧行为）不能。
     {
         const auto spin_omega = [&](bool adaptive, bool soft) {
             auto_aim::TrackerConfig spin_config = tracker_config;
@@ -730,8 +701,6 @@ int main()
     }
 
     // ---- 收敛看门狗 ----------------------------------------------------------
-    // 判据一（量测长期被拒）、判据二（状态发散）、判据三（帧间隔过长）各测一次，
-    // 外加"正常数据不许误触发"和"命中后必须能重新初始化并再次收敛"。
     auto_aim::Tracker clean_tracker(tracker_config);
     for (int frame = 0; frame <= 120; ++frame) {
         const double time = frame * tracker_dt;
@@ -790,7 +759,6 @@ int main()
     }
 
     // 判据三 + 恢复：间隔 0.3 s > max_frame_gap=0.05 → 触发；下一帧必须能用观测
-    // 重新初始化（跳过 tryReacquire），并在 3 帧后重新报"已收敛"，且不再重复触发。
     {
         auto_aim::TrackerConfig gap_config = tracker_config;
         gap_config.watchdog_max_frame_gap = 0.05;

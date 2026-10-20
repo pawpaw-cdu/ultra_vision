@@ -119,7 +119,6 @@ namespace auto_aim::energy
         snapshot_.target_center = frame.target_center;
 
         // 回合结束（没有点亮扇叶了）→ 机关复位。真值里每一轮开始时掩码都是 00000，
-        // 这里跟着清空，否则上一轮的记账会一直污染下一轮（实测过记的主因之一）。
         if (round_active_ && !frame.round_active) {
             clearActivation();
             if (debug_) {
@@ -130,7 +129,6 @@ namespace auto_aim::energy
         round_active_ = frame.round_active;
 
         // 证据衰减：每 decay_every_frames 帧没有新的证据就各槽位减一票。
-        // 单帧的 ±1 槽折算噪声会在衰减里自己掉下去，只有持续一致的证据才能置位。
         if (++decay_tick_ >= std::max(1, config_.decay_every_frames)) {
             decay_tick_ = 0;
             for (int& value : votes_) value = std::max(0, value - 1);
@@ -141,8 +139,6 @@ namespace auto_aim::energy
         std::array<bool, 5> observed_active{};   // 本帧观测到的"已激活片"集合
         if (frame.solved) {
             // 换片 = "刚才还在瞄的那片不再是被点亮的那片" ⇒ 它已经激活了。
-            // 被换下的片在**本帧**图像里的位置：把本帧靶心绕圆心反向转 step×72°。
-            // 只认 1~2 片的跳变（更大的跳变按误判处理）。
             const auto note_retired = [&](int step) {
                 if (step == 0) return;
                 const int count = std::min(std::abs(step), 2);
@@ -198,8 +194,6 @@ namespace auto_aim::energy
             }
 
             // 已激活记账：按"与当前靶心的相位差"把过滤前的候选折算到槽位，投票。
-            // 同时（用同一套几何）算出"本帧锁定的那片"相对跟踪槽位偏了几个槽位：
-            // 观测到已激活片时，估计器要靠它把观测折算回跟踪槽位。
             if (frame.round_active && anchored_ && snapshot_.slot_id >= 0) {
                 const cv::Point2f hub = frame.hub;
                 const double target_phase = std::atan2(frame.target_center.y - hub.y,
@@ -218,7 +212,6 @@ namespace auto_aim::energy
                     observed_active[static_cast<std::size_t>(slot)] = true;
                 }
                 // 换片推出来的"被换下的那片"：已经确认过的物理事件，一次给满票
-                // （不依赖网络类别，也不需要命中反馈）。
                 for (const cv::Point2f& retired : retired_centers_) {
                     int offset = 0;
                     if (!candidateSlotOffset(frame, retired, target_phase, slot_step, offset)) {
@@ -254,8 +247,6 @@ namespace auto_aim::energy
         }
 
         // ---- 命中锚重锚 ----------------------------------------------------
-        // 我们打中的片（strong_）是真值锚；若"本帧观测到的已激活片"在某个非零
-        // 循环移位下更吻合 strong_，说明参考系漂了，连续确认后把它转回来。
         if (anchored_ && snapshot_.slot_id >= 0) {
             int observed_count = 0;
             int strong_count = 0;

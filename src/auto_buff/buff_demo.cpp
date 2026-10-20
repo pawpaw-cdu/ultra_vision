@@ -1,25 +1,4 @@
 // 能量机关（大小符）入口：只负责"参数/环境 → 配置 → 跑 runner"。
-//
-// 分层（对照 sp_vision 的 tasks/auto_buff + 独立小入口）：
-//   rune_node.cpp   —— 本文件：参数解析、配置加载、调用 runner；
-//   rune_runner.cpp —— 主循环：收帧 → 感知 → 估计 → 瞄准发布 → 开火闸门（控制侧
-//                      由 control/GimbalController 的 100 Hz 线程执行）；
-//   rune_diag.cpp   —— 诊断层：CSV/遥测真值/录帧/静态试射/汇总打印；
-//   rune_detector/solver/target/aimer/model/refiner —— 算法本体。
-//
-// 常用环境变量（详见 README 与 git 历史里的 docs/energy_rune_issue_audit.md）：
-//   ULTRA_VISION_CONFIG_DIR          配置目录（默认 configs）
-//   ULTRA_VISION_RUNE_MODE           small|large，覆盖配置里的 mode
-//   ULTRA_VISION_RUNE_VIDEO          用视频回放代替仿真器
-//   ULTRA_VISION_RUNE_TEST_SECONDS   跑多少秒后退出
-//   ULTRA_VISION_RUNE_CSV            逐帧诊断 CSV 输出路径
-//   ULTRA_VISION_RUNE_GT_CSV         仿真真值遥测原文输出路径
-//   ULTRA_VISION_RUNE_AIM_IN_CONTROL 0 = 关掉"瞄准解算在控制线程"（默认开）
-//   ULTRA_VISION_RUNE_ADAPTIVE_SCALE 1 = 启用按轨道尺度自适应的画布缩放
-//   ULTRA_VISION_RUNE_ROI_CENTER     1 = 数字变焦时按预测符心裁剪（需同时开自适应）
-//   ULTRA_VISION_RUNE_GIMBAL_FREEZE  now|activation = 冻结云台的观测隔离实验
-//   ULTRA_VISION_RUNE_BORESIGHT      "yaw_deg,pitch_deg" 静态试射模式
-//   ULTRA_VISION_RUNE_NO_DIAG        1 = 关掉诊断层（不写 CSV/不落帧）
 
 #include <fstream>
 #include <iostream>

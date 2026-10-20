@@ -34,10 +34,6 @@ namespace auto_aim::energy
 
         const std::shared_ptr<ov::Model> model = impl_->core.read_model(config.model_path);
         // A static export keeps the anchor grid baked in, so its input size
-        // cannot be changed here; a dynamic export can be reshaped. Either way
-        // the letterbox below follows the shape the network actually accepts,
-        // which makes swapping in a re-exported model (say 416x416, roughly
-        // 2.4x cheaper) a configuration change rather than a code change.
         const ov::PartialShape declared_shape = model->input().get_partial_shape();
         if (declared_shape.is_dynamic() && config.input_size > 0) {
             model->reshape({{model->input().get_any_name(),
@@ -46,7 +42,6 @@ namespace auto_aim::energy
         } else if (declared_shape.rank().is_static() && declared_shape[2].is_static() &&
                    declared_shape[3].is_static()) {
             // 注意 rank[2] 是高、rank[3] 是宽：非方形输入（如 480x640）必须分别取，
-            // 早先把高当成宽，导致给 480x640 的模型喂了 480x480 的张量。
             const int declared_height = static_cast<int>(declared_shape[2].get_length());
             const int declared_width = static_cast<int>(declared_shape[3].get_length());
             if (declared_width != impl_->config.input_size ||
@@ -107,11 +102,6 @@ namespace auto_aim::energy
         const int input_height = config.input_height > 0 ? config.input_height : input_size;
 
         // Optional canvas transform, see RuneModelConfig::input_pad_scale: >1 pads
-        // the frame into a larger grey canvas (the rune shrinks inside the network
-        // input), <1 centre-crops it (digital zoom: a rune that is far away and
-        // therefore only a few dozen pixels wide grows back to the trained scale).
-        // `canvas_offset` maps canvas coordinates to image coordinates as
-        //     image = canvas - canvas_offset.
         cv::Mat canvas;
         double canvas_offset_x = 0.0;
         double canvas_offset_y = 0.0;
@@ -158,14 +148,10 @@ namespace auto_aim::energy
         const int scaled_width = std::max(1, static_cast<int>(std::lround(canvas.cols * scale)));
         const int scaled_height = std::max(1, static_cast<int>(std::lround(canvas.rows * scale)));
         // fit_to_window_letterbox: centre the padded frame, which is what the
-        // model's own inference tool does (with a 4:3 frame the padding is zero).
         const int pad_left = (input_size - scaled_width) / 2;
         const int pad_top = (input_height - scaled_height) / 2;
 
         // Letterbox: keep the aspect ratio, pad with the export's pad value, and
-        // let cv::dnn do the RGB swap, scaling and NCHW pack. The manual
-        // per-pixel version of this cost ~6 ms per frame at 640x640, this one
-        // ~1 ms (measured with rune_model_bench).
         cv::Mat padded_input(input_height, input_size, CV_8UC3,
                              cv::Scalar(config.pad_value, config.pad_value, config.pad_value));
         cv::Mat letterbox = padded_input(cv::Rect(pad_left, pad_top, scaled_width, scaled_height));
@@ -213,7 +199,6 @@ namespace auto_aim::energy
         const float* data = output.data<const float>();
         const std::size_t total = anchors * stride;
         // 越界保护：轴序判断一旦反了，data[...] 会静默踩内存并把进程挂死
-        // （这就是新模型"一帧都没处理完"的现象）。越界一律返回 0。
         const auto at = [&](std::size_t anchor, int attribute) {
             const std::size_t index =
                 attributes_first ? anchor + anchors * static_cast<std::size_t>(attribute)
@@ -264,7 +249,6 @@ namespace auto_aim::energy
             object.class_id = class_id;
 
             // 关键点：逐点置信度过滤（作者的判据：conf >= 阈值、有效点 >= 3、
-            // 出现负坐标直接丢弃），并把坐标映射回原图。
             const int keypoint_base = cfg.num_classes;
             bool negative = false;
             int valid_keypoints = 0;
@@ -317,8 +301,6 @@ namespace auto_aim::energy
         if (std::getenv("ULTRA_VISION_RUNE_DEBUG")) {
             static int printed = 0;
             // 默认每 30 帧打一行（免得刷屏）；诊断单帧/短视频时给
-            // ULTRA_VISION_RUNE_DEBUG_ALL=1 就每帧都打 —— 否则"这一帧网络到底
-            // 给了多少分"会被 30 的取模吃掉，很容易把"没打印"误读成"分数为 0"。
             const bool every_frame = std::getenv("ULTRA_VISION_RUNE_DEBUG_ALL") != nullptr;
             ++printed;
             if (every_frame || printed % 30 == 0) {
@@ -337,7 +319,6 @@ namespace auto_aim::energy
         });
 
         // 参考实现按中心点距离抑制：同一个扇叶被相邻 anchor 重复检出很常见，
-        // 而 IoU 抑制会把"大符两片同时点亮"互相叠着的框合掉一片。
         const float distance_threshold = std::max(1.0f, config.nms_center_dist_px);
         for (const std::size_t index : order) {
             bool suppressed = false;

@@ -73,7 +73,6 @@ namespace auto_aim::energy
         }
 
         // 必须用**副本**调用：aim()/aimCenter() 会原地 predict() 推进状态，
-        // 用同一个 buffer 连续调用会把相位反复外推（实测到位误差 p90 从 0.8° 涨到 14.9°）。
         auto_aim::energy::RuneTarget working = input.target;
         RuneCommand cmd = input.center_only
                               ? aimer_.aimCenter(working, input.frame_time, now_seconds,
@@ -108,8 +107,6 @@ namespace auto_aim::energy
         }
 
         // 开火判定（在控制线程里做，sp_vision commandgener + shooter 同构）：
-        // cmd.shoot（火控节流）、帧级可打性、云台到位误差、命中后保持、换叶，
-        // 必须是**同一时刻**的值；放到 30 Hz 帧循环里采样，这个"与"几乎凑不齐。
         if (controller_ != nullptr && fire_ != nullptr && cmd.shoot && input.engageable &&
             !input.hold && !cmd.blade_switched && fire_enabled_) {
             const auto snapshot = controller_->snapshot();

@@ -1,16 +1,4 @@
 // Regression test for the sim_receiver frame pipeline.
-//
-// The receiver used to do recv() + cv::imdecode() back to back on one thread.
-// While it decoded it was not reading the socket, so a fast sender was throttled
-// by the client's decode rate over TCP back-pressure — which is why making the
-// simulator faster could leave the observed frame rate unchanged.
-//
-// This test drives a synthetic sender that pushes 1440x1080 JPEG frames as fast
-// as the loopback will take them and checks that:
-//   * frames still arrive and carry their sequence/timestamps,
-//   * the sender is NOT throttled to the decode rate (it free-runs, the receiver
-//     drops stale frames instead), which only holds if recv and decode are on
-//     separate stages.
 
 #include <sim_receiver/vision_date_receiver.hpp>
 
@@ -388,8 +376,6 @@ int main() {
     passed &= expect(gimbal_ok, "v2 header carries the real gimbal pose");
     passed &= expect(sequence_monotonic, "the consumer never sees an older frame after a newer one");
     // The sender free-runs (loopback is far faster than the decoders), while the
-    // consumer is bounded by decode throughput.  A serial recv+decode client
-    // would instead have throttled the sender down to what it could decode.
     passed &= expect(sent > 3 * delivered,
                      "sender is not throttled to the client's decode rate");
     passed &= expect(receiver.droppedPackets() > 0,

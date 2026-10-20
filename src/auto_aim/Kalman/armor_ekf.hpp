@@ -21,7 +21,6 @@ namespace auto_aim {
 
 
 // State: [x_c, vx, y_c, vy, sin(theta), cos(theta), omega, z_c, vz].
-// The four armor plates are distributed on a circle in the x-z plane.
 class ArmorEKF {
 public:
     /// 状态维数：9 个运动量 + l(半径差) + h(高度差)。新量追加在末尾，索引 0..8 不变。
@@ -30,7 +29,6 @@ public:
         double R = 0.21;
         double process_acc = 1.0;
         // 过程噪声 `process_acc` 物理上是"底盘加速度的不确定度"：
-        // 靶车静止时它是 0，横移/急停时才有值。
         double process_acc_speed_ref = 0.28;   // 米/秒，速度尺度
         double process_acc_max = 40.0;         // 上限，防止速度估计野值时爆掉
         double process_omega = 2.0;
@@ -44,7 +42,6 @@ public:
         double P_min = 1e-3;
         std::array<double, 4> armor_y_offsets{{0.0, 0.0, 0.0, 0.0}};
         // 四块板各自到**车心**的水平距离（米）
-        // 0 = 该块板用 R（默认四块相等 → 圆）
         std::array<double, 4> plate_distance{{0.0, 0.0, 0.0, 0.0}};
     };
 
@@ -58,7 +55,6 @@ public:
 
     void setDt(double dt) {
         // 每个周期都重建：Q 里现在含"当前速度"（平移自适应过程噪声），
-        // 只在 dt 变化时重建会让它停留在旧速度上。9x9 赋值，代价可忽略。
         cfg_dt_ = dt;
         buildQ();
     }
@@ -157,7 +153,6 @@ public:
         P_(1, 1) = 1.0;  P_(3, 3) = 1.0;  P_(8, 8) = 1.0;
         P_(4, 4) = 0.4; P_(5, 5) = 0.4;
         // ω 的初始方差：**别给 100**。预测一步会生成 P(ω,sin/cos) 交叉协方差
-        // RotationRateEstimator 经 updateOmega() 融合进来，不靠这一帧的 yaw。
         P_(6, 6) = 4.0;
         initialized_ = true;
     }
@@ -306,7 +301,6 @@ public:
         if (accepted_count == 0) return 0.0;
 
         // plate_id is validated against 0..3 above, so accepted observations can
-        // contribute at most 4 * 4 = 16 measurement rows.
         constexpr int kMaxMeasurementDim = 16;
         const int measurement_dim = 4 * accepted_count;
         std::array<double, kMaxMeasurementDim> noise_diagonal{};
@@ -323,7 +317,6 @@ public:
         }
 
         // ---- IESEKF：在更新后的状态处重新线性化（迭代 2-5 次）--------------
-        // 的 K/H 做一次 Joseph 更新（避免迭代中重复收缩 P）。
         const int iterations = std::max(1, cfg_.iekf_iterations);
         const Vec<kStateDim> x_prior = x_;
         const Matrix<kStateDim, kStateDim> P_prior = P_;
@@ -462,8 +455,6 @@ public:
         }
         if (std::getenv("ULTRA_VISION_UV_DEBUG") != nullptr) {
             // 重投影残差的 RMS：这是 UV 观测"到底喂进去多少像素误差"的唯一直接
-            // 指标。正常应当是 1~3 px（角点噪声 + 模型偏差）；到十几 px 说明
-            // 板面几何/配对错了，滤波器只会学到一个错的状态。
             double sum = 0.0;
             int count = 0;
             for (int observation_index = 0;
@@ -505,7 +496,6 @@ public:
 
         Matrix<3, kStateDim> H;
         // theta is represented by [sin(theta), cos(theta)] in the state, so
-        // the position Jacobian must be taken with respect to those variables.
         H(0, 0) = 1.0; H(0, 4) = -plateRadius(plate_id) * sin_plate;
         H(0, 5) = plateRadius(plate_id) * cos_plate;
         H(1, 2) = 1.0;
@@ -563,9 +553,6 @@ public:
         const double residual_angle = normalizeAngle(observed_angle - predicted_angle);
 
         // 观测 = θ + plate_angle，状态是 (x4, x5) = (sinθ, cosθ)：
-        //     ∂观测/∂x4 = ∂θ/∂s =  cosθ = x5
-        //     ∂观测/∂x5 = ∂θ/∂c = −sinθ = −x4
-        // **必须用状态自己的 (sinθ, cosθ)**，不能用"旋转之后"的
         Matrix<1, kStateDim> H;
         H(0, 4) = x_(5, 0);
         H(0, 5) = -x_(4, 0);
@@ -675,10 +662,6 @@ public:
 
     Vec<kStateDim> getState() const { return x_; }
 
-    // ======================================================================
-    // UV-EKF（刚体分解）：直接用四个灯条端点像素更新整车状态。
-    // 见 Kalman/uv_observation.hpp 的推导与两处设计说明（差分/平均的分块噪声、
-    // 以及"一次 8 维更新"取代方案里的"两次顺序更新"）。
     // ======================================================================
 
     /// 四个灯条端点在**世界系**，顺序 [左灯条上, 左灯条下, 右灯条上, 右灯条下]。
@@ -875,12 +858,6 @@ public:
     }
 
     /// @brief 当前底盘 yaw 估计的标准差（rad）。
-    ///        θ = atan2(sinθ, cosθ)，δθ = cosθ·δsinθ − sinθ·δcosθ，所以
-    ///        Var(θ) = (c²·P_ss + s²·P_cc − 2·s·c·P_sc) / (s²+c²)。
-    ///        用途：把关联门限写成"跟着滤波器自身不确定度放大"的形式 ——
-    ///        初始化/丢帧/刚重捕时 yaw 不确定 → 门限宽；收敛后 → 门限紧。
-    ///        这是让固定角门限不再随 ω 变大而失配的关键（见 tracker 的
-    ///        adaptive_association_gate / max_angle_error 注释）。
     double yawStd() const {
         const double s = x_(4, 0);
         const double c = x_(5, 0);
@@ -898,7 +875,6 @@ public:
     }
 
     /// @brief 状态协方差对角元（诊断"P 是否真实"用；只读）。
-    ///        状态顺序：0=x_c 1=vx 2=y_c 3=vy 4=sinθ 5=cosθ 6=ω 7=z_c 8=vz 9=l 10=h。
     double covarianceDiag(int i) const {
         if (i < 0 || i >= kStateDim) return 0.0;
         return P_(i, i);
@@ -937,8 +913,6 @@ public:
     }
 
     /// @brief 只平移底盘中心（x/y/z 三个自由度），yaw/速度不动。
-    ///        用于"把识别到的装甲板当硬约束"：center += (观测板位置 − 模型板位置)，
-    ///        平移后模型算出的那块板就**精确等于观测**，另外三块随之平移（以观测板为锚）。
     void shiftCenter(const Vec<3>& delta) {
         if (!initialized_) return;
         x_(0, 0) += delta(0, 0);
@@ -947,11 +921,6 @@ public:
     }
 
     /// @brief 底盘 yaw 翻 180°（sin/cos 同时取反），协方差不动。
-    ///        用途：**硬约束**"构造用的那块板一定是离相机最近的那块"被违反时，
-    ///        说明模型的径向翻了 180°（PnP 法向翻号 / 关联到对面板），把相位翻回来。
-    /// @brief 硬置底盘 yaw（换板时"相位重锚"用）。
-    ///        换板那一帧，滤波器的 yaw 还停在旧板的状态上，而车心 = 观测板 − R·radial(yaw+φ)
-    ///        → yaw 一滞后，车心就被新板方向拖走（实车 CSV：换板跳 0.43m、同板只抖 0.026m）。
     void setChassisYaw(double yaw) {
         if (!initialized_ || !std::isfinite(yaw)) return;
         x_(4, 0) = std::sin(yaw);
@@ -1129,15 +1098,11 @@ private:
         Q_(v, p) = dt3 / 2.0 * qa;
         Q_(v, v) = dt2 * qa;
         // l/h：机械常数，但允许缓慢收敛（每步一个很小的方差）。取 4e-7 → 1s(70步)
-        // 后 P 增长 ~3e-5，σ≈5mm，足够跟上机械偏差又不会被运动滞后带跑。
         Q_(9, 9) = cfg_.process_geometry;
         Q_(10, 10) = cfg_.process_geometry;
     }
 
     // theta is represented by [sin(theta), cos(theta)]. Map the same
-    // piecewise angular-acceleration noise used by the reference target EKF
-    // into this representation instead of injecting independent noise directly
-    // into sin/cos, which made a stationary chassis appear to spin.
     const double q_angle = dt4 / 4.0 * qw;
     const double q_angle_omega = dt3 / 2.0 * qw;
     const double q_omega = dt2 * qw;

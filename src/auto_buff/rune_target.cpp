@@ -89,17 +89,9 @@ namespace auto_aim::energy
         lost_count_ = 0;
 
         // ---- 观测优先 + 二次确认（现场反馈："模型和估计器在抢云台"）----
-        // 观测是唯一的一手信息，理应最高优先级：换片（相位跳 > 0.35 槽位）或
-        // 圆心跳变/距离跳变时，**用观测重置估计器**，而不是像以前那样丢掉它、
-        // 让估计器用旧相位继续指挥云台（实测相位差 70~144°，云台先朝旧槽位甩、
-        // 下一帧才对齐 = "随意乱动"）。
-        // 但单帧野值也可能长这样，所以加二次确认：把可疑观测缓存一帧，下一帧
-        // 与它一致（相位差 < 0.35 槽位、圆心跳变 < 6°）才认定"目标真的变了"。
         const double slot = 2.0 * kPi / 5.0;
         const double roll_raw = rune->phase_valid ? rune->phase_rad : rune->ypr_in_world[2];
         // 观测到的是"已激活的那片"时（slot_offset_valid），把它折算回**跟踪槽位**：
-        // 相位减 offset×72°，这样下面所有"相位跳变/接管/测量"都还站在跟踪槽位上，
-        // 瞄点不会跳到那片已激活的片上去（实测这类帧贡献了 11% 的 >2° 瞄准跳变）。
         const double roll_measurement =
             rune->slot_offset_valid ? roll_raw - rune->slot_offset * slot : roll_raw;
         if (!first_in_) {
@@ -114,7 +106,6 @@ namespace auto_aim::energy
             const bool slot_changed =
                 std::abs(limitRad(roll_measurement - ekf_.x[5])) > 0.35 * slot;
             // 非跟踪槽位的观测不能用来"接管/重置"估计器：它的相位是折算过的，
-            // 只适合当一次普通的测量（万一 offset 判错，也不会把估计器整块翻掉）。
             if (!rune->slot_offset_valid && (distance_jump || center_jump || slot_changed)) {
                 constexpr double kConfirmCenterRad = 6.0 * kPi / 180.0;
                 const bool confirmed =
@@ -133,7 +124,6 @@ namespace auto_aim::energy
                     pending_valid_ = false;
                     coaster_frames_ = 0;
                     // 观测确认接管：这就是"换叶/换靶"的真实信号（相位/圆心跳变），
-                    // 火控据此中断控制一帧并抑制开火。
                     blade_switched_ = true;
                     return;
                 }
@@ -152,7 +142,6 @@ namespace auto_aim::energy
         update(timestamp, rune.value());
 
         // Divergence guards: a small rune must keep |omega| near pi/3, and a
-        // large rune must keep a and w inside the simulator's ranges.
         if (mode_ == RuneMode::Small) {
             const double spd = ekf_.x[6];
             if (std::abs(spd) > kSmallOmega + kPi / 18.0 ||
@@ -177,16 +166,11 @@ namespace auto_aim::energy
             return;
         }
         // Coast on the motion model: advance the state to `timestamp` and keep
-        // publishing it, so a dropout does not reset the phase estimate.
         const double dt = timestamp - lasttime_;
         if (dt > 0.0) {
             // Never trust an unbounded time step: a stalled stream would
-            // otherwise integrate the phase model arbitrarily far.
             const double step = std::min(dt, 0.5);
             // 滑行时圆心在世界上是静止的：只有相位该继续走。这里先把"圆心偏航
-            // 角速度"清零，否则它会被相位旋转的观测残差污染，滑行时把圆心按
-            // 60°/s 外推出去，瞄准（含"瞄圆心"保底）会跟着转出去 —— 实测相机
-            // 会甩到 ±45° 再触发归位。
             ekf_.x[1] = 0.0;
             if (mode_ == RuneMode::Small) {
                 predictSmall(step);
@@ -207,12 +191,8 @@ namespace auto_aim::energy
         Q_.resize(n, n);
 
         // 相位"解缠"：换片/观测接管时，观测给的是包到 (-π, π] 的相位，直接当
-        // 初值会让相位状态在换片处跳回去（例如 150° → −140°），基于相位建立的
-        // 5 槽格点参考系随之被打乱（实测扇叶 ID 记账 78% 不一致）。这里把它折到
-        // 上一次状态附近，保证相位连续：新相位 = 旧相位 + 最短角差。
         double phase_init = rune.phase_valid ? rune.phase_rad : rune.ypr_in_world[2];
         // 观测到的是"已激活的那片"（不在跟踪槽位）时，先把相位折算回跟踪槽位：
-        // 否则初值会把相位钉到观测片，瞄点整跳一片。
         if (rune.slot_offset_valid) {
             phase_init -= rune.slot_offset * 2.0 * kPi / 5.0;
         }
@@ -225,7 +205,6 @@ namespace auto_aim::energy
                 rune.ypr_in_world[0], phase_init, kSmallOmega * voter_.clockwise();
         } else {
             // a = 0.9125, w = 1.942 and b = 2.09 - a = 1.1775 are the middle of
-            // the simulator's parameter ranges, the same seed the reference uses.
             x0_ << rune.ypd_in_world[0], 0.0, rune.ypd_in_world[1], rune.ypd_in_world[2],
                 rune.ypr_in_world[0], phase_init, 1.1775, 0.9125, 1.942, 0.0;
         }
@@ -308,13 +287,11 @@ namespace auto_aim::energy
                 };
 
                 // 残差门限：槽位/关联错了会让残差很大（一整片 ≈ 60 px），
-                // 那种量测直接丢掉，避免把状态拽偏（多片同帧时尤其重要）。
                 const Eigen::VectorXd predicted = predict_pixels(ekf_.x);
                 const Eigen::Vector2d observation(observed.x, observed.y);
                 if ((observation - predicted).norm() > model.max_residual_px) continue;
 
                 // 有限差分雅可比：只有 5 个相关状态分量，每帧多算 25 次投影，
-                // 代价可忽略，但省掉了对整套链式求导的维护。
                 Eigen::MatrixXd H = Eigen::MatrixXd::Zero(2, state_size);
                 const Eigen::VectorXd x0 = ekf_.x;
                 for (const int param : params) {
@@ -359,12 +336,8 @@ namespace auto_aim::energy
         const double spd_before = ekf_.x.size() > 6 ? ekf_.x[6] : 0.0;
 
         // Blade changes light up a different 72-degree slot; fold the
-        // measurement onto the tracked angle instead of re-initialising.
-        // 相位观测优先用几何量（深大做法）；PnP 的 roll 仅作兜底。
         const double roll_raw = rune.phase_valid ? rune.phase_rad : rune_ypr[2];
         // 观测到的是**已激活的那片**时，先折算回跟踪槽位（-offset×72°），
-        // 再参与"折到最近的兄弟槽"与相位测量：不折算的话状态会被拉到观测片，
-        // 瞄点整跳一片（现场实测这类帧贡献了 11% 的 >2° 瞄准跳变）。
         const double roll_measurement =
             rune.slot_offset_valid ? roll_raw - rune.slot_offset * 2.0 * kPi / 5.0 : roll_raw;
         if (std::abs(roll_measurement - ekf_.x[5]) > kPi / 12.0) {
@@ -392,8 +365,6 @@ namespace auto_aim::energy
         }
 
         // 像素残差观测（可选）：直接吃网络给的像素，替代下面两条 3D 量测。
-        // 注意**不能提前 return** —— 后面还有大符的正弦拟合/限幅与小符的
-        // 常量转速写回，那些与观测形式无关，必须继续执行。
         const bool pixel_mode = pixel_model_.valid();
         if (pixel_mode) {
             updateWithPixels();
@@ -410,10 +381,6 @@ namespace auto_aim::energy
         R1(1, 1) = 0.01;
         R1(2, 2) = 0.5;
         // roll（相位）这一项要放得很松：PnP 的 roll 只由靶面四点的"姿态"决定，
-        // 而靶面在 6 m 处只有 ~28 px 宽，关键点 1 px 的抖动就折合 ~4° 相位误差
-        // （实测逐帧 ±5~8°）。相位真正的信息来源是"靶心相对 R 标的位置"
-        // （下面 measurement 2），它靠 64 px 的力臂把误差压到 ~1°。原来的
-        // R1(3,3)=0.1 让噪声大的姿态测量主导，云台就会跟着抖、把符摆出画面。
         R1(3, 3) = 0.1;
 
         auto subtract_angles = [](const Eigen::VectorXd& a, const Eigen::VectorXd& b) {
@@ -429,17 +396,11 @@ namespace auto_aim::energy
         ekf_.update(z1, H1, R1, subtract_angles);
 
         // Measurement 2: the lit plate centre, predicted through the rune
-        // geometry (radius fixed at the configured value).
-        // 观测到的是已激活的那片时，预测与求导都要正对**那片观测**
-        // （状态相位 + offset×72°），而不是跟踪槽位（否则残差是一整片的 72°）。
         const double blade_phase_offset =
             rune.slot_offset_valid ? rune.slot_offset * 2.0 * kPi / 5.0 : 0.0;
         const Eigen::MatrixXd H2 = jacobian(blade_phase_offset);
         Eigen::Matrix3d R2 = Eigen::Matrix3d::Zero();
         // 靶心方向的观测精度被严重低估了：上面 PnP 的重投影误差实测 0.01~0.07 px，
-        // 靶心方向因此准到 ~0.5°（0.01 rad 相当于 5.7°，力臂 6.3 m 上就是 0.6 m,
-        // 和 0.7 m 的回转半径一个量级，等于相位基本没被约束）。收紧到 0.01 rad² 的
-        // 1/100，让相位由这条"靶心位置"测量主导，云台才不抖。
         R2(0, 0) = 0.01;
         R2(1, 1) = 0.01;
         R2(2, 2) = 0.5;
@@ -476,11 +437,6 @@ namespace auto_aim::energy
                 spd_fitter_.best_result_.phi, spd_fitter_.best_result_.C);
 
             // 物理限幅 + 帧间限幅：大符的相位角速度由模型 speed(t)=a·sin(wt+φ)+b
-            // 给出，恒在 [0, kLargePeakOmega] 内、且变化率上界约 a·w ≤ 2.09 rad/s²。
-            // 实测不加限幅时，只要观测在两片点亮扇叶之间跳一次，状态就会被推到
-            // ±95 rad/s，超前量 = spd × 飞行时间 随之前后甩——现场就是"云台在两块
-            // 待激活扇叶之间高频抖动"。这里把物理约束写回状态（与下面小符固定
-            // ω=π/3 是同一个思路）。
             {
                 constexpr double kLargeRateSlewRadSS = 3.0; // 帧间变化率上界
                 const double dt = std::max(1e-3, nowtime - lasttime_);
@@ -492,9 +448,6 @@ namespace auto_aim::energy
         }
 
         // 小符的转速是规则给定的常量（±π/3 rad/s，深大 SmallRuneKalmanFilter
-        // 的 expect_angular_velocity）：把它当**已知量**写回状态，而不是让滤波器
-        // 从观测里估。估计出来的 ω 会把关键点的噪声带进相位预测，直接表现为
-        // 瞄准角的抖动；固定 ω 后预测项只依赖"相位 + 常量转速"。
         if (mode_ == RuneMode::Small) {
             ekf_.x[6] = kSmallOmega * (voter_.clockwise() >= 0 ? 1.0 : -1.0);
         }

@@ -28,8 +28,6 @@ namespace auto_aim::energy
         lifecycle_.configure(config_.status_track_hold_s,
                              config_.status_lost_timeout_s);
         // 启动横幅：把"这次到底用了哪套模型/阈值"打出来 —— 现场排查最常见的
-        // 误判就是配置与模型不匹配（类别数、点序、输入尺寸、阈值），
-        // 所以这几个量必须在日志开头就有据可查。
         std::cout << "[rune config] classes=" << config_.model.num_classes
                   << " keypoints=" << config_.model.num_keypoints
                   << " input=" << config_.model.input_size << "x"
@@ -63,14 +61,12 @@ namespace auto_aim::energy
         if (blades.empty()) return {0.0f, 0.0f};
 
         // 0) 多片扇叶求交得到的圆心最可信（每片都给出一条"圆心→靶心"射线，
-        //    射线交点与各片的 R 标点无关，噪声被平均掉）。
         if (multi_blade_hub.has_value()) {
             hub_source_ = HubSource::MultiBladeRay;
             return multi_blade_hub.value();
         }
 
         // 靶面点半径（像素）：四个靶面点相对靶心的平均距离。圆心一定在
-        // "靶心 + N 倍该半径" 的环上（N = 圆心到靶心 / 靶面点半径）。
         double plate_radius_px = 0.0;
         {
             const std::size_t count = std::min<std::size_t>(4, blades.front().points.size());
@@ -82,8 +78,6 @@ namespace auto_aim::energy
         plate_radius_px = std::max(2.0, plate_radius_px);
 
         // 1) 网络直接给的 R 标（旋转中心）。深大五点模型的第 5 个点就是它，
-        //    比"靶心 + 臂点外推"稳得多。仿真渲染和训练域差得远时，网络会把
-        //    它压到靶心附近，这种"圆心 = 靶心"的点必须丢掉。
         cv::Point2f hint(0.0f, 0.0f);
         int hint_count = 0;
         const double orbit_ratio = std::max(1.5, config_.center_orbit_ratio);
@@ -91,9 +85,6 @@ namespace auto_aim::energy
             if (!blade.has_rune_center) continue;
             const double offset = cv::norm(blade.rune_center - blade.center);
             // 圆心到靶心的像素距离应当 ≈ orbit_ratio × 靶面点半径：太近说明网络把
-            // 第 5 点压在了靶心上（仿真域差异时常见），太远说明那是个野点——离域
-            // 画面上网络会在画面边缘给出高置信度的假点，直接用它会把 PnP 选解、
-            // 相位和瞄准全部带偏（实测 EKF 的 yaw 会跑到 30° 以上）。
             if (offset < 0.5 * plate_radius_px ||
                 offset > std::max(2.0, 1.5 * orbit_ratio) * plate_radius_px) {
                 if (std::getenv("ULTRA_VISION_RUNE_DEBUG")) {
@@ -109,20 +100,15 @@ namespace auto_aim::energy
         if (have_hint) hint /= static_cast<float>(hint_count);
 
         // 模型给的 R 标（旋转中心）是专门训练出来的点，深大参考实现也直接
-        // 用它（RP-26Rune：rune_center = point_R）。实测在归一化输入下它与
-        // 画面里 5 条臂的交汇点误差 0.5 px 量级，深度校正全靠它，直接用。
         if (have_hint) {
             hub_source_ = HubSource::RMarkKeypoint;
             return hint;
         }
 
         // 3) 没有可用方向：沿环带找"最亮方位"。能量机关的 R 标是画面里唯一
-        //    稳定的亮点（仿真里是一块红色 R），靶面图案离该环带也够远。
         {
             const cv::Point2f plate_center = blades.front().center;
             // 判据是"小亮点 + 周围暗"：R 标是几像素大小的亮块（仿真是纯红，
-            // 灰度只有 ~76，二值化阈值抓不到，必须用通道最大值），而靶面图案
-            // 是个大亮块，两者用"小窗峰值 − 大窗均值"区分得开。
             cv::Mat channels[3];
             cv::split(bgr_image, channels);
             const cv::Mat bright = cv::max(cv::max(channels[0], channels[1]), channels[2]);
@@ -188,7 +174,6 @@ namespace auto_aim::energy
         // 类别统计（CSV 与激活状态机用）：0=未激活，1=小符已激活，2=大符已激活。
         class_counts_ = {0, 0, 0};
         // 诊断量每帧清零：否则没建出 rune 的帧会沿用上一帧的值，
-        // 和同一行的观测列（此时是 0）混在一起，会得出"hub 偏了 300px"这种假结论。
         last_blade_center_ = {0.0f, 0.0f};
         last_blade_rmark_ = {0.0f, 0.0f};
         frame_orbit_px_ = -1.0;
@@ -224,8 +209,6 @@ namespace auto_aim::energy
         };
 
         // ① 几何修正：每片扇叶（含已激活）都给出"圆心→靶心"方向，圆心必在这些
-        //    射线上。≥2 片时用最小二乘求交点 —— 已激活扇叶在这里只贡献几何约束，
-        //    不参与目标选择。这正是"用已激活扇叶做重投影修正"的最小实现。
         std::optional<cv::Point2f> multi_blade_hub;
         {
             Eigen::Matrix2d normal_matrix = Eigen::Matrix2d::Zero();
@@ -271,15 +254,6 @@ namespace auto_aim::energy
         }
 
         // ② 目标只取"未激活(class 0)"：小符每轮只有一片未激活，天然不会在两片
-        //    已激活扇叶之间来回换靶（现场实测的"云台左右拉扯"）。
-        //    但离线验证（录制帧逐帧）发现：网络会把**点亮图案**误判成 class 1
-        //    （88 个有候选帧里 20 帧，23%）。硬过滤会在这些帧丢掉真正的目标、
-        //    转去锁更暗的片子（配对 A/B：每轮命中 30% vs 放开类别 36%）。
-        //    折中：默认只在 class 0 里选；只有当某个非 class0 候选的亮点分
-        //    **明显更亮**（超过最佳 class0 候选 margin 倍）时才采信它 ——
-        //    这既救回"点亮片被误分类"的帧，又不会去锁已经打过的亮片。
-        // 候选的"图像相位"（圆心→靶面中心的方向）。类别闸门与相位关联都用它，
-        // 所以在函数作用域里定义一次。
         const auto candidate_phase = [&](const RuneModel::Object& candidate) -> double {
             if (candidate.keypoints.size() < 5) {
                 return std::numeric_limits<double>::quiet_NaN();
@@ -289,17 +263,6 @@ namespace auto_aim::energy
             return std::atan2(plate.y - hub.y, plate.x - hub.x);
         };
         // ---- 几何连续优先（必须在类别过滤**之前**）-----------------------------
-        // 2026-09-24 实测的"最后一片打不出去"根因：只剩一片未激活时，网络会把
-        // **已激活片**标成 class 0、把真正的目标标成 class 1；类别过滤按类别重排
-        // 候选，于是"几何上我们一直在跟踪的那片"被挤掉，瞄点被拖到已激活片上
-        // （仿真事件里直接可见：highlighted=1 时我们连续 4 发打在 hit=3，
-        // scored 全 0，本轮随后超时失败）。
-        //
-        // 三家参考都不允许"类别"决定目标：sp_vision 用"亮片数 + 位置连续性"
-        // （buff_type.cpp 的 PowerRune），rm_vision_core 在 inactive 为空时本帧
-        // 不更新、并把 active 集合只当几何参考，RP-26Rune 用整符模型做配准。
-        // 这里做等价的事：先用**运动模型预测的相位**在全部候选里找"连续的那片"，
-        // 找到就只保留它，类别随后不再参与。
         std::optional<std::size_t> continuous_index;
         if (config_.phase_assoc.enabled && assoc_valid_ && timestamp > 0.0) {
             const double dt = timestamp - assoc_time_;
@@ -335,8 +298,6 @@ namespace auto_aim::energy
             }
         }
         // Observation/model construction is class-agnostic. Activated blades are
-        // valuable geometry measurements and must still build the five-slot model.
-        // Whether the planned slot may be fired on is decided later by RuneFireGate.
 
         if (std::getenv("ULTRA_VISION_RUNE_DEBUG")) {
             std::cerr << "[rune detect] candidates=" << results.size();
@@ -351,17 +312,8 @@ namespace auto_aim::energy
         }
 
         // Keep only the candidate whose plate is actually lit. Several blades
-        // are visible at once (the unlit artwork is drawn dark), and picking by
-        // network score alone made the tracker lock onto a dark blade, which is
-        // exactly the "hits the neighbouring target" failure.
-        // 注意：这里必须对"只检出一片"的帧也生效。大符每轮点亮两片，关键点
-        // 网络经常一帧只出其中一片、下一帧换成另一片；如果只在多候选时做锁定，
-        // 单候选帧就会各自为政，瞄点仍在两片之间来回抖。
         if (config_.prefer_bright_blade && !results.empty()) {
             // 亮点判据用"小窗峰值 − 大窗均值"，而不是区域均值：仿真里画面
-            // 底部的白色反光整片都很亮，均值排序会把它排在真正点亮的靶面前面
-            // （网络也确实会在那片反光上出框，距离解算因此跑到十几米）。
-            // 点亮的靶面是"小亮块 + 周围暗"，反光是"大面积均匀亮"，两者可分。
             cv::Mat channels[3];
             cv::split(bgr_image, channels);
             const cv::Mat bright_image =
@@ -376,9 +328,6 @@ namespace auto_aim::energy
                 roi &= cv::Rect(0, 0, bgr_image.cols, bgr_image.rows);
                 if (roi.width <= 0 || roi.height <= 0) return 0.0;
                 // 小窗固定 5x5（靶面图案在 6 m 处只有 ~15 px 半径，用更大的窗
-                // 会把暗扇叶的轮廓也平均进来）；大窗取候选框本身，用"小窗峰值 −
-                // 大窗均值"衡量"小亮块压在场地上"的程度。这套参数在仿真实测里
-                // 选靶准确率 ~78%（对比按网络置信度只有 29%）。
                 const int small = 2;
                 cv::Rect small_roi(static_cast<int>(center.x) - small,
                                    static_cast<int>(center.y) - small, 2 * small + 1,
@@ -410,7 +359,6 @@ namespace auto_aim::energy
             }
 
             // 记录所有"足够亮"的候选作为点亮扇叶集合（阈值取最亮者的 60%，
-            // 只排除明显是暗色图案的误检）。
             lit_centers_.clear();
             const double lit_threshold = *std::max_element(scores.begin(), scores.end()) * 0.6;
             for (std::size_t i = 0; i < results.size(); ++i) {
@@ -426,16 +374,6 @@ namespace auto_aim::energy
             lit_center_ = plateCenter(results[best]);
 
             // ① 相位关联选片（优先于亮度竞争，且**不依赖 EKF**）
-            //
-            // 大符每轮两片同时点亮，两片相位差 72°/144°。按亮度竞争时两片亮度
-            // 接近就会逐帧易主：观测相位出现 ±130° 的跳变，EKF 的角速度通道
-            // 被打到 ±95 rad/s（物理上只可能 0~2.09），瞄准角随之前后甩 ——
-            // 现场表现就是"在两块待激活扇叶之间高频抖动"。
-            //
-            // 做法借深大 SmallRuneKalmanFilter：用"上一次关联到的相位 +
-            // 自估角速度 × dt"预测本帧相位，取最接近的候选；残差超过容差就
-            // 认为本帧没有可信观测（返回空，让滤波滑行），把跳片挡在 EKF 之前。
-            // 自估角速度用相邻两次接受观测的相位差做 EMA，并夹在大符物理区间里。
             bool assoc_used = false;
             assoc_rejected_ = false;
             std::size_t assoc_choice = best;
@@ -448,13 +386,6 @@ namespace auto_aim::energy
 
                 if (can_predict) {
                     // 关联判据（按预测相位取最近 + 残差门限）：
-                    //   predicted = 上次相位 + 自估角速度 × dt
-                    //   选 |wrap(phase_i - predicted)| 最小的候选；残差超过门限就
-                    //   认为本帧没有可信观测。
-                    // 为什么不直接用"隐含角速度必须落在物理区间"：小 dt 时相位
-                    // 测量噪声（±0.1~0.6 rad）折算出的角速度噪声可达 ±20 rad/s，
-                    // 物理区间会把 40% 的合法观测误杀（实测）。残差门限与 dt 无关，
-                    // 而两片扇叶相隔 1.26 rad，门限 0.6 rad 足以区分。
                     const double predicted = assoc_phase_ + assoc_rate_ * dt;
                     const double gate =
                         std::min(0.55 * (2.0 * CV_PI / 5.0), assoc.tolerance_rad + 0.5 * dt);
@@ -498,11 +429,6 @@ namespace auto_aim::energy
                         pending_switch_frames_ = 0;
                     } else if (results.size() > 1) {
                         // 只有"多片同时可见"时才用关联丢弃：这时才有选错片的歧义。
-                        // 单片（网络本帧只给一片）没有歧义，交给锁定/状态估计的
-                        // 换叶确认去处理，否则会把 70% 的单片观测白白丢成滑行
-                        // （实测单候选帧占拒绝的 90%）。
-                        // 所有候选都离预测相位太远：本帧观测不可信（跳片/误检），
-                        // 交给状态估计滑行。
                         assoc_rejected_ = true;
                         assoc_residual = best_cost;
                         assoc_residual_last_ = best_cost;
@@ -516,19 +442,6 @@ namespace auto_aim::energy
                         return std::nullopt;
                     } else {
                         // 单片观测，但它离预测位置很远（≥ 一个槽位量级）。
-                        //
-                        // 2026-09-24 实测：已激活片变多以后，网络**逐帧**在相邻亮片
-                        // 之间翻烧饼 —— 尤其"待激活片夹在两片已激活片之间"时，
-                        // 观测相位在 ±72°/144° 之间来回跳（30 s 里 26 次 >40° 跳变，
-                        // 其中一段 1 s 内跳 5 次），而且这些帧大多是**单候选**，
-                        // 所以旧的"单片无歧义、直接放行"规则会把跳变原样喂给估计器：
-                        // EKF 的 roll/角速度被反复拽，瞄点在两片之间甩、记账也被污染。
-                        //
-                        // 判据只有一个：**连续确认**。连续 switch_confirm_frames 帧
-                        // 看到同一个新位置（互相在 0.35 槽位内）才认这次换片；确认之前
-                        // 本帧不产生观测，交给估计器按运动模型滑行（滑行的小符相位是
-                        // 可靠的：转速固定 60°/s）。真实换片是持续事件，两帧就够区分，
-                        // 代价只有 ~66 ms 的滑行。
                         const double observed = candidate_phase(results[index]);
                         const double step = 2.0 * CV_PI / 5.0;
                         if (std::abs(limitRad(observed - pending_switch_phase_)) < 0.35 * step) {
@@ -540,7 +453,6 @@ namespace auto_aim::energy
                         const int confirm = std::max(1, assoc.switch_confirm_frames);
                         if (pending_switch_frames_ >= confirm) {
                             // 确认换片：把关联重置到新位置（角速度/方向保留），
-                            // 本帧照常产出观测。
                             assoc_phase_ = observed;
                             assoc_time_ = timestamp;
                             assoc_valid_ = true;
@@ -572,13 +484,10 @@ namespace auto_aim::energy
             }
 
             // 锁定：优先保持上一帧选中的那片扇叶，除非有候选"明显更优"并
-            // 连续多帧确认。没有这层滞回时，亮度接近的两个候选会逐帧易主，
-            // 目标角在 72° 两档之间来回跳，云台看起来就是左右拉扯。
             std::size_t chosen = best;
             if (assoc_used) {
                 assoc_residual_last_ = assoc_residual;
                 // 相位关联已经给出明确选择：不再让亮度/锁定滞回改判，
-                // 避免两片之间来回切。锁定解禁仍由上面的"锁定片变 class!=0"负责。
                 chosen = assoc_choice;
                 switch_votes_ = 0;
                 picked_brightness_ = scores[chosen];
@@ -604,7 +513,6 @@ namespace auto_aim::energy
                 const bool lock_found = locked_index >= 0 && locked_distance <= lock_radius;
                 if (!lock_found) {
                     // 锁定目标这一帧没检出：短暂丢失就交给滤波滑行，不换靶；
-                    // 连续丢失超过阈值才允许重新选，避免被别片抢走。
                     if (++lock_miss_ >= config_.lock_max_miss) {
                         has_lock_ = false;
                         switch_votes_ = 0;
@@ -615,7 +523,6 @@ namespace auto_aim::energy
                     }
                 } else {
                     // 已锁定：始终选离当前瞄准位置最近的那一片，不再比较亮度，
-                    // 否则大符两片同时点亮时会来回跳。
                     chosen = static_cast<std::size_t>(locked_index);
                     switch_votes_ = 0;
                 }
@@ -641,7 +548,6 @@ namespace auto_aim::energy
                             assoc_sign_ = observed_rate > 0.0 ? 1 : -1;
                         }
                         // 角速度只按幅值做 EMA 与夹取，方向单独用 assoc_sign_ 保持，
-                        // 这样顺时针（负角速度）不会被 clamp 到正区间里去。
                         const double magnitude = std::clamp(
                             std::abs(observed_rate), assoc.rate_min_rad_s,
                             assoc.rate_max_rad_s);
@@ -652,7 +558,6 @@ namespace auto_aim::energy
                     }
                 } else {
                     // 首次捕获：方向未知（assoc_sign_=0），角速度先用标称值，
-                    // 下一帧由隐含角速度确定方向。
                     assoc_rate_ = assoc.nominal_rate_rad_s;
                     assoc_sign_ = 0;
                 }
@@ -675,8 +580,6 @@ namespace auto_aim::energy
             for (auto& candidate : candidates) {
                 {
                     // 深大五点模型：图像上逆时针依次是 k0 -> k1 -> k4 -> k3，
-                    // 对应 PnP 物点的 外 -> 右 -> 内 -> 左（RuneSolver 的顺序），
-                    // k2 是 R 标（机关旋转中心）。
                     if (candidate.keypoints.size() < 5) continue;
                     std::vector<cv::Point2f> points;
                     points.reserve(5);
@@ -690,7 +593,6 @@ namespace auto_aim::energy
                     }
                     if (points.size() != 4) continue;
                     // 靶面几何精修（网络 ROI → 经典角点提取）：只在这个候选身上做，
-                    // 不通过一致性检查就原样保留网络结果（见 rune_plate_refiner.hpp）。
                     if (config_.plate_refiner.enabled) {
                         ++refine_stats_.plate_refiner_tried;
                         const std::array<cv::Point2f, 4> network_points{points[0], points[1],
@@ -706,7 +608,6 @@ namespace auto_aim::energy
                     points.push_back(candidate.center);
                     blades.emplace_back(points, candidate.center, Lit);
                     // 观测精修：轮廓几何 + 可用性闸门（config.refiner.enabled=false 时
-                    // 下面全部退化成"原样使用 k2"，故默认路径与之前完全一致）。
                     cv::Point2f center = candidate.keypoints[2];
                     if (config_.refiner.enabled) {
                         RuneBladeRefinement detail;
@@ -723,7 +624,6 @@ namespace auto_aim::energy
                         if (detail.center_fused) ++refine_stats_.center_fused;
                         if (config_.refiner.require_usable && !detail.usable) {
                             // 几何不可信（灯臂轮廓破碎/长宽比离谱/装甲板凹陷）：
-                            // 这一片本帧不参与解算，宁可让滤波器滑行。
                             blades.pop_back();
                             ++refine_stats_.dropped;
                             continue;
@@ -753,8 +653,6 @@ namespace auto_aim::energy
         std::optional<PowerRune> rune = attempt(results);
         if (!rune.has_value() && config_.fallback_single_blade && results.size() > 1) {
             // Several blades are visible but they do not fit the lattice
-            // (recorded footage where the whole rune glows). Track the most
-            // confident one, which is what the reference implementation does.
             const auto best = std::max_element(
                 results.begin(), results.end(),
                 [](const RuneModel::Object& lhs, const RuneModel::Object& rhs) {
@@ -774,7 +672,6 @@ namespace auto_aim::energy
         last_eval_time_ = timestamp;
         last_powerrune_ = rune;
         // 自适应画布缩放用的尺度：本帧由靶面尺寸反推的轨道半径。用 EMA 平滑，
-        // 单帧的靶面抖动（角点噪声）不该让缩放系数来回跳。
         if (frame_orbit_px_ > 5.0) {
             last_orbit_px_ = last_orbit_px_ > 5.0
                                  ? 0.7 * last_orbit_px_ + 0.3 * frame_orbit_px_
@@ -782,7 +679,6 @@ namespace auto_aim::energy
         }
         if (target_class_ < 0) {
             // prefer_bright_blade 关闭时上面没有选靶分支，这里按"离实际瞄准的
-            // 那片最近"补一次类别，好让 CSV 与激活状态机拿到一致的类别。
             float best_distance = std::numeric_limits<float>::max();
             for (const RuneModel::Object& candidate : results) {
                 const float distance = cv::norm(candidate.center - rune->target().center);
@@ -804,8 +700,6 @@ namespace auto_aim::energy
         if (input_width <= 0 || input_height <= 0) return;
 
         // 画布缩放系数 cs 的含义：原图先被缩放/填充成 cs 倍大小，再 letterbox 到
-        // 网络输入。因此"机关在网络输入里的轨道半径" = orbit_px × min(iw/W, ih/H) / cs，
-        // 反解 cs 就让机关落在训练尺度上（canvas_target_orbit_px）。
         const double base = std::min(static_cast<double>(input_width) / bgr_image.cols,
                                      static_cast<double>(input_height) / bgr_image.rows);
         double scale = 0.0;
@@ -848,8 +742,6 @@ namespace auto_aim::energy
         last_roi_fallback_ = false;
 
         // ROI 裁剪把视野缩小了。如果这一帧一个候选都没有，立即用整幅图重跑
-        // 一次，避免"裁偏一次 → 丢失 → 再裁偏"的正反馈。只有真正启用 ROI
-        // 时才会多付这一次推理。
         if (objects.empty() && last_roi_active_ && config_.canvas_recenter_fallback) {
             last_roi_fallback_ = true;
             model_.setCanvasCenter({0.0f, 0.0f}, false);

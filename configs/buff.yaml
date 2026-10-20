@@ -8,9 +8,7 @@
 # 靶面半宽 0.127 m、臂上关键点半径 0.220 m。实车需要在现场重新标定后修改。
 
 rune:
-  enabled: true
   mode: small              # small（小符，60°/s 匀速）| large（大符，变速）
-  visualize: true
   simulator_config: simulator.yaml   # 与 configs/simulator.yaml 共用的 TCP 端点
 
   # 相机内参：与 configs/camera.yaml 的 simulator 段一致（640x480, FOV 45°）。
@@ -196,7 +194,6 @@ rune:
     # 前馈尖峰会把生成器推进超调振荡（实测下发角 6↔38° 来回摆）。
     max_target_velocity_deg_s: 200.0
     # 换靶阶跃帧清零速度前馈（压超调用，A/B 可关）。
-    zero_feedforward_on_step: true
     # 扇叶 ID 闸门：锁定的槽位已在"已激活"集合里就不开火（防止打旧靶）。
     # 2026-09-24 更新：**默认打开**。早期 A/B（ON 18%/36% vs OFF 40%/40%）判它更差，
     # 那是因为当时的槽位记账靠网络 class 1/2（新模型下这条路是死的）而且选靶在
@@ -204,7 +201,6 @@ rune:
     # （§51），实测反过来：命中有效率 28~34% → 42~58%，小符完整激活轮数 1/8 → 3/12，
     # 大符完整激活 0 → 2（35 发 / 8 次有效命中），实拍 buff_three 跟踪率不变。
     # 仍准的判据在 CSV：slot_id / slot_activated_mask / slot_votes。
-    fire_block_on_hit_slot: true
     # 相位关联选片（大符每轮两片同时点亮）：用"上次关联相位 + 自估角速度×dt"
     # 预测本帧相位，取最接近的候选；残差超过 tolerance 就丢弃这一帧观测，
     # 交给状态估计滑行。实测（大符 25 s）：没这层时两片会逐帧易主，观测相位
@@ -274,7 +270,6 @@ rune:
     high_speed_delay: 0.13
     fire_thresh_degrees: 1.5      # 开火时云台与瞄点允许的最大角误差
     # 云台指令闸门：仿真器把 GIMBAL 当绝对角执行，单帧野值不能把相机甩出去
-    max_slew_deg_per_frame: 8.0
     aim_yaw_limit_deg: 50.0
     aim_pitch_limit_deg: 35.0
     round_window_s: 2.5           # 一轮点亮窗口（规则 2.5 s），超窗口的弹丸不打
@@ -289,11 +284,6 @@ rune:
     slot_activate_votes: 4        # 槽位"已激活"的投票阈值（每帧+2、每4帧-1）
     post_hit_switch_phase_rad: 0.30    # 命中保持(hold)的解禁阈值：靶心图像相位跳变
     post_hit_hold_max_s: 1.2           # 命中保持最长时间（没确认换片也放行，防卡死）
-    # 解除禁火还要求看到"已激活片"作证。实测 3+3 轮（30 s 小符）：
-    #   开：计分 5.7/轮、打旧靶 11.3/轮；关：5.0/轮、9.7/轮 —— 比值一样，判据
-    #   几乎不改变决策（"能看到 class 1/2 候选"本来就几乎每帧成立）。默认关，
-    #   开关留着做后续实验。
-    post_hit_require_active_witness: false
 
   # 云台下发：由控制层的 100 Hz 轨迹生成器执行（加加速度受限 + 速度前馈），
   # 视觉帧率只负责更新目标角，不再直接产生角度阶跃，避免顿挫。

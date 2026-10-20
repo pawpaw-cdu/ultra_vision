@@ -1,15 +1,4 @@
 // 下位机协议层的离线自检（不需要硬件、不需要相机）。
-//
-// 覆盖三件事，任何一件错了真机都会"连上但不动/乱动"：
-//   1. CRC16 必须是 RM 标准。RM 那张 crc16_table 的前 8 项
-//      (0x0000,0x1189,0x2312,0x329b,...) 逐项等于 **CRC-16/MCRF4XX**
-//      （多项式 0x1021 反射=0x8408、init 0xffff、refin/refout=true、无异或输出），
-//      其标准校验值 "123456789" -> **0x6F91** 钉死；再用逐位实现交叉核对。
-//      注意：它**不是** CRC-16/MODBUS（那个是 poly 0xA001、校验值 0x4B37），
-//      两者查表口径不同 —— 这一条搞错，真机就是"能连上但 CRC 全不过"。
-//   2. 两个结构体的**字节布局**必须和下位机 visual_task.h 的 TJ_T_t/TJ_R_t 一致
-//      （43 B / 29 B，各字段偏移见下面的断言）—— 编译器 padding 变了真机就全错；
-//   3. 打包 → 校验 → 解析往返一致；改一个字节、改帧头、截断都必须被判非法。
 
 #include <cstdint>
 #include <cstdio>
@@ -33,7 +22,6 @@ namespace
     }
 
     /// @brief 逐位实现的 CRC16（poly 0x1021 反射=0x8408、init 0xffff、无异或输出
-    ///        = CRC-16/MCRF4XX），用来独立核对查表版，而不是拿同一个实现自己比自己。
     uint16_t crc16Bitwise(const uint8_t* data, std::size_t length)
     {
         uint16_t crc = 0xffff;

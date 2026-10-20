@@ -82,8 +82,6 @@ namespace auto_aim
         const auto center = predictCenterPosition(estimate, lead_time);
         const double center_angle = std::atan2(center[2], center[0]);
         // ArmorEKF stores armor positions as center + R * radial. The visible
-        // firing-side armor is therefore opposite that radial direction. Shift
-        // the plate angle by pi before comparing it with the center bearing.
         const double plate_angle = estimate.yaw + estimate.omega * lead_time +
             angleForPlate(wrapPlateId(armor_id)) + kPi;
         return normalizeAngle(plate_angle - center_angle);
@@ -114,8 +112,6 @@ namespace auto_aim
         }
 
         // ---- 静止靶闸门：静止时把速度/角速度按 0 处理 ----
-        // 见 TargetSelectorConfig::motion_gate_* 的实测数据：阈值按"噪声够不到、
-        // 真实运动够得着"取，进/出各一个阈值（滞回）避免在边界抖动。
         TargetEstimate estimate_used = estimate_in;
         if (config_.motion_gate_enabled) {
             const double speed_h =
@@ -141,22 +137,12 @@ namespace auto_aim
         const TargetEstimate& estimate = estimate_used;
 
         // ---- 提前量口径改成参考实现的形式（2026-10-15）--------------------------
-        // 参考实现（sp_vision `aimer.cpp`）只叠"飞行时间 + 0.005 s 检测耗时"，
-        // delay_time 在配置里就是 0：**它从不把速度外推 0.3 s**。我们原来把
-        // `观测年龄 + 云台时间` 也塞进位置外推，等于让速度状态的噪声（自旋时 ±2~6 m/s、
-        // 深度换向时更大）乘上一个长视界——小陀螺甩飞、深度反向塌陷都是这一个放大器。
-        // 观测年龄该补的由"状态按时间戳外推 + 时间基对齐"负责，不再乘速度。
-        // A fast target needs a larger allowance than a slow one; see the config
-        // comment. The split is on the chassis yaw rate, like the reference.
         const double latency = std::abs(estimate.omega) > config_.decide_speed
             ? config_.high_speed_latency
             : config_.low_speed_latency;
         const double seed_time = latency + center_distance / config_.projectile_speed;
 
         // ---- 守角档：|ω| 超过云台可达上限，追板必然失败 -----------------------
-        // 瞄"预测的底盘中心方位"：正对相机的近侧板与中心方位只差 asin(R/d)≈2~3°，
-        // 云台停住不动就能让每块板周期性扫过视轴，不再被板换甩飞。开火窗 = 预测
-        // 弹丸到达时刻，最近的板与守角的夹角在 spin_fire_tolerance 内。
         if (config_.spin_hold_enabled &&
             std::abs(estimate.omega) > config_.chase_omega_threshold) {
             const std::array<double, 3> center_pred{{
@@ -166,10 +152,6 @@ namespace auto_aim
             const double horizontal = std::hypot(center_pred[0], center_pred[2]);
             if (horizontal > 1e-6 && center_pred[2] > 0.0) {
                 // 弹道下坠：这里必须和追板档用**同一套**补偿，否则两档在 |ω| 门限
-                // 附近来回切时，命令 pitch 会一次跳一个 drop（3 m、25 m/s ≈ 1.3°，
-                // 5 m ≈ 1.9°）—— 实测就是"pitch 偶尔抽一下"（2026-10-15：1 rad/s 跑
-                // 里 ω 在 2.5 门限上下跳，pitch 在 0.53° 与 1.86° 之间跳 1.33°，
-                // 差的正好是 drop 1.29°）。
                 const double flight_time = center_distance / config_.projectile_speed;
                 const double drop = 0.5 * config_.gravity * flight_time * flight_time;
                 // 相机系 y 向下：下坠要让瞄点抬高 → y 减小。
@@ -343,10 +325,6 @@ namespace auto_aim
             candidate.lead_time = aim_time;
             candidate.time_to_handoff = time_to_handoff;
             // Spinning chassis: a plate crosses the window in a fraction of the
-            // bullet's flight time, so requiring it to stay put for the whole
-            // lead time (`time_to_handoff > aim_time`) is unsatisfiable and
-            // silently disables firing. The reference implementation only asks
-            // for "inside the window and on the side where plates appear".
             const bool spinning = std::abs(estimate.omega) >
                 config_.spin_omega_threshold;
             candidate.in_fire_window = abs_delta <= config_.coming_angle &&
@@ -368,9 +346,6 @@ namespace auto_aim
         }
 
         // Plate locking: when the previously chosen plate is still eligible,
-        // keep it unless another candidate is clearly cheaper. Without this the
-        // selector can alternate between two plates that sit at similar angles,
-        // which costs a gimbal round trip every time.
         if (lock_id_ >= 0 && lock_id_ < 4 &&
             evaluated[static_cast<std::size_t>(lock_id_)].eligible) {
             const double locked_cost =
@@ -388,10 +363,6 @@ namespace auto_aim
         result = evaluated[best_armor].decision;
 
         // No handoff blending while the chassis is spinning. The blend puts the
-        // aim point *between* two plates, so neither is ever aligned with the
-        // gimbal and the firing gate stays closed. During spin the plates sweep
-        // continuously anyway, so aiming straight at the chosen one is both
-        // simpler and correct.
         const bool spin_mode = std::abs(estimate.omega) >
             config_.spin_omega_threshold;
         if (spin_mode) return result;

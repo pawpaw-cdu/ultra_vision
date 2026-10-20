@@ -41,7 +41,6 @@ namespace auto_aim::energy
 
         if (frames_without_control_ > config_.recenter_after_frames) {
             // 连"最后已知符心"都过期了（例如从没看到过符，或超过 park 时限）：
-            // 这才回标定位姿，作为最后的兜底。
             frames_without_control_ = 0;
             decision.reset_estimator = true;
             if (std::abs(commanded_yaw) > config_.home_epsilon_rad ||

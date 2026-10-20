@@ -1,14 +1,4 @@
 // Energy-rune (大小能量机关) 跟踪与瞄准入口。
-//
-// Two inputs, mirroring the auto-aim entry points:
-//   * the TCP simulator (default): frames, timestamps and the GIMBAL/FIRE
-//     command channel are shared with node_sim.cpp;
-//   * a video file, for offline review of recorded footage.
-//
-// In video mode there is no gimbal feedback, so the camera pose stays at the
-// configured angles and the computed commands are only printed. Use
-// ULTRA_VISION_RUNE_POSE="yaw_deg,pitch_deg" when the recording was made with
-// the gimbal away from the calibration pose.
 
 #include <algorithm>
 #include <chrono>
@@ -121,10 +111,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                                         config.max_distance_jump_ratio,
                                         config.max_center_jump_deg);
     // ---- 瞄准解算放在控制线程（参照 sp_vision 的 multithread/commandgener）----
-    // 帧循环只发布"最新目标状态 + 该帧时刻 + 平滑延迟"，控制线程按 100 Hz 用
-    // **当前时刻**重算瞄准/弹道（to_now），避免目标角在两帧之间变旧；
-    // 没有目标时按帧循环给的"停靠角"继续下发。ULTRA_VISION_RUNE_AIM_IN_CONTROL=0 可关。
-    // 试射模式下必须关掉"控制线程算瞄准"，否则 provider 会用目标角覆盖试射角。
     const bool aim_in_control =
         (std::getenv("ULTRA_VISION_RUNE_AIM_IN_CONTROL") == nullptr ||
          std::string(std::getenv("ULTRA_VISION_RUNE_AIM_IN_CONTROL")) != "0");
@@ -133,8 +119,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
     if (!input.open(config, config_dir, video_path)) return -1;
 
     // 观测隔离实验：保持物理相机不动，避免云台闭环把目标在画面里来回拖动。
-    //   now              = 从启动开始冻结在初始/指定姿态
-    //   activation       = 正常闭环打出第一次真值激活后冻结并停火
     enum class GimbalFreezeMode { None, Now, AfterActivation };
     GimbalFreezeMode freeze_mode = GimbalFreezeMode::None;
     if (const char* freeze = std::getenv("ULTRA_VISION_RUNE_GIMBAL_FREEZE")) {
@@ -195,15 +179,11 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
     int shots_held_for_window = 0;
     bool scored_hit_this_frame = false;
     // ---- 一轮（点亮窗口）的记账 + 命中保持 + 禁火窗口 ----------------------
-    // 规则与状态都在 rune_round_guard.{hpp,cpp}：本轮何时开始/结束、类别命中
-    // （class0 → class1/2）、命中后的 hold、以及窗口是否还开着。
-    // 注：hold 在**本帧**发布之后才更新（与拆分前的内联顺序一致，因此发布出去的
-    // hold 比测量晚一帧），这样 A/B 数据可以直接对照。
     auto_aim::energy::RuneRoundGuard round_guard(
             auto_aim::energy::RuneRoundGuard::Config{
             config.round_end_frames, config.blade_slot_jump_px, config.fire_start_delay_s,
             config.round_window_s, config.post_hit_switch_phase_rad, 2.0 * CV_PI / 5.0,
-            config.post_hit_hold_max_s, config.post_hit_require_active_witness});
+            config.post_hit_hold_max_s, false});
     // 上一次成功解算出观测的本地时间（用于"观测寿命"判定，见 RuneAimer）。
     double last_solved_time = -1.0;
     // 观测层只提供几何/相位；开火资格由独立状态机按计划槽位判定。
@@ -215,8 +195,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         auto_aim::energy::RuneAimFallback::Config{config.park_on_center_max_age_s,
                                                   config.recenter_after_frames});
     // ---- 扇叶槽位格点（1..5 号位的记账）------------------------------------
-    // 状态与规则都在 rune_slot_lattice.{hpp,cpp}：单扇叶构建 5 槽、每帧重新
-    // 对齐、丢帧不重锚、静默才复位。这里只负责喂输入、取快照。
     auto_aim::energy::RuneSlotLattice::Config lattice_config;
     lattice_config.activate_votes = config.slot_activate_votes;
     lattice_config.reset_silence_s = config.slot_lattice_reset_silence_s;
@@ -286,7 +264,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         missing_frames = 0;
 
         // 时间基准：优先用仿真给的曝光时刻（与本地同一 epoch，见 StandardClock），
-        // 两者相差过大说明时钟不可比，退回本地到达时刻。
         const uint64_t frame_time_us = auto_aim::StandardClock::selectFrameTimestampUs(
             frame_local_timestamp_us, frame_source_timestamp_us);
         const double timestamp = auto_aim::StandardClock::secondsFromUs(frame_time_us);
@@ -294,7 +271,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         solver.updateImageSize(frame.cols, frame.rows);
 
         // 用轨迹生成器的历史快照取"这一帧曝光时刻"的云台姿态，而不是我们自己
-        // 记的下发值：异步下发 + 帧延迟下两者能差好几度。
         if (!video_mode && !gimbal_frozen) {
             const auto pose = gimbal_controller.snapshotAt(frame_time_us);
             if (pose.valid) {
@@ -304,24 +280,15 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         }
 
         // 用轨迹生成器的历史快照取"这一帧曝光时刻"的云台姿态，而不是我们
-        // 自己记的下发值：异步下发 + 帧延迟下，两者能差好几度。
-        // The estimate is expressed relative to the pose the rune was
-        // calibrated in; feed the current absolute gimbal angles.
         solver.setCameraPose(commanded_yaw, commanded_pitch);
 
         std::optional<auto_aim::energy::PowerRune> rune =
             config.detector.multi_candidate ? detector->detect(frame, timestamp)
                                             : detector->detectBest(frame, timestamp);
         // 采样时刻放在**推理之后**：`now` 要参与瞄准的提前量计算
-        //   detection_age = now - timestamp(曝光时刻)
-        // 现在它包含"传输 + 排队 + 推理(实测 p50 41 ms)"的全部延迟，云台锁上新片
-        // 的那几帧才不会系统性滞后（现场反馈：归中后重新锁片时总差一点、抖动大）。
         const double now = auto_aim::StandardClock::nowSeconds();
         solver.solve(rune);
         // ---- 扇叶 ID：把当帧观测喂给槽位格点，取出 1..5 号位的记账 ----------
-        // **必须在喂估计器之前**：格点同时给出"本帧锁定的那片相对跟踪槽位偏了几个
-        // 槽位"，观测到已激活片时估计器要靠它把观测折算回跟踪槽位（不然瞄点会整跳
-        // 一片）。规则见 rune_slot_lattice.hpp 的注释。
         {
             auto_aim::energy::RuneSlotLattice::Frame lattice_frame;
             lattice_frame.solved =
@@ -332,15 +299,12 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                 lattice_frame.hub = rune->r_center;
                 lattice_frame.target_center = rune->target().center;
                 // 过滤前的**全部**候选（含已激活片）：格点用它们的相位差把
-                // class 1/2 折算成槽位偏移，直接记账"该槽已激活"。
                 const auto& candidates = detector->lastCandidates();
                 lattice_frame.candidates.reserve(candidates.size());
                 for (const auto& candidate : candidates) {
                     lattice_frame.candidates.emplace_back(candidate.class_id, candidate.center);
                 }
                 // 5 个槽位在图像里的预测位置：k=0 是当前瞄准的那片，k=1..4 依次
-                // 往后 72°。用解算层投影（含透视压缩），比"候选与靶心的图像夹角
-                // ÷72°"准得多（实测后者把掩码一致率封在 ~45%）。
                 const double slot_step = 2.0 * CV_PI / 5.0;
                 const Eigen::Vector3d rune_center_in_world =
                     target.pointBuffToWorld(Eigen::Vector3d::Zero());
@@ -358,12 +322,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             lattice_frame.scored_hit = scored_hit_this_frame;
             lattice_frame.fired_slot = fired_slot_id;
             // 本轮是否还有点亮的扇叶 —— **不能**直接用 round_guard 的 blade_lit：
-            // 它只要连续 5 帧没有解算结果（≈165 ms）就置假，而我们的检出占空比
-            // 只有 ~80%，于是"回合结束"的事件每 0.3~0.5 s 触发一次，
-            // clearActivation 把记账整张抹掉（实测 607 个已锚定帧里 255 帧掩码是
-            // 00000 = 42%）。真实回合结束是"机关整片熄灭/复位"，量级是秒：
-            // 这里改成"这么久没有任何解算结果才算本轮结束"，与格点自己的
-            // reset_silence_s 同一量级。
             lattice_frame.round_active =
                 (rune.has_value() && rune->solved) ||
                 (last_solved_time > 0.0 &&
@@ -375,10 +333,9 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         int planned_slot = slot_snapshot.slot_id;
         // 开火资格在观测/估计器更新之后由 RuneFireGate 单独计算。
         bool aimed_slot_activated =
-            config.fire_block_on_hit_slot && planned_slot >= 0 &&
+            planned_slot >= 0 &&
             slot_activation[static_cast<std::size_t>(planned_slot)];
         // 观测到的是**已激活**的那片（class 1/2）时告诉估计器：它相对跟踪槽位偏了
-        // 几个槽位，请按这个偏移折算（相位 -offset×72°、靶心预测 +offset×72°）。
         const int observed_class = detector->targetClass();
         if (rune.has_value() && rune->solved &&
             slot_snapshot.observed_offset_valid && observed_class > 0) {
@@ -432,20 +389,17 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         }
         target.getTarget(rune, timestamp);
         // 换叶信号：估计器确认"观测接管"时才认为换叶（见 RuneTarget::bladeSwitched）。
-        // 检测层的相位关联在换叶后必须重新捕获（否则方向/相位残留会挡掉新靶）。
         aimer.setObservedBladeSwitch(target.bladeSwitched());
         if (target.bladeSwitched()) detector->resetPhaseAssociation();
 
         auto_aim::energy::RuneTarget predicted = target;
         // 观测寿命：超过 observation_life_s 没有新的解算结果，就不再外推扇叶
-        // （外推会把云台按 60°/s 甩出去、40°+ 后触发归位），改为瞄圆心稳住相机。
         if (rune.has_value() && rune->solved) last_solved_time = now;
         if (rune.has_value() && rune->solved) {
             // 记录"符心"对应的云台角，丢目标时用来把相机停住（park）。
             fallback.noteCenter(-rune->ypd_in_world[0], rune->ypd_in_world[1], now);
         }
         // 观测寿命：小符角速度是已知常量（±π/3），滑行期相位预测可靠 ⇒ 允许更长的
-        // "继续瞄扇叶"窗口；大符角速度会变，滑行误差随时间涨，窗口保持较短。
         const double observation_life =
             config.aimer.observation_life_s * (rune_is_small ? 2.25 : 1.0);
         const bool observation_fresh =
@@ -490,13 +444,11 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         if (blade_selection.retargeting && blade_selection.valid) {
             planned_slot = blade_selection.planned_slot;
             aimed_slot_activated =
-                config.fire_block_on_hit_slot && planned_slot >= 0 &&
+                planned_slot >= 0 &&
                 slot_activation[static_cast<std::size_t>(planned_slot)];
         }
 
         // ---- 火控边界：只判断“计划槽位能不能开火” --------------------------
-        // 观测层可以因为几何连续性选择 class1/2 的已激活片，这不会影响模型构造。
-        // 火控层独立读取**计划槽位**上的类别证据和激活掩码；两者不能互相代替。
         int planned_slot_class = blade_selection.target_class;
         if (planned_slot_class < 0 && !predicted.isUnsolvable() &&
             slot_snapshot.slot_id >= 0 && planned_slot >= 0) {
@@ -519,9 +471,7 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         fire_frame.observation_fresh = observation_fresh;
         fire_frame.planned_slot = planned_slot;
         fire_frame.planned_slot_class = planned_slot_class;
-        if (config.fire_block_on_hit_slot) {
-            fire_frame.activated = slot_activation;
-        }
+        fire_frame.activated = slot_activation;
         fire_gate.update(fire_frame, now);
         const bool fire_engageable = fire_gate.engageable();
         // 提前量用的"帧到瞄准延迟"：优先用曝光时刻做主时钟；瞬时值抖动大，做 EMA。
@@ -537,7 +487,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         }
 
         // ---- 图像相位（对 72° 取模）：类别命中/命中保持都用它，比 EKF 的 roll
-        //      稳得多，也不会被解缠影响。
         constexpr double kSlot = 2.0 * CV_PI / 5.0;
         double aim_phase = std::numeric_limits<double>::quiet_NaN();
         if (rune.has_value() && rune->solved) {
@@ -567,14 +516,12 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                 round_frame.blade_center = picked;
             }
             // Update before publishing the aim state: the control thread must use
-            // this frame's hold/switch decision, not the previous frame's.
             round_guard.update(round_frame, now);
         }
         const auto round_snapshot = round_guard.snapshot();
         scored_hit_this_frame = false;
 
         // 瞄准解算：aim_in_control=true 时由控制线程按 100 Hz 用"当前时刻"重算
-        // （sp_vision 的 commandgener 结构），这里只发布状态、并取回它算出的指令。
         auto_aim::energy::RuneCommand command;
         int commanded_slot_offset = 0;
         if (aim_in_control) {
@@ -586,7 +533,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             aim_input.latency = smoothed_lead_latency_s;
             aim_input.valid = !predicted.isUnsolvable();
             // 扇叶选择已经在观测/模型更新后完成。这里只把“计划物理槽”
-            // 转成相对观测槽的瞄准偏移；不再混入亮度/类别/几何的兜底选择。
             int retarget_offset = 0;
             if (slot_snapshot.slot_id >= 0 && planned_slot >= 0 &&
                 planned_slot != slot_snapshot.slot_id) {
@@ -600,9 +546,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                 retarget_offset == 0;
             aim_input.slot_offset = retarget_offset;
             // 与帧级闸门同源（见上面的 blade_engageable）：类别说"可打"**并且**
-            // 我们自己的槽位记账没有把这一槽标成已激活，才允许这帧开火。
-            // 需要重新瞄一片（retarget_offset != 0）时，瞄的是**另一片**：被记账
-            // 挡掉的是"跟踪槽位"而不是真正要打的那片，这时只按类别判。
             aim_input.engageable = fire_engageable;
             aim_input.hold = holding;
             aim_bridge.publish(aim_input);
@@ -618,15 +561,12 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         if (!video_mode && command.control) {
             fallback.noteControlAvailable();
             // 角度包线仍然保留：野值不能把目标角发布出去。单帧限幅交给轨迹
-            // 生成器的速度/加速度/加加速度约束，不再做 8°/帧的硬截断，
-            // 否则目标角每帧都被削平，反而制造阶跃。
             const double yaw_limit = config.aim_yaw_limit_deg * CV_PI / 180.0;
             const double pitch_limit = config.aim_pitch_limit_deg * CV_PI / 180.0;
             if (std::abs(command.yaw) <= yaw_limit && std::abs(command.pitch) <= pitch_limit) {
                 auto_aim::GimbalTargetAngles target_angles;
                 target_angles.valid = true;
                 // 先过瞄准角递归滤波：它把单帧抖动和换靶尖点抹平，并给出
-                // 干净的角度与角速度，再交给轨迹生成器做加加速度受限的运动。
                 target_angles.yaw = command.yaw;
                 target_angles.pitch = command.pitch;
                 target_angles.yaw_velocity = command.yaw_velocity;
@@ -642,10 +582,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                     }
                 }
                 // 目标角阶跃（换片/观测接管）会让"速度前馈"出现尖峰，轨迹生成器
-                // 被推过它的线性区间就变成超调振荡 —— 实测下发角在 6↔38° 之间来回摆，
-                // 而目标角本身是稳的。这里做两道限制：
-                //   1) 阶跃超过 switch_angle_deg 的帧，前馈清零，交给生成器自己爬；
-                //   2) 前馈速度包络限幅（默认 200°/s，约 1.7 倍靶心最大转速）。
                 {
                     const double step = std::abs(auto_aim::energy::limitRad(target_angles.yaw -
                                                           previous_target_yaw));
@@ -667,12 +603,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                 }
                 if (!aim_in_control) gimbal_controller.setTargetAngles(target_angles);
                 // 与 sp_vision 的 buff_aimer 对齐：唯一的禁火条件是"正在换叶"，
-                // 换叶期间不开火并重置节流计时；其余按 fire_gap_time 节流。
-                // 之前额外加的"本轮 2.5 s 窗口"闸门会让命中第一片之后窗口永久
-                // 关闭、再也不发弹，这里不再作为开火条件（仅保留统计）。
-                // sp_vision planner 的判火思路：不看"有没有到窗口"，而看
-                // **击发时刻云台是否真的到了瞄点**。这里用轨迹生成器的
-                // 状态快照（含期望角与误差）作判据，fire_thresh 是容差。
                 const auto aim_snapshot = gimbal_controller.snapshot();
                 const double fire_thresh = config.fire_thresh_deg * CV_PI / 180.0;
                 const bool aim_ready =
@@ -682,8 +612,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                 const bool blade_engageable = fire_engageable;
                 const bool fire_request = aim_in_control && aim_bridge.consumeFireRequest();
                 // aim_in_control 模式下开火判据已经在控制线程里用"同一时刻"的三个
-                // 条件判过（见 provider），这里只负责真正发火，不再用 30 Hz 的采样值
-                // 二次裁决（否则会把已经判好的火又挡掉）。
                 const bool fire_ok =
                     aim_in_control
                         ? (fire_request && fire_enabled && !gimbal_frozen &&
@@ -712,7 +640,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             }
         } else if (!video_mode) {
             // 暂时没有可用目标。策略在 RuneAimFallback 里（停靠最后已知符心优先，
-            // 兜底才回标定位姿），这里只负责执行判决。
             const auto fallback_decision = fallback.decide(now, commanded_yaw, commanded_pitch);
             // 原实现里回中与 `target.reset()` 是同一步（与是否真的发出回中指令无关）。
             if (fallback_decision.reset_estimator) target.reset();
@@ -734,9 +661,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
                         park_input.park_pitch = parked.pitch;
                     } else {
                         // 只是本帧没有观测、估计器还在滑行 → **保持可瞄准**：
-                        // 让控制线程继续用"预测到当前时刻"的解算结果（sp_vision 的
-                        // commandgener 也是拿 0.2 s 内的旧目标继续算指令），
-                        // 观测过期则退化为瞄符心。
                         park_input.target = target;
                         park_input.valid = true;
                         park_input.park = false;
@@ -804,8 +728,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
     }
 
     // 退出顺序：必须先停控制线程，再让它引用的对象析构。aim_bridge 是后构造的
-    // （先析构），而控制线程的 provider 会回调 aim_bridge 的互斥量；不显式 join
-    // 的话线程会去锁一个已经析构的 mutex（实测退出时 abort）。
     gimbal_controller.stop();
 
     std::cout << "=== rune run summary (simulator ground truth) ===" << std::endl

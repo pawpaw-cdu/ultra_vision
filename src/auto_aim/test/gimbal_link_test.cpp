@@ -1,16 +1,4 @@
 // 整链路测试：用**伪终端**冒充下位机，把 io::Gimbal 真跑一遍。
-//
-// 为什么要有它：协议帧本身（CRC/布局）由 gimbal_protocol_test 钉死了，但真机上
-// 出问题的往往是链路层 —— 帧头对不对齐、半帧怎么处理、CRC 错的帧会不会污染状态、
-// mode 映射对不对、我们发出去的 mode/角度/CRC 下位机能不能认。这些东西用伪终端
-// 在电脑上就能全部验掉，不用等实车。
-//
-// 覆盖：
-//   1. 下位机视角写一帧合法 43B → state/mode/bullet_speed/IMU 队列都更新；
-//   2. 我们的 send() 出来的 29B：头、mode(控制+开火=2)、6 个 float、CRC 全对；
-//   3. 写一帧 CRC 错的 → 只增加 crc_errors，state 不变；
-//   4. mode=0 的帧 → mode() 回到 IDLE（下位机收回控制权）；
-//   5. imuAt() 在两个样本之间能插值出中间的姿态。
 
 #include <chrono>
 #include <cmath>

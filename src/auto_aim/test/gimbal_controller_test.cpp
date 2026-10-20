@@ -81,9 +81,6 @@ int main()
         const double elapsed = std::chrono::duration<double>(
             copied_commands[i].sent_at - copied_commands[i - 1].sent_at).count();
         // Callback timestamps are sampled just after the controller computes
-        // its dt. Allow one scheduler period of timestamp skew, then scale the
-        // bound by the actual elapsed time so CPU contention cannot create a
-        // false failure while a genuine position jump still is rejected.
         const double bounded_elapsed = std::max(0.0, elapsed) + 1.0 / command_rate;
         command_steps_limited &=
             yaw_step <= config.max_yaw_velocity * bounded_elapsed + 1e-9 &&

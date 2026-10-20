@@ -47,7 +47,6 @@ namespace auto_aim::energy
             double score = candidate.class_id == 0 ? config_.class0_bonus : 0.0;
             if (candidate.lit) score += config_.lit_bonus;
             // Activated-class evidence is a weaker candidate, not an outright
-            // observation gate; class0/lit evidence should win when both exist.
             if (candidate.class_id > 0) score -= 0.15;
             if (score > best.score) {
                 best.valid = true;

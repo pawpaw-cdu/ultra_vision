@@ -9,7 +9,6 @@ namespace auto_aim::energy
     namespace
     {
         // 与深大 is_line_pass_through_contour 等价：线段 A→B 上采样若干点，
-        // 只要有一个落在轮廓内部就算"穿过"。
         bool linePassesThroughContour(const cv::Point2f& a, const cv::Point2f& b,
                                       const std::vector<cv::Point>& contour, int samples)
         {
@@ -182,7 +181,6 @@ namespace auto_aim::energy
                     result.armor_circularity = 4.0 * CV_PI * area / (perimeter * perimeter);
                 }
                 // 网络四点（k0,k1,k3,k4）构成的四边形面积：作为**尺度基准**，
-                // 面积比与圆度都相对它来判（与 §39 的实拍标定一致）。
                 double quad_area = 0.0;
                 if (keypoints.size() >= 5) {
                     const cv::Point2f quad[4] = {keypoints[0], keypoints[1], keypoints[3],

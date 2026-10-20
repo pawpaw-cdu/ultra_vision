@@ -74,19 +74,8 @@ namespace auto_aim::energy
                 hold_start_time_ = now;
             } else if (hold_) {
                 // 解禁条件：**确认换片**（估计器观测接管 / 相位整跳），而不是
-                // "相位漂移超过某个小角度" —— 符一直在转（60°/s），靶心的图像相位
-                // 每帧都在变，按 0.30 rad 判会在 ~0.28 s 后无条件放行，于是又把刚
-                // 打过的那片再打一遍（实测：66% 的命中打在已激活的旧靶上，直接导致
-                // 本轮判失败）。这里改成：
-                //   1) 收到"确认换片"信号 → 放行；
-                //   2) **同一片连续 2 帧被读成 class 0**（稳定观测）→ 放行：
-                //      刚打过的那片此时应当读 class 1，连续两帧读 0 说明已经是新靶，
-                //      这条比"等估计器确认接管"快得多（实测接管要 0.4~0.8 s，
-                //      这段时间一直盯着刚打过的片）。
-                //   3) 保持超过 post_hit_hold_max_s → 兜底放行（防闸门卡死）。
                 const bool switched = frame.blade_switched;
                 // 稳定 class-0：同一片连续 2 帧读成未激活；且（默认）要求同时
-                // 看到"已激活片作证"，压掉"已激活片被误读成未激活"的情况。
                 const bool witness_ok =
                     !config_.require_active_witness || frame.active_witness > 0;
                 const bool stable_inactive = class_zero_frames_ >= 2 && witness_ok;

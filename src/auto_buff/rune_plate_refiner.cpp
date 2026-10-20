@@ -22,7 +22,6 @@ namespace auto_aim::energy
         }
 
         /// 把旋转矩形的四条**边中点**按"与网络点方向最接近"配过去，
-        /// 保证输出顺序仍是 外→右→内→左（与 PnP 物点一致）。
         std::array<cv::Point2f, 4> edgeMidpoints(const cv::RotatedRect& rect,
                                                  const std::array<cv::Point2f, 4>& keypoints)
         {
@@ -124,7 +123,6 @@ namespace auto_aim::energy
         if (best_score == -std::numeric_limits<double>::max()) return result;
 
         // ④-a 尺度保持模式：只借经典结果的中心（可选朝向），尺寸保留网络原值。
-        //     这样"经典 ≠ 网络标注特征"的尺度差就不会进 PnP 深度（§44 的教训）。
         best_rect.center += offset;
         if (config_.preserve_network_scale) {
             const cv::Point2f network_center_plate = quadCenter(keypoints);

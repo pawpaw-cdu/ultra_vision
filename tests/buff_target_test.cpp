@@ -1,12 +1,4 @@
 // Self-checking test for the energy-rune estimator and aimer.
-//
-// The pipeline is fed analytic observations of a rotating rune (no image and
-// no simulator needed), so the numerical behaviour can be checked anywhere:
-//   * the small rune turns at a fixed pi/3 rad/s and the filter must follow it;
-//   * the large rune turns at a*sin(w*t + phi) + (2.09 - a) and the filter must
-//     identify a and w well enough to predict better than a constant-rate model;
-//   * the aimer must point at the predicted plate with the simulator's angle
-//     convention (positive yaw right, positive pitch up).
 
 #include <cmath>
 #include <cstdio>
@@ -35,7 +27,6 @@ namespace
     double wrap(double angle) { return limitRad(angle); }
 
     // Ground-truth rune: the mechanism sits d metres in front of the camera and
-    // the plate orbits in the y-z plane of the z-up world frame.
     struct RuneTruth
     {
         Eigen::Vector3d center{3.0, 0.0, 0.0};
@@ -58,8 +49,6 @@ namespace
             rune.blade_xyz_in_world = platePosition(roll);
             rune.blade_ypd_in_world = xyz2ypd(rune.blade_xyz_in_world);
             // RuneTarget::getTarget 只接受"solved"的观测（未解算的观测绝不允许
-            // 进入估计器，见 PowerRune::solved 的注释）。合成观测必须显式置位，
-            // 否则整个自检会静默失效（滤波器一次都不初始化）。
             rune.solved = true;
             return rune;
         }
@@ -121,14 +110,11 @@ namespace
               "small rune: aim yaw matches the predicted plate (got " +
                   std::to_string((command.yaw - expected_yaw) * 180.0 / kPi) + " deg)");
         // The aimer fires on a ballistic solution, so its pitch sits a degree
-        // or two above the straight line to the plate (gravity compensation).
         check(std::abs(command.pitch - expected_pitch) < 3.5 * kPi / 180.0,
               "small rune: aim pitch matches the predicted plate (got " +
                   std::to_string((command.pitch - expected_pitch) * 180.0 / kPi) + " deg)");
 
         // A shifted-slot candidate must be solved from the same base state and
-        // commit the cooldown only once. The old implementation consumed the
-        // shot on the base slot, then returned a shifted command with shoot=false.
         RuneTarget shifted_target = target;
         const auto state_before_shift = shifted_target.ekfX();
         RuneAimer shifted_aimer(aimer_config);
@@ -141,9 +127,6 @@ namespace
     }
 
     // 观测到"已激活的那片"（class 1/2）时，估计器的相位必须留在**跟踪槽位**上，
-    // 而不是跟着观测片跑：否则瞄点整跳一片，云台就在两片之间来回甩。
-    // 这就是 PowerRune::slot_offset 的作用（现场实测：92 帧 >2° 瞄准跳变里
-    // 有 10 帧落在"观测到已激活片"的帧上）。
     void testForeignSlotObservation()
     {
         const RuneTruth truth;

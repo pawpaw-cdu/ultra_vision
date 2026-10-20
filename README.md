@@ -127,19 +127,7 @@ ctest --test-dir build_sim -R gimbal      # 协议帧 + 伪终端整链路
 
 ### 调试窗口（仿真入口）
 
-`node_sim` 只开**一个**窗口 `Ultra Vision`：**上面**是检测/跟踪叠加图，**下面**是实时曲线
-（两者同宽；曲线区高度按 window 自适应，默认整窗不超过 900 px，笔记本也放得下）。
-曲线四个 panel 分别是 yaw（命令 vs 观测）、pitch（命令 vs 观测）、瞄点像素误差、
-距离（观测 vs 估计）；同一 panel 的两条线共用一条纵轴、图例各占一行。
-`ULTRA_VISION_CURVES=0` 可关曲线，`ULTRA_VISION_CURVE_CSV=<path>` 同时落 CSV
-（配合离线重画脚本），`ULTRA_VISION_NO_DISPLAY=1` 完全不出窗口
-（跑回归/看真实帧率时用，HighGUI 每帧要 ~20 ms）。
-曲线现在默认"按需采集"：只有开窗口或给了 `ULTRA_VISION_CURVE_CSV` 才采，
-显式 `ULTRA_VISION_CURVES=1/0` 仍然可以强制开/关。
-
-`ULTRA_VISION_PROF=1` 会每秒打印一次**分段耗时**（roi / submit / pnp+ekf /
-csv / control / overlay / resize），并对 pnp+ekf 同时给出**线程 CPU 时间**：
-墙钟远大于 CPU 时间说明是机器在抢 CPU，不是算法变慢 —— 看性能数据前先过这一关。
+`node_sim` 只显示检测/跟踪画面；`ULTRA_VISION_NO_DISPLAY=1` 完全不出窗口。
 
 `auto_aim` 的两个入口——真机（`node.cpp`）和 TCP 仿真（`node_sim.cpp`）——共用同一套
 **整车 Tracker**、同一套 `config_loader.hpp` 对 `detector.yaml`/`tracker.yaml` 的解析，

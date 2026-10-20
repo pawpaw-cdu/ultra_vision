@@ -92,9 +92,6 @@ int main()
     passed &= expect(!far.valid, "prediction beyond max lead time must be rejected");
 
     // ---- 静止靶闸门（2026-09-29）------------------------------------------
-    // 实车静止靶上 EKF 的 |v|/|ω| 噪声（|v| p90 200 mm/s、|ω| p90 3.7°/s）会通过
-    // 提前量 + 云台角速度前馈变成可见抖动。闸门必须在"噪声量级"上判静止、
-    // 在"真实运动量级"上判在动。
     {
         auto noise = makeEstimate();
         noise.velocity = {0.20, 0.0, -0.15};   // |v| = 250 mm/s：噪声量级

@@ -66,9 +66,6 @@ namespace auto_aim
             const auto_aim::PnpGeometry pnp_geometry = auto_aim::loadPnpGeometry(tracker_cfg);
 
             // Optional neural-network detector. It replaces the light-bar pipeline but
-            // produces the same Armor type, so PnP and everything downstream is shared.
-            // It runs on its own thread so that a slow inference never throttles the
-            // camera and control loop.
             std::unique_ptr<auto_aim::AsyncArmorDetector> nn_detector;
 #ifdef ULTRA_VISION_USE_OPENVINO
             if (auto_aim::neuralDetectorEnabled(detector_cfg)) {
@@ -94,7 +91,6 @@ namespace auto_aim
             const bool use_neural_detector = nn_detector != nullptr;
 
             // 配置只在 config_loader.hpp 里解析一次（默认值也只在结构体里）：
-            // 硬件入口 node.cpp 以后接瞄准链时读的是同一份，不会再各写一套默认值。
             const auto_aim::GimbalAimConfig gimbal_cfg =
                 auto_aim::loadGimbalConfig(tracker_cfg);
             const double gimbal_command_rate_hz =
@@ -108,10 +104,6 @@ namespace auto_aim
             fire_enabled_ = std::getenv("ULTRA_VISION_DISABLE_FIRE") == nullptr;
             show_display_ = std::getenv("ULTRA_VISION_NO_DISPLAY") == nullptr;
             // Restrict inference to the projected chassis region while tracking.
-            // OFF by default: it was measured not to speed anything up, because the
-            // detector letterboxes the crop back to the network's fixed 640x640 input.
-            // 默认开：4 m 工况实测（20 s）可用观测 116 → 319 行、FIRING 段 12 → 15。
-            // ULTRA_VISION_DYNAMIC_ROI=0 可关（A/B 用）。
             const bool dynamic_roi =
                 std::getenv("ULTRA_VISION_DYNAMIC_ROI") == nullptr ||
                 std::string(std::getenv("ULTRA_VISION_DYNAMIC_ROI")) != "0";
@@ -144,8 +136,6 @@ namespace auto_aim
             }
             receiver_->connect();
             // A previous run can leave the camera pointing anywhere, which makes the
-            // next run see nothing and makes any A/B comparison meaningless. Ask for a
-            // clean scene unless the caller wants to keep the manual state.
             if (const char* reset = std::getenv("ULTRA_VISION_SIM_RESET")) {
                 if (std::string(reset) != "0") {
                     receiver_->sendResetCommand();
@@ -156,8 +146,6 @@ namespace auto_aim
             receiver_->sendGimbalCommand(0.0, 0.0);
 
             // 真机与仿真共用同一套"检测前端 + 瞄准流水线"（见 armor_source / aim_pipeline）。
-            // 这个入口只保留仿真专属的东西：TCP 帧源、曝光→到手的时间基、曲线/CSV/显示。
-            // 仿真相机内参：分辨率固定时由 makeCameraMatrix() 按 FOV 重建，先占位声明。
             dist_coeffs_ = cv::Mat::zeros(5, 1, CV_64F);
 
             auto_aim::ArmorSourceConfig source_cfg;
@@ -177,7 +165,6 @@ namespace auto_aim
                 fire_angle_tolerance * 180.0 / CV_PI,
                 0.0);   // 仿真链路不需要心跳
             // 没合格板时的兜底策略：0=瞄最后观测到的板（现行为），1=放弃（保持上一拍
-            // 瞄点，不开火）。见 AimPipelineConfig；YAML 给默认值，环境变量 A/B 覆盖。
             pipeline_cfg.no_valid_armor_policy =
                 auto_aim::loadNoValidArmorPolicy(tracker_cfg);
             if (const char* policy_env = std::getenv("ULTRA_VISION_NO_VALID_ARMOR_POLICY")) {
@@ -196,7 +183,6 @@ namespace auto_aim
                 });
 
             // 模型构造（重投影整车轮廓）用的装甲板安装倾角：仿真靶没有 15° 支架
-            // （灯条在板坐标系里绝对竖直），所以默认 0。
             {
                 const char* tilt_env = std::getenv("ULTRA_VISION_ARMOR_TILT_DEG");
                 const double tilt = tilt_env != nullptr ? std::atof(tilt_env) : 0.0;
@@ -204,13 +190,11 @@ namespace auto_aim
             }
 
             // 曝光→收到的延迟：每秒取中位，喂给选择器当"观测年龄"的固定附加项。
-            // ULTRA_VISION_SOURCE_DELAY=0 可关掉（A/B 用）。
             source_delay_enabled_ = [] {
                 const char* value = std::getenv("ULTRA_VISION_SOURCE_DELAY");
                 return value == nullptr || std::string(value) != "0";
             }();
             // 定时退出（ULTRA_VISION_TEST_SECONDS）：仿真回归脚本要"跑 N 秒然后干净退出"，
-            // 这样 CSV 的 ofstream 正常析构、最后几行不会因为 SIGTERM 丢掉。
             const char* test_seconds_env = std::getenv("ULTRA_VISION_TEST_SECONDS");
             test_seconds_ = test_seconds_env != nullptr ? std::atof(test_seconds_env) : 0.0;
             loop_start_time_ = std::chrono::steady_clock::now();
@@ -222,8 +206,6 @@ namespace auto_aim
             frame_sequence_ = 0;
             frame_local_timestamp_us_ = 0;
             // 仿真器给的**曝光时刻**（sim 时钟）。与 local 时间戳相差"网络+处理+节流"
-            // 的整条延迟（实测 ~57 ms），用真值做回归时必须按它对齐，否则那点延迟在
-            // 云台转动时会以"相机系位移"的形式混进观测误差里。
             frame_source_timestamp_us_ = 0;
             frame_gimbal_yaw_ = 0.0f;
             frame_gimbal_pitch_ = 0.0f;
@@ -240,9 +222,6 @@ namespace auto_aim
             }
             missing_frames_ = 0;
             // 曝光→到手 的延迟采样（两边都是 Unix 时钟；Mac/NUC 有 NTP，
-            // 常数级的钟差不影响"这段延迟有多大"的结论，只把绝对值平移）。
-            // 这一项就是"观测年龄"里**原来被漏掉**的一段：检测用的是仿真端
-            // 曝光时刻的像，而我们原来只用"本机收到的时刻"当观测时间。
             if (frame_source_timestamp_us_ > 0 &&
                 frame_local_timestamp_us_ > frame_source_timestamp_us_) {
                 source_delay_samples_us_.push_back(
@@ -263,8 +242,6 @@ namespace auto_aim
         void SimRunner::prepareFrame()
         {
             // All estimator, control, and command-history timestamps use the same
-            // local monotonic clock. The simulator source timestamp is metadata
-            // only and is never compared with local wall-clock time.
             last_gimbal_command_ = pipeline_->controller().snapshotAt(frame_local_timestamp_us_);
             if (last_gimbal_command_.valid) {
                 commanded_yaw_ = last_gimbal_command_.yaw;
@@ -283,9 +260,6 @@ namespace auto_aim
                 camera_matrix_ = makeCameraMatrix(image_.rows, image_.cols, simulator_fov_degrees_);
                 processing_height_ = image_.rows;
                 // 进图尺寸一变就把"实际处理尺寸 + 现算的内参"打出来：仿真器给 640x480
-                // 还是 1440x1080，PnP 的尺度和检出率完全是两回事，必须看一眼就知道。
-                // 期望值来自 configs/camera.yaml 的 simulator.max_processing_width，
-                // 它和实车海康的 1440x1080 / 41°(f≈1447) 是同一套标定。
                 const bool size_mismatch =
                     max_processing_width_ > 0 && image_.cols < max_processing_width_;
                 std::cout << "[input] " << image_.cols << "x" << image_.rows
@@ -327,7 +301,6 @@ namespace auto_aim
                 tracker.getEstimatedArmorPositions(), tracker.getState(),
                 /*image_will_be_modified=*/show_display_);
             // Sizes captured before the armors are moved into the pipeline below;
-            // the per-second stats line must not read a moved-from vector.
             light_count_ = static_cast<int>(source_result_.lights.size());
             armor_count_ = static_cast<int>(source_result_.armors.size());
             pnp_count_ = source_result_.pnp_count;
@@ -339,7 +312,6 @@ namespace auto_aim
             auto_aim::Tracker& tracker = pipeline_->tracker();
 
             // 观测时刻：仿真里检测用的是**曝光那一刻**的像，所以要把
-            // "曝光→到手"的延迟从收到帧的时刻里减掉（真机串口链路是同步的，直接用帧时刻）。
             const bool source_delay_usable = source_delay_enabled_ &&
                 observation_source_delay_ > 0.0005 && observation_source_delay_ < 0.120;
             const uint64_t source_delay_us = source_delay_usable
@@ -350,9 +322,6 @@ namespace auto_aim
 
             auto_aim::CameraPose detection_pose;
             // 用仿真器回传的**真实云台姿态**（执行之后），等价实车的 IMU 反馈。
-            // 以前用"指令快照"（gimbal_controller.snapshotAt）——只有仿真云台瞬时
-            // 到位（Direct）时才成立；现在仿真云台是限速跟随的，必须用真实姿态，
-            // 闭环才和实车同构（否则会以为相机在指令角、实际在别处）。
             detection_pose.valid = true;
             detection_pose.timestamp_valid = true;
             detection_pose.timestamp = observation_time;
@@ -367,7 +336,6 @@ namespace auto_aim
             frame.allow_control = true;         // 仿真里没有下位机，始终由我们控制
             frame.fire_enabled = fire_enabled_;
             // 移动而不是拷贝：检出结果只进这一条流水线，搬走 vector 就够
-            //（每帧省掉一次 Armor 列表（含嵌套 vector/cv::Mat 头）的深拷贝）。
             frame.armors = std::move(source_result_.armors);
             const auto outcome = pipeline_->update(frame);
 

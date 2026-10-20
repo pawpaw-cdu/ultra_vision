@@ -12,9 +12,6 @@ namespace auto_aim::energy
     namespace
     {
         // Maps a camera-frame (optical, x right / y down / z forward) point to
-        // the z-up world frame used by the estimator: X = forward, Y = left,
-        // Z = up. The world frame coincides with the camera frame the rune was
-        // calibrated against, which keeps yaw = 0 for a centred rune.
         const Eigen::Matrix3d kOpticalToWorld =
             (Eigen::Matrix3d() << 0.0, 0.0, 1.0,
              -1.0, 0.0, 0.0,
@@ -22,8 +19,6 @@ namespace auto_aim::energy
                 .finished();
 
         // Camera optical frame -> optical frame of the calibration pose, given
-        // the absolute gimbal yaw/pitch. Matches the simulator's
-        // camera.rotation = home * Ry(-yaw) * Rx(pitch).
         Eigen::Matrix3d opticalRotation(double yaw, double pitch)
         {
             const double cy = std::cos(yaw), sy = std::sin(yaw);
@@ -42,7 +37,6 @@ namespace auto_aim::energy
         const double radius = config_.target_radius_m;
         const double half = config_.target_half_width_m;
         // Keypoint order used by the network: radially outer corner, right,
-        // inner, left, then the plate centre and a point on the arm.
         object_points_ = {
             cv::Point3f(0.0f, 0.0f, static_cast<float>(radius + half)),
             cv::Point3f(0.0f, static_cast<float>(half), static_cast<float>(radius)),
@@ -94,9 +88,6 @@ namespace auto_aim::energy
         const std::vector<cv::Point3f> object_points(object_points_.begin(),
                                                      object_points_.begin() + 4);
         // 平面四点的 IPPE 一定有两个解，它们的重投影误差几乎一样（实测都是
-        // 0.0x px），但第二个解的靶面法线朝向反了、圆心能偏到隔壁扇叶上。仿真
-        // 里噪声会让两个解逐帧翻转，云台因此左右大幅摆动。用"靶面法线朝向相机"
-        // 这个物理约束来选解（能量机关的靶面就是朝着观察者的）。
         std::vector<cv::Mat> rvecs;
         std::vector<cv::Mat> tvecs;
         const int solutions = cv::solvePnPGeneric(
@@ -107,9 +98,6 @@ namespace auto_aim::energy
             return;
         }
         // 两个解的重投影误差几乎一样，区分它们要用"圆心投影"：正确解的圆心
-        // 反投影会落在网络给出的 R 标上（实测偏差 7~8 px = 关键点噪声量级），
-        // 错误解能偏出 90 px（整整一片扇叶）。这也是选解唯一可靠的物理依据——
-        // R 标是模型直接训出来的、就在画面里。
         double best_score = std::numeric_limits<double>::max();
         const cv::Point3f origin(0.0f, 0.0f, 0.0f);
         for (int index = 0; index < solutions; ++index) {
@@ -142,9 +130,6 @@ namespace auto_aim::energy
         }
 
         // Sanity gate: the plate must be in front of the camera and the four
-        // corners must reproject onto what the network detected. IPPE returns
-        // the second-best solution silently otherwise, and that solution puts
-        // the rune centre metres away from the truth.
         if (tvec_[2] <= 0.1) {
             observation.solved = false;
             return;
@@ -191,10 +176,6 @@ namespace auto_aim::energy
         observation.ypr_in_world = matrixToYpr(R_buff2world);
 
         // ---- 相位观测（深大做法：平面内的"圆心 -> 靶心"向量角）----
-        // EKF 的刀片预测是 Rz(yaw)·Rx(roll)·(0,0,R)：roll=0 时靶心在 +Z（画面
-        // 12 点方向），roll 增大向 -Y（画面里顺时针）。所以把观测到的
-        // "圆心 -> 靶心"单位向量投影到该基上取 atan2 即可，和 EKF 的状态定义
-        // 完全一致，不需要另一套标定。
         {
             const Eigen::Vector3d radial =
                 observation.blade_xyz_in_world - observation.xyz_in_world;
@@ -209,7 +190,6 @@ namespace auto_aim::energy
         }
 
         // 距离闸门：见 RuneSolverConfig::min_distance_m。误检（关键点塌缩成
-        // 几像素）会算出荒谬距离，这种观测必须丢掉。
         const double observed_distance = observation.ypd_in_world[2];
         if (!(observed_distance >= config_.min_distance_m &&
               observed_distance <= config_.max_distance_m)) {
@@ -229,7 +209,6 @@ namespace auto_aim::energy
             config_.R_camera2gimbal.transpose() *
             (R_gimbal2world_.transpose() * xyz_in_world - config_.t_camera2gimbal);
         // 点已在相机系：rvec/tvec 取零。写法与 reproject() 保持一致
-        // （用 vector<Point3f> + Vec3d，避免 projectPoints 的 Mat 类型断言）。
         const std::vector<cv::Point3f> points{
             cv::Point3f(static_cast<float>(xyz_in_camera[0]),
                         static_cast<float>(xyz_in_camera[1]),

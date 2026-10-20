@@ -24,27 +24,20 @@ namespace auto_aim::energy
 {
     struct RuneConfig
     {
-        bool enabled = false;
         RuneMode mode = RuneMode::Small;
         RuneDetectorConfig detector;
         RuneSolverConfig solver;
         RuneAimerConfig aimer;
         std::string simulator_config = "simulator.yaml";
         std::string model_path;
-        bool visualize = true;
         int max_coast_frames = 30;
         int recenter_after_frames = 15;
         // 喂给云台轨迹生成器的目标角速度包络（度/秒）。
         double max_target_velocity_deg_s = 200.0;
-        // 换靶阶跃帧是否清零速度前馈（之前为了压住超调加的；A/B 用）。
-        bool zero_feedforward_on_step = true;
-        // 扇叶 ID 闸门：锁定的槽位已在"已激活"集合里就不开火（见 rune_node 的说明）。
-        bool fire_block_on_hit_slot = true;
         // 丢目标时把相机停在"最后已知符心"的最长时间（秒）；超过才回标定位姿兜底。
         double park_on_center_max_age_s = 1.5;
         double max_distance_jump_ratio = 0.35;
         double max_center_jump_deg = 20.0;
-        double max_slew_deg_per_frame = 8.0;
         double aim_yaw_limit_deg = 50.0;
         double aim_pitch_limit_deg = 35.0;
         double fire_thresh_deg = 1.5;
@@ -76,8 +69,6 @@ namespace auto_aim::energy
         double post_hit_switch_phase_rad = 0.30;
         // 命中后保持（hold）的最长时间：即使没有确认换片也放行，防止闸门卡死。
         double post_hit_hold_max_s = 1.2;
-        // hold 解禁时是否要求"已激活片作证"（见 RuneRoundGuard::Config）。A/B 开关。
-        bool post_hit_require_active_witness = false;
     };
 
     /// @brief 读 `configs/buff.yaml`（或任何同构文件）→ RuneConfig。
