@@ -12,7 +12,6 @@
 
 #include "estimation/rotation_rate_estimator.hpp"
 #include "armor_ekf.hpp"
-#include "plate_ekf.hpp"
 #include "common/armor_geometry.hpp"
 #include "common/chassis_model.hpp"
 #include "common/types.hpp"
@@ -127,11 +126,6 @@ namespace auto_aim
         double position_nis_threshold = 7.815;
         double angle_nis_threshold = 3.841;
         bool soft_nis_gate = true;
-        bool plate_model_enabled = false;
-        double plate_model_process_acc = 20.0;
-        double plate_model_process_yaw_acc = 50.0;
-        double plate_model_enter_omega = 0.7;   // |ω| 低于此值 → 板模型可信
-        double plate_model_exit_omega = 2.7;    // |ω| 高于此值 → 只信整车模型
         bool mahalanobis_matching = false;
         double association_chi2 = 9.488;   // χ²(4, 95%)
         std::array<double, 4> armor_y_offsets{{0.0, 0.0, 0.0, 0.0}};
@@ -208,17 +202,7 @@ namespace auto_aim
         double getArmorTiltDeg() const { return cfg_.armor_tilt_deg; }
         double getYaw() const;
         double getYawWorld() const { return ekf_.getYaw(); }
-        double getOmega() const {
-            if (plate_model_weight_ <= 0.0) return ekf_.getOmega();
-            return (1.0 - plate_model_weight_) * ekf_.getOmega() +
-                plate_model_weight_ * plate_ekf_.getOmega();
-        }
-        double getPlateModelOmega() const {
-            return plate_ekf_.isInit() ? plate_ekf_.getOmega() : ekf_.getOmega();
-        }
-        bool hasPlateModel() const { return plate_ekf_.isInit(); }
-        bool plateModelActive() const { return plate_model_weight_ > 0.5; }
-        double plateModelWeight() const { return plate_model_weight_; }
+        double getOmega() const { return ekf_.getOmega(); }
         double getRotationRateOmega() const {
             return rotation_rate_estimator_.omega();
         }
@@ -275,7 +259,6 @@ namespace auto_aim
         ArmorEKF ekf_;
         /// 底盘慢层几何（唯一模型来源；由 config / 观测慢收敛更新）。
         ChassisGeometry geometry_;
-        PlateEKF plate_ekf_;                       // 双模型的装甲板模型
         /// "最近板硬约束"把 yaw 翻回来的次数（诊断：正常应长期为 0，只有翻解时才动）。
         int nearest_plate_flips_ = 0;
         /// 连续多少帧处在"观测板落到远半侧"（两条确认才翻，防单帧异常）。
@@ -286,14 +269,6 @@ namespace auto_aim
         int previous_plate_id_ = -1;
         double last_view_deg_ = -1.0;
 
-        double plate_model_last_timestamp_ = -1.0;
-        double plate_model_weight_ = 0.0;
-        Vec<3> plateDerivedCenter() const;
-        Vec<3> plateDerivedVelocity() const;
-        double plateDerivedYaw() const;
-        Vec<3> blendedCenter() const;
-        Vec<3> blendedVelocity() const;
-        double blendedYawWorld() const;
         std::deque<bool> recent_measurements_;   // 最近若干帧的量测接受情况
         int watchdog_resets_ = 0;
         int accepted_since_init_ = 0;

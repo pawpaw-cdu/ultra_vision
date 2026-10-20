@@ -37,12 +37,6 @@ namespace auto_aim
 
         // 底盘慢层几何的初值
         syncGeometryFromConfig();
-
-        // 双模型的板模型（并行运行，见 TrackerConfig::plate_model_enabled）
-        PlateEKF::Config plate_cfg;
-        plate_cfg.process_acc = cfg_.plate_model_process_acc;
-        plate_cfg.process_yaw_acc = cfg_.plate_model_process_yaw_acc;
-        plate_ekf_.setConfig(plate_cfg);
     }
 
     bool Tracker::update(const Armor& armor, double timestamp)
@@ -499,33 +493,6 @@ namespace auto_aim
         updateRotationRate(valid_pairs[best_armor_index].home, timestamp, best_yaw_trusted,
                            plate_id_);
 
-        if (cfg_.plate_model_enabled) {
-            const Armor& observed = valid_pairs[best_armor_index].home;
-            const auto plate_radial = armorRadialAngle(observed);
-            if (plate_radial) {
-                double dt = cfg_.default_dt;
-                if (plate_model_last_timestamp_ > 0.0) {
-                    const double gap = timestamp - plate_model_last_timestamp_;
-                    if (gap > 1e-4 && gap < 0.2) dt = gap;
-                }
-                plate_ekf_.setDt(dt);
-                plate_ekf_.predict();
-                plate_ekf_.update(toVec(observed.tvec), *plate_radial,
-                                  cfg_.ypd_nis_threshold);
-                plate_model_last_timestamp_ = timestamp;
-            }
-        }
-        {
-            const double omega_abs = std::abs(ekf_.getOmega());
-            if (!cfg_.plate_model_enabled || !plate_ekf_.isInit()) {
-                plate_model_weight_ = 0.0;
-            } else {
-                const double span = std::max(1e-3, cfg_.plate_model_exit_omega -
-                                                       cfg_.plate_model_enter_omega);
-                const double weight = (cfg_.plate_model_exit_omega - omega_abs) / span;
-                plate_model_weight_ = std::max(0.0, std::min(1.0, weight));
-            }
-        }
         latest_armor_ = valid_pairs[best_armor_index].camera;
         latest_armor_.tvec = worldToCamera(ekf_.armorPosition(best_plate_id));
         last_observed_armor_ = valid_pairs[best_armor_index].camera;

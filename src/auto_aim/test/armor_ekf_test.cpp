@@ -1,5 +1,4 @@
 #include "Kalman/armor_ekf.hpp"
-#include "Kalman/plate_ekf.hpp"
 #include "Kalman/tracker.hpp"
 
 #include <cmath>
@@ -723,64 +722,6 @@ int main()
         passed &= expect(std::abs(online_tracker.armorHalfWidth(1) - rect.large_half_width) < 1e-12 &&
                              std::abs(online_tracker.armorHalfWidth(0) - rect.small_half_width) < 1e-12,
                          "plate size follows the per-plate large/small flag");
-    }
-
-    // ---- 装甲板模型（双模型低速档，上科大 2026 §9.4.4）----------------------
-    {
-        auto_aim::PlateEKF::Config plate_config;
-        plate_config.process_acc = 50.0;
-        plate_config.process_yaw_acc = 100.0;
-        auto_aim::PlateEKF plate(plate_config);
-        auto_aim::Vec<3> center;
-        center(0, 0) = 0.0;
-        center(1, 0) = 0.0;
-        center(2, 0) = 5.0;
-        plate.init(center, 0.0);
-        constexpr double plate_dt = 1.0 / 30.0;
-        constexpr double true_vx = 0.4;
-        constexpr double true_plate_omega = 0.5;
-        std::mt19937 plate_rng(7);
-        std::normal_distribution<double> plate_noise(0.0, 0.001);
-        for (int frame = 1; frame <= 90; ++frame) {
-            plate.setDt(plate_dt);
-            plate.predict();
-            auto_aim::Vec<3> observation;
-            observation(0, 0) = true_vx * frame * plate_dt + plate_noise(plate_rng);
-            observation(1, 0) = plate_noise(plate_rng);
-            observation(2, 0) = 5.0 + plate_noise(plate_rng);
-            plate.update(observation, true_plate_omega * frame * plate_dt +
-                             plate_noise(plate_rng),
-                         9.488, 1e-4, 4e-4);
-        }
-        std::cout << "plate ekf: vx=" << plate.getVelocity()(0, 0)
-                  << " omega=" << plate.getOmega() << std::endl;
-        passed &= expect(std::abs(plate.getVelocity()(0, 0) - true_vx) < 0.1,
-                         "PlateEKF must estimate a translating plate's velocity");
-        passed &= expect(std::abs(plate.getOmega() - true_plate_omega) < 0.15,
-                         "PlateEKF must estimate a plate's yaw rate");
-    }
-
-    // ---- 双模型（§9.4.4）：Tracker 并行跑装甲板模型 -------------------------
-    {
-        auto_aim::TrackerConfig dual_config = tracker_config;
-        dual_config.plate_model_enabled = true;
-        auto_aim::Tracker dual_tracker(dual_config);
-        std::mt19937 dual_rng(11u);
-        constexpr double dual_omega = 1.0;
-        for (int frame = 0; frame <= 150; ++frame) {
-            const double time = frame * tracker_dt;
-            dual_tracker.update(std::vector<auto_aim::Armor>{
-                makeNoisyTrackerArmor(tracker_center_z, 0.0, dual_omega, time,
-                                      tracker_plate_id, radius, dual_rng, 0.01, 0.01)},
-                time);
-        }
-        std::cout << "dual model: ekf_omega=" << dual_tracker.getOmega()
-                  << " plate_omega=" << dual_tracker.getPlateModelOmega()
-                  << " has_plate=" << dual_tracker.hasPlateModel() << std::endl;
-        passed &= expect(dual_tracker.hasPlateModel(),
-                         "dual model must initialize the armor-plate model");
-        passed &= expect(std::abs(dual_tracker.getPlateModelOmega() - dual_omega) < 0.5,
-                         "armor-plate model must track a slow plate's yaw rate");
     }
 
     // ---- IESEKF：先验偏离真值较远时，迭代重新线性化不应比单次 EKF 更差 --------

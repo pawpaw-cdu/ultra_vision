@@ -140,16 +140,6 @@ namespace auto_aim
                                                .as<double>(cfg.ypd_distance_sigma_coeff);
             cfg.soft_nis_gate =
                 kalman["soft_nis_gate"].as<bool>(cfg.soft_nis_gate);
-            cfg.plate_model_enabled =
-                kalman["plate_model_enabled"].as<bool>(cfg.plate_model_enabled);
-            cfg.plate_model_process_acc =
-                kalman["plate_model_process_acc"].as<double>(cfg.plate_model_process_acc);
-            cfg.plate_model_process_yaw_acc = kalman["plate_model_process_yaw_acc"]
-                                                  .as<double>(cfg.plate_model_process_yaw_acc);
-            cfg.plate_model_enter_omega = kalman["plate_model_enter_omega"]
-                                              .as<double>(cfg.plate_model_enter_omega);
-            cfg.plate_model_exit_omega = kalman["plate_model_exit_omega"]
-                                             .as<double>(cfg.plate_model_exit_omega);
             cfg.angle_match_weight =
                 kalman["angle_match_weight"].as<double>(cfg.angle_match_weight);
             // PnP 平面解 yaw 的可信门限（度）；0 = 关闭门控（见 TrackerConfig 注释）。

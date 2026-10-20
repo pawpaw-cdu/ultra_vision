@@ -216,14 +216,6 @@ tracker:
     # NIS 降级为诊断量（对齐 sp_vision：始终应用更新、只统计失败率）。
     # 关掉 = 恢复旧的硬门限行为（A/B 用）。
     soft_nis_gate: true
-    # ---- 双模型（上科大 2026 §9.4.4）--------------------------------------
-    # 并行维护装甲板模型（直接跟踪可见板），低速时比整车模型少一层"半径/切向不可
-    # 观测"约束。第一阶段只并行运行、不参与输出；输出切换下一片再做。
-    plate_model_enabled: false
-    plate_model_process_acc: 20.0
-    plate_model_process_yaw_acc: 50.0
-    plate_model_enter_omega: 0.7
-    plate_model_exit_omega: 2.7
     uv_armor_height: 0.060        # 重投影用的板高（必须与 pnp 段语义一致）
 
   # ---- 装甲板几何（标定值，不是"标准尺寸"）---------------------------------
