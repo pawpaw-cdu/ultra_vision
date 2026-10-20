@@ -233,31 +233,6 @@ if(ULTRA_VISION_USE_HIK_CAMERA AND HIK_LIB)
   set_target_properties(hand_eye_calibrate PROPERTIES BUILD_RPATH "${HIK_LIB_DIR}")
 endif()
 
-# ---- sp_vision_25 的滤波器 / 底盘构造 / 重投影（**移植版**）--------------------
-# 为什么搬：用户在真机上验证过 sp_vision_25 的底盘模型构造与重投影"非常优秀"，
-# 而我们自己这套的几何学习等补丁在实车上会漂（实测 l 在 18s 内从 +3.5cm 走到
-# −16cm）。所以底座换成它的实现，局部拟合器只在这个底座上做 A/B。
-# 只搬了 armor/target/tracker/solver + extended_kalman_filter/math_tools；
-# 裁掉全向感知重载与 spdlog（换零依赖桩）；滤波器逻辑一行没动，namespace 改 spv。
-# 见 src/spv/tools/logger.hpp 与 git 历史里的 docs/spv_port.md。
-find_package(Eigen3 QUIET)
-if(Eigen3_FOUND)
-  add_library(spv_core STATIC
-      src/spv/armor.cpp
-      src/spv/target.cpp
-      src/spv/tracker.cpp
-      src/spv/solver.cpp
-      src/spv/tools/extended_kalman_filter.cpp
-      src/spv/tools/math_tools.cpp)
-  target_include_directories(spv_core PUBLIC
-      ${CMAKE_SOURCE_DIR}/src/spv ${CMAKE_SOURCE_DIR}/src
-      ${EIGEN3_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${YAML_CPP_INCLUDE_DIRS})
-  target_link_libraries(spv_core PUBLIC Eigen3::Eigen ${OpenCV_LIBS} ${YAML_CPP_LDFLAGS})
-  message(STATUS "spv_core: 启用（sp_vision_25 的 tracker/solver 移植版）")
-else()
-  message(STATUS "spv_core: 跳过（未找到 Eigen3）")
-endif()
-
 if(ULTRA_VISION_BUILD_AUTO_AIM)
   if(ULTRA_VISION_AUTO_AIM_SIMULATOR)
     message(STATUS "auto_aim input: TCP simulator")
