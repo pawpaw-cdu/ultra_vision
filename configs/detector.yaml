@@ -22,10 +22,15 @@ detector:
     score_threshold: 0.25
     nms_threshold: 0.5
     min_confidence: 0.25
-    # 默认不做颜色过滤：模型会把未点亮的装甲板判成 extinguish(灰)，
-    # 按颜色筛会直接丢掉这些有效目标（sp_vision 的神经网络路径也不筛颜色，
-    # 只校验编号与大小）。需要只打某一方时，交给目标选择层去做。
-    filter_by_color: false
+    # 2026-10-16：**打开**颜色过滤，与 sp_vision_25 对齐。
+    # 之前关掉的理由是"模型会把未点亮的装甲板判成 extinguish(灰)，按颜色筛会丢掉
+    # 有效目标"；但 sp_vision 的**跟踪层**（tasks/auto_aim/tracker.cpp 的
+    # `remove_if(a.color != enemy_color_)`）是无条件按敌方颜色筛的，检出层不筛。
+    # 也就是说 sp 只吃 enemy_color 的观测，UV 却吃包括灰在内的全部颜色 —— 同一个
+    # 仿真场景下两边的观测集合不同，A/B 出来的差异里混着"筛不筛"这一项。
+    # 需要两边观测口径一致时打开这一项（实测仿真里靶面灯条是亮蓝，被误判成灰的
+    # 帧两边都会丢）。
+    filter_by_color: true
     # 部署机相关的调度参数（实测 4 线程最优：默认 8 会与仿真器抢核）。
     performance_mode: "latency"               # latency / throughput
     num_threads: 4

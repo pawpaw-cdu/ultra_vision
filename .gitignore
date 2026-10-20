@@ -26,3 +26,4 @@ docs/_eq/
 build_sim/
 __pycache__/
 *.pyc
+experiments/
