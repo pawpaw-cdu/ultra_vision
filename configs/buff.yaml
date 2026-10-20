@@ -252,18 +252,8 @@ rune:
     #   用 PnP 深度反推 = 0.141 m  → 取 0.145。改之前是 0.160（偏大 ⇒ 深度 +13%）。
     target_half_width_m: 0.148
     arm_point_radius_m: 0.220   # 第 6 个关键点的半径
-    # 深度校正：PnP 在远距离上会把靶面关键点缩小（8 m 处低 27%），用"靶心
-    # 到 R 标的像素偏移 + 已知回转半径"给出独立距离，弹道提前量才不会被整格
-    # 带偏。min_plate_offset_px 以下偏移太小、数值不稳，退回 PnP 结果。
-    # 深度覆盖：标定 h 之后裸 PnP 已经更准（中位 +2.2% / p90 6.63 / 方位散布 ±6%），
-    # 而"用 hub↔靶心偏移覆盖"会引入 ±20% 的方位依赖长尾（§13）。默认关。
-    correct_depth_with_radius: false
-    # 用回转椭圆拟合的半长轴测距（消掉瞬时偏移在轨道远侧被透视压短导致的 +20% 长尾，
-    # 见 git 历史里的 docs/energy_rune_issue_audit.md §13）。攒不够样本时自动退回瞬时偏移。
-    correct_depth_with_orbit_fit: true
-    min_plate_offset_px: 8.0
     # 观测距离闸门：超出这个范围的观测直接判为不可解（仿真里画面底部的反光
-    # 会被误检成扇叶，深度校正后能算出 20~50 m）。
+    # 会被误检成扇叶，关键点塌缩后能算出 20~50 m）。
     min_distance_m: 1.5
     max_distance_m: 15.0
     R_camera2gimbal: [1.0, 0.0, 0.0,

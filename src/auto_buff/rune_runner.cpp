@@ -226,12 +226,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         std::getenv("ULTRA_VISION_RUNE_PIXEL_RESIDUAL") == nullptr ||
         std::string(std::getenv("ULTRA_VISION_RUNE_PIXEL_RESIDUAL")) != "0";
     // R 标那条量测要不要用（ULTRA_VISION_RUNE_PIXEL_RMARK=0 关掉）
-    // 确认换片后重建估计器（三家参考都这么做）：ULTRA_VISION_RUNE_REBUILD_ON_SWITCH=0 可关
-    // 实测：开它（每次确认换片都重建）记账漂移更大（前后半移位差 3~4 格 vs 1 格），
-    // 端到端相当。默认关，开关保留（ULTRA_VISION_RUNE_REBUILD_ON_SWITCH=1 打开）。
-    static const bool rebuild_on_switch =
-        std::getenv("ULTRA_VISION_RUNE_REBUILD_ON_SWITCH") != nullptr &&
-        std::string(std::getenv("ULTRA_VISION_RUNE_REBUILD_ON_SWITCH")) != "0";
     static const bool pixel_use_rmark =
         std::getenv("ULTRA_VISION_RUNE_PIXEL_RMARK") == nullptr ||
         std::string(std::getenv("ULTRA_VISION_RUNE_PIXEL_RMARK")) != "0";
@@ -339,20 +333,9 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
         solver.setCameraPose(commanded_yaw, commanded_pitch);
 
         const auto stage_detect_start = std::chrono::steady_clock::now();
-        // 判定探针（只用于量吞吐上限）：隔帧跑一次推理，看帧率会不会涨。
-        // 涨 ⇒ 我们是限速方（仿真被我们拖慢），不涨 ⇒ 仿真自己就这个速度。
-        static const bool probe_skip_detect =
-            std::getenv("ULTRA_VISION_RUNE_SKIP_DETECT") != nullptr;
-        static std::optional<auto_aim::energy::PowerRune> probe_last_rune;
-        static int probe_frame_index = 0;
-        std::optional<auto_aim::energy::PowerRune> rune;
-        if (probe_skip_detect && (++probe_frame_index % 2 == 1)) {
-            rune = probe_last_rune;
-        } else {
-            rune = config.detector.multi_candidate ? detector->detect(frame, timestamp)
-                                                   : detector->detectBest(frame, timestamp);
-            if (probe_skip_detect) probe_last_rune = rune;
-        }
+        std::optional<auto_aim::energy::PowerRune> rune =
+            config.detector.multi_candidate ? detector->detect(frame, timestamp)
+                                            : detector->detectBest(frame, timestamp);
         profiler.add("detect", stage_ms(stage_detect_start));
         // 采样时刻放在**推理之后**：`now` 要参与瞄准的提前量计算
         //   detection_age = now - timestamp(曝光时刻)
@@ -499,11 +482,6 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             target.setPixelModel(pixel_model);
         } else {
             target.clearPixelModel();
-        }
-        // 参考实现的做法：**确认换片后直接重建估计器到新片**（而不是让滤波器慢慢漂）。
-        if (rebuild_on_switch && rune.has_value() && rune->solved &&
-            slot_snapshot.switch_confirmed) {
-            target.rebuildFrom(rune.value(), timestamp);
         }
         target.getTarget(rune, timestamp);
         profiler.add("target+lattice", stage_ms(stage_target_start));
@@ -941,16 +919,8 @@ int auto_aim::energy::runRune(const auto_aim::energy::RuneConfig& config,
             sources.slot_votes = slot_snapshot.votes;
             sources.slot_centers = slot_snapshot.slot_centers;
             sources.gimbal_frozen = gimbal_frozen;
-            const auto orbit = solver.lastOrbitFit();
-            sources.orbit_valid = orbit.valid;
-            sources.orbit_semi_major_px = orbit.semi_major_px;
-            sources.orbit_center = orbit.center;
-            sources.orbit_samples = orbit.samples;
             sources.sigma_dis_m = target.distanceSigma();
             sources.sigma_roll_deg = target.phaseSigma() * 180.0 / CV_PI;
-            sources.orbit_ratio = orbit.semi_major_px > 1e-6
-                                      ? orbit.semi_minor_px / orbit.semi_major_px
-                                      : 0.0;
             sources.sim_offset_valid = telemetry_stats.sim_offset_valid;
             sources.sim_offset_s = telemetry_stats.sim_offset_s;
             const auto stage_csv_start = std::chrono::steady_clock::now();

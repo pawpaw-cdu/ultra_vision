@@ -13,7 +13,6 @@
 #include "auto_buff/rune_round_guard.hpp"
 #include "auto_buff/rune_slot_lattice.hpp"
 #include "auto_buff/rune_aim_fallback.hpp"
-#include "auto_buff/rune_orbit_fit.hpp"
 #include "auto_buff/rune_track_lifecycle.hpp"
 #include "auto_buff/rune_fire_gate.hpp"
 #include "auto_buff/rune_blade_selector.hpp"
@@ -648,73 +647,6 @@ namespace
         check(recovers.decide(20.4, 0.5, 0.2).kind == Fallback::Decision::Kind::None,
               "fallback: a frame with a usable target restarts the lost-target count");
     }
-    // ---- 回转椭圆拟合 ---------------------------------------------------------
-    void testOrbitFit()
-    {
-        // 造一条"椭圆轨道"的**相对向量**（靶心−符心）：半长轴 70、半短轴 55、倾斜 20°。
-        // 注意拟合的是相对量，所以椭圆中心应当在原点附近。
-        RuneOrbitFit fit;
-        const cv::Point2f center(0.0f, 0.0f);
-        const double a = 70.0, b = 55.0, tilt = 20.0 * kPi / 180.0;
-        double now = 0.0;
-        for (int i = 0; i < 40; ++i) {
-            const double t = 2.0 * kPi * i / 40.0;
-            const cv::Point2f local(static_cast<float>(a * std::cos(t)),
-                                    static_cast<float>(b * std::sin(t)));
-            const cv::Point2f rotated(
-                static_cast<float>(local.x * std::cos(tilt) - local.y * std::sin(tilt)),
-                static_cast<float>(local.x * std::sin(tilt) + local.y * std::cos(tilt)));
-            now += 0.05;
-            fit.add(center + rotated, now);
-        }
-        const auto result = fit.fit(now);
-        check(result.valid, "orbit fit: a full-arc synthetic ellipse is fitted");
-        check(cv::norm(result.center) < 1.5,
-              "orbit fit: the relative-vector ellipse is centred at the origin (" +
-                  std::to_string(cv::norm(result.center)) + " px off)");
-        check(std::abs(result.semi_major_px - a) < 2.0,
-              "orbit fit: recovers the semi-major axis (got " +
-                  std::to_string(result.semi_major_px) + " vs 70)");
-
-        // 被云台平移污染的样本（椭圆中心偏得远）必须被拒 → 退回瞬时偏移
-        RuneOrbitFit shifted;
-        double ts = 0.0;
-        for (int i = 0; i < 30; ++i) {
-            const double ang = 2.0 * kPi * i / 30.0;
-            ts += 0.05;
-            shifted.add(cv::Point2f(static_cast<float>(60.0 + a * std::cos(ang)),
-                                    static_cast<float>(-40.0 + b * std::sin(ang))), ts);
-        }
-        check(!shifted.fit(ts).valid,
-              "orbit fit: a translation-contaminated cloud is rejected");
-
-        // 样本几乎共线（短弧/直线）不许当作有效椭圆 → 调用方会退回瞬时偏移
-        RuneOrbitFit narrow;
-        double t2 = 0.0;
-        for (int i = 0; i < 12; ++i) {
-            const float x = 380.0f + 4.0f * i;    // 一条直线上的点
-            t2 += 0.05;
-            narrow.add(cv::Point2f(x, 260.0f + 0.25f * (x - 400.0f)), t2);
-        }
-        check(!narrow.fit(t2).valid, "orbit fit: collinear samples are rejected");
-
-        // 少量野值不影响结果
-        RuneOrbitFit noisy;
-        double t3 = 0.0;
-        for (int i = 0; i < 30; ++i) {
-            const double ang = 2.0 * kPi * i / 30.0;
-            const cv::Point2f local(static_cast<float>(a * std::cos(ang)),
-                                    static_cast<float>(b * std::sin(ang)));
-            cv::Point2f point = center + local;
-            if (i % 10 == 3) point += cv::Point2f(25.0f, -18.0f);   // 野值
-            t3 += 0.05;
-            noisy.add(point, t3);
-        }
-        const auto noisy_result = noisy.fit(t3);
-        check(noisy_result.valid && std::abs(noisy_result.semi_major_px - a) < 4.0,
-              "orbit fit: outliers are rejected by the refit (got " +
-                  std::to_string(noisy_result.semi_major_px) + " vs 70)");
-    }
 } // namespace
 
 int main()
@@ -735,7 +667,6 @@ int main()
     testBladeSelectorSearchesNextBladeAfterHit();
     testBladeSelectorRejectsNearAndActivatedCandidates();
     testFallbackParkAndRecenter();
-    testOrbitFit();
     if (failures == 0) {
         std::printf("rune_pipeline_state_test: all checks passed\n");
         return 0;

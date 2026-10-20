@@ -21,7 +21,6 @@ add_test(NAME buff_target_test COMMAND buff_target_test)
 add_executable(buff_state_test
     buff_state_test.cpp
     ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_aim_fallback.cpp
-    ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_orbit_fit.cpp
     ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_round_guard.cpp
     ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_slot_lattice.cpp
     ${CMAKE_SOURCE_DIR}/src/auto_buff/rune_fire_gate.cpp

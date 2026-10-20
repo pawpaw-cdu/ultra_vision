@@ -248,13 +248,6 @@ namespace auto_aim::energy
         config.solver.target_radius_m = geometry["target_radius_m"].as<double>(0.700);
         config.solver.target_half_width_m = geometry["target_half_width_m"].as<double>(0.127);
         config.solver.arm_point_radius_m = geometry["arm_point_radius_m"].as<double>(0.220);
-        config.solver.correct_depth_with_radius =
-            geometry["correct_depth_with_radius"].as<bool>(true);
-        config.solver.correct_depth_with_orbit_fit =
-            geometry["correct_depth_with_orbit_fit"].as<bool>(true);
-        config.solver.orbit_fit_window_s = geometry["orbit_fit_window_s"].as<double>(10.0);
-        config.solver.orbit_fit_min_samples = geometry["orbit_fit_min_samples"].as<int>(15);
-        config.solver.min_plate_offset_px = geometry["min_plate_offset_px"].as<double>(4.0);
         config.solver.min_distance_m = geometry["min_distance_m"].as<double>(1.5);
         config.solver.max_distance_m = geometry["max_distance_m"].as<double>(15.0);
         if (geometry["R_camera2gimbal"]) {

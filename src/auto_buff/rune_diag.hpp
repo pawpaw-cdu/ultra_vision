@@ -99,12 +99,6 @@ namespace auto_aim::energy::rune_diag
         int roi_h = 0;
         double model_letterbox_scale = 0.0;
         int gimbal_frozen = 0;
-        // 回转椭圆拟合（测距用）与靶面压扁程度：长尾误差的归因量（见 §13.3）。
-        int orbit_ok = 0;
-        double orbit_semi_major_px = 0.0;
-        cv::Point2f orbit_center{0.0f, 0.0f};
-        int orbit_samples = 0;
-        double orbit_ratio = 0.0;
         double sigma_dis_m = 0.0;
         double sigma_roll_deg = 0.0;
         double plate_aspect = 1.0;
@@ -213,11 +207,6 @@ namespace auto_aim::energy::rune_diag
         std::array<int, 5> slot_votes{};
         std::array<cv::Point2f, 5> slot_centers{};
         bool gimbal_frozen = false;
-        bool orbit_valid = false;
-        double orbit_semi_major_px = 0.0;
-        cv::Point2f orbit_center{0.0f, 0.0f};
-        int orbit_samples = 0;
-        double orbit_ratio = 0.0;
         double sigma_dis_m = 0.0;
         double sigma_roll_deg = 0.0;
         bool sim_offset_valid = false;

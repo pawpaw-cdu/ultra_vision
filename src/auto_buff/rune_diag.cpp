@@ -318,11 +318,6 @@ namespace auto_aim::energy::rune_diag
         row.roi_h = roi.height;
         row.model_letterbox_scale = detector.modelLetterboxScale();
         row.gimbal_frozen = sources.gimbal_frozen ? 1 : 0;
-        row.orbit_ok = sources.orbit_valid ? 1 : 0;
-        row.orbit_samples = sources.orbit_samples;
-        row.orbit_ratio = sources.orbit_ratio;
-        row.orbit_semi_major_px = sources.orbit_semi_major_px;
-        row.orbit_center = sources.orbit_center;
         row.sigma_dis_m = sources.sigma_dis_m;
         row.sigma_roll_deg = sources.sigma_roll_deg;
         // 靶面压扁程度：正方形靶面的两条对角线在正对时相等，侧视时其中一条被压缩。
@@ -398,8 +393,8 @@ namespace auto_aim::energy::rune_diag
                     "class0,class1,class2,blade_class,"
                     "aim_phase_deg,ekf_roll_deg,plate_r_px,cand_n,cand_bright,"
                     "obs_phase_deg,pnp_roll_deg,sim_t,best_cls_score,buff_yaw_deg,slot_id,"
-                    "slot_activated_mask,slot_votes,slot_centers,obs_slot_offset,orbit_ok,"
-                    "orbit_a_px,orbit_cx,orbit_cy,orbit_n,orbit_ratio,sigma_dis_m,sigma_roll_deg,"
+                    "slot_activated_mask,slot_votes,slot_centers,obs_slot_offset,"
+                    "sigma_dis_m,sigma_roll_deg,"
                     "plate_aspect,aim_px,aim_py,"
                     "aim_world_yaw_deg,"
                     "aim_world_pitch_deg,"
@@ -458,9 +453,7 @@ namespace auto_aim::energy::rune_diag
                  << static_cast<int>(row.slot_centers[3].y) << '|'
                  << static_cast<int>(row.slot_centers[4].x) << ':'
                  << static_cast<int>(row.slot_centers[4].y) << ',' << row.obs_slot_offset << ','
-                 << row.orbit_ok << ',' << row.orbit_semi_major_px << ',' << row.orbit_center.x
-                 << ',' << row.orbit_center.y << ',' << row.orbit_samples << ','
-                 << row.orbit_ratio << ',' << row.sigma_dis_m << ',' << row.sigma_roll_deg << ','
+                 << row.sigma_dis_m << ',' << row.sigma_roll_deg << ','
                  << row.plate_aspect << ','
                  << row.aim_pixel.x << ',' << row.aim_pixel.y << ',' << row.aim_world_yaw_deg
                  << ',' << row.aim_world_pitch_deg << ',' << row.aim_roll_deg << ','

@@ -17,7 +17,6 @@ set(AUTO_BUFF_SOURCES
     rune_blade_selector.cpp
     rune_round_guard.cpp
     rune_aim_fallback.cpp
-    rune_orbit_fit.cpp
     rune_aim_bridge.cpp
     rune_runner.cpp
     rune_detector.cpp

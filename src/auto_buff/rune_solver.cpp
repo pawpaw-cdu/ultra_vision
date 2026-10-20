@@ -38,10 +38,6 @@ namespace auto_aim::energy
 
     RuneSolver::RuneSolver(const RuneSolverConfig& config) : config_(config)
     {
-        RuneOrbitFit::Config orbit_config;
-        orbit_config.window_s = config.orbit_fit_window_s;
-        orbit_config.min_samples = config.orbit_fit_min_samples;
-        orbit_fit_ = RuneOrbitFit(orbit_config);
         camera_matrix_scaled_ = config_.camera_matrix;
         const double radius = config_.target_radius_m;
         const double half = config_.target_half_width_m;
@@ -212,52 +208,8 @@ namespace auto_aim::energy
             }
         }
 
-        // Depth correction: keep the well-conditioned direction from PnP, but
-        // take the range from the plate's pixel offset and its known orbital
-        // radius. Without this the reported range is ~25-30% too long, the
-        // predicted flight time inherits that error, and the aim leads by a
-        // whole blade slot instead of hitting the lit one.
-        if (config_.correct_depth_with_radius) {
-            const double plate_offset_px =
-                cv::norm(observation.target().center - observation.r_center);
-            const double focal = cameraMatrix().at<double>(0, 0);
-            // 用回转椭圆的**半长轴**代替瞬时偏移：瞬时偏移在轨道远侧被透视压短
-            // （实测测距偏差只跟靶心方位有关，远侧 +20%、近侧 -1%），半长轴则
-            // 是整圈的量，不带这个 foreshortening。样本不够时退回瞬时偏移。
-            double radius_px = plate_offset_px;
-            RuneOrbitFit::Result orbit;
-            if (config_.correct_depth_with_orbit_fit) {
-                const double sample_time =
-                    std::chrono::duration<double>(
-                        std::chrono::steady_clock::now().time_since_epoch())
-                        .count();
-                // 喂**相对向量**（靶心 − 符心）：云台在动，绝对像素的轨迹是
-                // "轨道 + 平移"，拟合会得到一个偏大的椭圆（实测距离塌到 3.9 m）。
-                // 相对量把云台运动消掉，剩下的就是轨道本身的投影形状。
-                orbit_fit_.add(observation.target().center - observation.r_center,
-                               sample_time);
-                orbit = orbit_fit_.fit(sample_time);
-                if (orbit.valid) radius_px = orbit.semi_major_px;
-            }
-            last_orbit_ = orbit;
-            if (radius_px > config_.min_plate_offset_px && focal > 0.0) {
-                const double corrected = focal * config_.target_radius_m / radius_px;
-                const double scale = corrected / observation.ypd_in_world[2];
-                if (scale > 0.3 && scale < 3.0) {
-                    const Eigen::Vector3d blade_offset =
-                        observation.blade_xyz_in_world - observation.xyz_in_world;
-                    observation.xyz_in_world *= scale;
-                    observation.ypd_in_world[2] = corrected;
-                    // The plate keeps its offset from the centre; only the
-                    // centre's range is corrected.
-                    observation.blade_xyz_in_world =
-                        observation.xyz_in_world + blade_offset;
-                    observation.blade_ypd_in_world = xyz2ypd(observation.blade_xyz_in_world);
-                }
-            }
-        }
         // 距离闸门：见 RuneSolverConfig::min_distance_m。误检（关键点塌缩成
-        // 几像素）经深度校正会算出 20 m 以上的距离，这种观测必须丢掉。
+        // 几像素）会算出荒谬距离，这种观测必须丢掉。
         const double observed_distance = observation.ypd_in_world[2];
         if (!(observed_distance >= config_.min_distance_m &&
               observed_distance <= config_.max_distance_m)) {
